@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Integration test: run power flow on d_70k_070.mat and verify:
+# Integration test: convert the PSAT file d_70k_070.mat to a case file, run power flow on it and verify:
 #   1. The solver converges to alpha=1
 #   2. "Computation time:" is printed (clean exit after computation)
 #   3. Output .mat file is created and non-empty
@@ -37,7 +37,7 @@ if [ -f "${APP_BIN}.exe" ]; then
 fi
 
 echo "=== GenSAS power flow integration test ==="
-echo "Input : resources/psat_mat/d_70k_070.mat"
+echo "Input : resources/psat_mat/d_70k_070.mat (converted to a case file)"
 echo "Output: ${OUTPUT_MAT}"
 echo ""
 
@@ -46,13 +46,25 @@ bazel build //app:app
 
 echo ""
 
+# The solver reads GenSAS case files; convert the PSAT data first (python3 with numpy, scipy and h5py).
+PY="$(command -v python3 || command -v python || true)"
+CASE_DIR="gensas_integration_cases"
+rm -rf "${REPO_DIR}/${CASE_DIR}"
+mkdir -p "${REPO_DIR}/${CASE_DIR}"
+for name in d_70k_070 d_014_ind_zip1; do
+  if [ -z "${PY}" ] || ! "${PY}" scripts/psat_to_case.py "resources/psat_mat/${name}.mat" "${CASE_DIR}/${name}.case" >/dev/null; then
+    echo "FAIL: ${name}: could not convert the PSAT file to a case file (python3 with numpy, scipy and h5py required)"
+    exit 1
+  fi
+done
+
 # Run the binary directly — bypasses the Bazel sandbox so the output
 # .mat file can be written to an arbitrary filesystem path.
 # Pass a relative output name; the app prepends CWD, yielding REPO_DIR/OUTPUT_NAME.
 set +e
 APP_OUTPUT=$("${APP_BIN}" \
   -p \
-  -f "${INPUT_DIR}/resources/psat_mat/d_70k_070.mat" \
+  -f "${INPUT_DIR}/${CASE_DIR}/d_70k_070.case" \
   -s 0.5 -l 28 -d 1e-5 \
   -o "${OUTPUT_NAME}" \
   2>&1)
@@ -120,7 +132,7 @@ check_fingerprint "d_70k_070" "${APP_OUTPUT}" 490000 282.7520234 69169.68943
 set +e
 SMALL_OUTPUT=$("${APP_BIN}" \
   -p \
-  -f "${INPUT_DIR}/resources/psat_mat/d_014_ind_zip1.mat" \
+  -f "${INPUT_DIR}/${CASE_DIR}/d_014_ind_zip1.case" \
   -s 0.5 -l 28 -d 1e-5 \
   -o "gensas_integration_test_small.mat" \
   2>&1)
@@ -134,41 +146,23 @@ else
   check_fingerprint "d_014_ind_zip1" "${SMALL_OUTPUT}" 153 4.061145417 11.64662517
 fi
 
-# ── Case files: the converted PSAT data gives the same results ──────────────
-# scripts/psat_to_case.py needs python with numpy, scipy and h5py.
-PY="$(command -v python3 || command -v python || true)"
-CASE_DIR="gensas_integration_cases"
-rm -rf "${REPO_DIR}/${CASE_DIR}"
-mkdir -p "${REPO_DIR}/${CASE_DIR}"
-run_case() {
-  local name="$1" want_n="$2" want_norm="$3" want_sum="$4"
-  if [ -z "${PY}" ] || ! "${PY}" scripts/psat_to_case.py "resources/psat_mat/${name}.mat" "${CASE_DIR}/${name}.case" >/dev/null; then
-    echo "FAIL: ${name}: could not convert the PSAT file to a case file (python3 with numpy, scipy and h5py required)"
-    PASS=0
-    return
-  fi
-  local out code
-  set +e
-  out=$("${APP_BIN}" -p -f "${INPUT_DIR}/${CASE_DIR}/${name}.case" -s 0.5 -l 28 -d 1e-5 -o "gensas_integration_test_case.mat" 2>&1)
-  code=$?
-  set -e
-  rm -f "${REPO_DIR}/gensas_integration_test_case.mat"
-  if [ "${code}" -ne 0 ]; then
-    echo "FAIL: ${name}.case: app exited with code ${code}"
-    PASS=0
+# SciPy (an independent implementation) must be able to read the MAT files we write.
+check_mat_with_scipy() {
+  local label="$1" file="$2" code="$3"
+  if [ -n "${PY}" ] && "${PY}" -c "import sys; from scipy.io import loadmat; m = loadmat(sys.argv[1]); ${code}" "${file}"; then
+    echo "PASS: ${label}: SciPy reads the MAT file"
   else
-    check_fingerprint "${name}.case" "${out}" "${want_n}" "${want_norm}" "${want_sum}"
+    echo "FAIL: ${label}: SciPy could not read the MAT file or its content is wrong"
+    PASS=0
   fi
 }
-run_case d_014_ind_zip1 153 4.061145417 11.64662517
-run_case d_70k_070 490000 282.7520234 69169.68943
-rm -rf "${REPO_DIR}/${CASE_DIR}"
 
 # ── Check 4: output .mat file exists and is non-empty ───────────────────────
 if [ -f "${OUTPUT_MAT}" ]; then
   MAT_SIZE=$(wc -c < "${OUTPUT_MAT}")
   if [ "${MAT_SIZE}" -gt 0 ]; then
     echo "PASS: output .mat created (${MAT_SIZE} bytes)"
+    check_mat_with_scipy "power-flow result" "${OUTPUT_MAT}" "assert m['s'].shape == (490000, 1)"
   else
     echo "FAIL: output .mat file is empty"
     PASS=0
@@ -232,11 +226,14 @@ fi
 # A MAT v5 file starts with the text header "MATLAB 5.0 MAT-file".
 if [ -s "${REPO_DIR}/${HYBRID_MAT}" ] && head -c 19 "${REPO_DIR}/${HYBRID_MAT}" | grep -q "MATLAB 5.0 MAT-file"; then
   echo "PASS: MAT v5 result written"
+  check_mat_with_scipy "Modelica result" "${REPO_DIR}/${HYBRID_MAT}" "assert m['s'].shape[0] == len(m['names']) and m['s'].shape[1] == m['t'].shape[1] and m['event_t'].size == 3"
 else
   echo "FAIL: MAT v5 result was not written to ${HYBRID_MAT}"
   PASS=0
 fi
 rm -f "${REPO_DIR}/${HYBRID_JSON}" "${REPO_DIR}/${HYBRID_CSV}" "${REPO_DIR}/${HYBRID_EVENTS_CSV}" "${REPO_DIR}/${HYBRID_MAT}"
+
+rm -rf "${REPO_DIR}/${CASE_DIR}"
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo ""

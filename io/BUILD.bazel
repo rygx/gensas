@@ -61,23 +61,6 @@ cc_library(
     ]
 )
 
-# Transitional: reads PSAT .mat files with matio (removed once the case format is the only input).
-cc_library(
-    name = "legacy_mat_loader_lib",
-    hdrs = [
-        "LegacyMatLoader.h",
-    ],
-    srcs = [
-        "LegacyMatLoader.cpp",
-    ],
-    deps = [
-        ":case_file_lib",
-    ] + select({
-        "//:windows": ["//:libmatio_lib_cmake"],
-        "//conditions:default": ["//:libmatio_lib"],
-    })
-)
-
 cc_library(
     name = "mat_psat_rw_lib",
     hdrs = [

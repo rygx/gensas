@@ -91,7 +91,7 @@ survives copying the AST into the computation model.
 * To iterate without Bazel, use `scripts/local_solver_test.sh`. It needs a C++ compiler, Armadillo,
   SuperLU, jsoncpp and BLAS/LAPACK (on Debian/Ubuntu:
   `sudo apt install g++ libarmadillo-dev libsuperlu-dev libjsoncpp-dev libblas-dev liblapack-dev`)
-  and stubs matio (the MAT writer test is skipped). A full run takes seconds after the first compile.
+  A full run takes seconds after the first compile.
 * `scripts/run_integration_test.sh` runs the command line on a power-flow case and on the bouncing
   ball example (used by the Integration workflow on pushes to `main`).
 * Formatting: `bash scripts/format.sh` (clang-format 22.1.2, as in the lint check).

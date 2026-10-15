@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds and runs the solver unit tests (sas/test/*_test.cpp) without Bazel.
 #
-# Why: a Bazel build compiles OpenBLAS, HDF5, matio, ... from source, which takes many minutes. The
+# Why: a Bazel build compiles OpenBLAS, SuperLU, ... from source, which takes many minutes. The
 # solver tests only need Armadillo, SuperLU, jsoncpp and a BLAS/LAPACK, so with those installed on
 # the system a change-compile-test loop takes seconds. CI (Bazel) stays the authority.
 #
@@ -22,8 +22,6 @@
 #   LINK_LIBS          libraries to link (-ljsoncpp -lsuperlu -llapack -lblas -lpthread -lm)
 #   JOBS               parallel compile jobs (number of CPUs)
 #
-# matio is replaced by a stub (scripts/local_solver/matio_stub) for the library sources that include it;
-# the solver and result tests do not need the real library. The MAT writer test is skipped.
 
 set -euo pipefail
 
@@ -38,7 +36,7 @@ JSONCPP_INCLUDE="${JSONCPP_INCLUDE:-/usr/include/jsoncpp}"
 LINK_LIBS="${LINK_LIBS:--ljsoncpp -lsuperlu -llapack -lblas -lpthread -lm}"
 JOBS="${JOBS:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null) || echo 4)}"
 
-CXXFLAGS="-std=c++14 -O1 -w -DARMA_DONT_USE_WRAPPER -I. -Iscripts/local_solver/matio_stub \
+CXXFLAGS="-std=c++14 -O1 -w -DARMA_DONT_USE_WRAPPER -I. \
 -I${ARMADILLO_INCLUDE} -I${SUPERLU_INCLUDE} -I${JSONCPP_INCLUDE}"
 
 # Library sources the solver tests depend on (no power flow, no PSAT/MAT input).
@@ -61,13 +59,11 @@ compile() {
 export -f compile
 export BUILD_DIR CXX CXXFLAGS newest_header
 echo ${SOURCES} | tr ' ' '\n' | xargs -P "${JOBS}" -I{} bash -c 'compile {}'
-${CXX} ${CXXFLAGS} -c scripts/local_solver/matio_stub/matio_stub.cpp -o "${BUILD_DIR}/obj/matio_stub.o"
 
 if [ "$#" -gt 0 ]; then
   TESTS="$*"
 else
-  # *_mat_test.cpp read MAT files back with matio and need the real library (Bazel builds them).
-  TESTS="$(cd sas/test && ls *_test.cpp | grep -v '_mat_test' | sed 's/\.cpp$//')"
+  TESTS="$(cd sas/test && ls *_test.cpp | sed 's/\.cpp$//')"
 fi
 
 FAILED=0

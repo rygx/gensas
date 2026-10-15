@@ -16,7 +16,7 @@ bazel-bin/app/app -p \
 
 Explanations:
 * The first argument `-p` (mandatory, and must be the first argument) means GenSAS runs under PowerSAS mode. For the rest of the arguments, the order does not matter.
-* `-f/--file <input-file-name>` (mandatory) specifies the input data: a GenSAS case file (see [Case format](CaseFormat.md)), made from a PSAT .mat file with `python3 scripts/psat_to_case.py`. PSAT .mat files (for example `resources/psat_mat/d_014_syn_ind_zip_export.mat`) are still accepted for now, but this is going away.
+* `-f/--file <input-file-name>` (mandatory) specifies the input data: a GenSAS case file (see [Case format](CaseFormat.md)), made from a PSAT .mat file with `python3 scripts/psat_to_case.py`. PSAT .mat files (for example `resources/psat_mat/d_014_syn_ind_zip_export.mat`) are not read directly.
 * `-o/--output <output-file-name>` (mandatory) specifies the output curve data. Currently the output is a .mat file containing the power flow solution as a vector. The name is taken relative to the current directory, so do not pass an absolute path.
 * `-l/--level <sas-order>` (optional) specifies the order of SAS. If not specified, the order of SAS is 15.
 * `-s/--segment <segment-length>` (optional) specfies the length of a segment of SAS computation. If not specified, the the segment length is 1.0.
@@ -27,7 +27,8 @@ Explanations:
 Example:
 Try running power flow of the modified synthetic eastern-interconnection (EI) 70,000-bus system in the project root directory:
 ```bash
-bazel-bin/app/app -p -f resources/psat_mat/d_70k_070.mat -s 0.5 -l 28 -d 1e-5 -o res.mat
+python3 scripts/psat_to_case.py resources/psat_mat/d_70k_070.mat d_70k_070.case
+bazel-bin/app/app -p -f d_70k_070.case -s 0.5 -l 28 -d 1e-5 -o res.mat
 ```
 
 ### ModelicaSAS

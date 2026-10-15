@@ -27,7 +27,6 @@
 #include "util/AbstractCheCalculator.h"
 #include "pf/ChePFCalculator.h"
 #include "io/MatPsatDataRW.h"
-#include "io/LegacyMatLoader.h"
 #include "util/SafeArmadillo.h"
 #include "util/CheCompUtil.h"
 #include "nvwa/pctimer.h"
@@ -503,19 +502,11 @@ int main(int argc, char **argv) {
 		// string filePath = GetCurrentWorkingDir() + "/resources/psat_mat/d_ei_458_100.mat";
 		// string filePath = GetCurrentWorkingDir() + "/resources/psat_mat/d_dcase2383wp_mod2_zip9x.mat";
 		// string filePath = GetCurrentWorkingDir() + "/resources/psat_mat/d_70k.mat";
-		int flag;
 		if (filePath.size() >= 4 && filePath.compare(filePath.size() - 4, 4, ".mat") == 0) {
-			// Transitional: PSAT .mat files are read directly; convert them with tools/psat_to_case.py.
-			che::io::MatrixSet matrices;
-			string loadError;
-			if (!che::io::loadPsatMatFile(filePath, matrices, loadError)) {
-				cerr << "Error reading \"" << filePath << "\": " << loadError << endl;
-				return -1;
-			}
-			flag = matReader.parse(matrices, &psatData);
-		} else {
-			flag = matReader.parse(filePath.c_str(), &psatData);
+			cerr << "Error: PSAT .mat files are not read directly. Convert \"" << filePath << "\" with scripts/psat_to_case.py first (see doc/CaseFormat.md)." << endl;
+			return -1;
 		}
+		int flag = matReader.parse(filePath.c_str(), &psatData);
 		if (flag != CHE_IO_SUCCESS) {
 			cerr << "Error: cannot read the input file." << endl;
 			return -1;

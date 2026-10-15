@@ -96,7 +96,7 @@ cc_test(
     ],
 )
 
-# MAT v5 writer, read back with matio (needs the real matio, so the local script skips it).
+# MAT v5 writer, read back with a separate minimal reader.
 cc_test(
     name = "result_mat_test",
     srcs = ["result_mat_test.cpp"],
@@ -108,10 +108,7 @@ cc_test(
         "//sas:sas_result_lib",
         "//sas:sas_result_mat_lib",
         "//util:safe_armadillo_headers",
-    ] + select({
-        "//:windows": ["//:libmatio_lib_cmake"],
-        "//conditions:default": ["//:libmatio_lib"],
-    }),
+    ],
 )
 
 # GenSAS case files (binary and JSON) and the PSAT reader on top of them.

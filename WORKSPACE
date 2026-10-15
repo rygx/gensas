@@ -76,52 +76,6 @@ http_archive(
     sha256 = "02719846FABB64DC1734E914ADE9B559AB48B18C21A745149595CCAD1B20C953",
 )
 
-#hdf5
-http_archive(
-    name = "hdf5",
-    build_file_content = _ALL_CONTENT ,
-    strip_prefix = "./hdf5-1.14.3",
-    urls = [
-        "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.3/src/hdf5-1.14.3.tar.gz"
-    ],
-    sha256 = "09CDB287AA7A89148C1638DD20891FDBAE08102CF433EF128FD345338AA237C7",
-)
-
-#zlib
-# Upgraded from 1.3 to 1.3.1: fixes fdopen macro clash with macOS SDK headers.
-http_archive(
-    name = "zlib",
-    build_file_content = _ALL_CONTENT ,
-    strip_prefix = "zlib-1.3.1",
-    urls = [
-        "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
-    ],
-    sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
-)
-
-#libaec (szlib)
-http_archive(
-    name = "libaec",
-    build_file_content = _ALL_CONTENT ,
-    # GitHub release asset (stable bytes); gitlab.dkrz.de rate-limits CI runners (HTTP 429).
-    strip_prefix = "libaec-1.0.6",
-    urls = [
-        "https://github.com/MathisRosenhauer/libaec/releases/download/v1.0.6/libaec-1.0.6.tar.gz",
-    ],
-    sha256 = "032961877231113bb094ef224085e6d66fd670f85a3e17f53d0f131abf24f2fd",
-)
-
-#libmatio
-http_archive(
-    name = "libmatio",
-    build_file_content = _ALL_CONTENT ,
-    strip_prefix = "matio-1.5.26",
-    urls = [
-        "https://github.com/tbeu/matio/releases/download/v1.5.26/matio-1.5.26.tar.gz"
-    ],
-    sha256 = "8B47C29F58E468DBA7A5555371C6A72AD4C6AA8B15F459B2B0B65A303C063933",
-)
-
 _NVWA_ALL_CONTENT = """\
 load("@rules_cc//cc:defs.bzl", "cc_library")
 

@@ -65,3 +65,16 @@ cc_test(
         "//util:safe_armadillo_headers",
     ],
 )
+
+# Solver with an algebraic equation (guards the Pade coefficient cache during AE calibration).
+cc_test(
+    name = "dae_regression_test",
+    srcs = ["dae_regression_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_computation_lib",
+        "//sas:sas_expr_parser_lib",
+        "//sas:sas_model_parser_lib",
+        "//util:safe_armadillo_headers",
+    ],
+)

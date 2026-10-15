@@ -1034,8 +1034,17 @@ namespace che {
 			sp_mat LHSY = LHStotal.tail_cols(nY);
 			sp_mat LHSX = LHStotal.head_cols(nX);
 
+			// A Pade solution caches its coefficients on the first evaluation. The series is changed after
+			// that (AE calibration, filling the higher orders), so the cache must be dropped each time.
+			auto resetPade = [&sasSol]() {
+				if (CheSolutionPade *pade = dynamic_cast<CheSolutionPade *>(sasSol->solution)) {
+					pade->ready = false;
+				}
+			};
+
 			if (nAE > 0) {
 				// Check and calibrate AE imbalances.
+				resetPade();
 				vec diff = calcDiff(sasSol->solution, 0.0);
 				vec initY = sasSol->solution->solution.col(0).tail(nY);
 				vec diffAE = diff.tail(nAE);
@@ -1045,6 +1054,7 @@ namespace che {
 					int maxIter = 10;
 					while (diffMax > tol / 10 && iter < maxIter) {
 						sasSol->solution->solution.col(0).tail(nY) -= spsolve(LHSY, diffAE);
+						resetPade();
 						diff = calcDiff(sasSol->solution, 0.0);
 						diffAE = diff.tail(nAE);
 						diffMax = norm(diffAE, "inf");
@@ -1073,6 +1083,8 @@ namespace che {
 					sasSol->solution->solution.col(lvl).tail(nY) = spsolve(LHSY, rhs, "superlu");
 				}
 			}
+
+			resetPade();
 
 			// sasSol->solution->solution.print("sol");
 			vec diff = calcDiff(sasSol->solution, 0.0);

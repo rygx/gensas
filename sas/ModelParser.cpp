@@ -25,6 +25,7 @@
 // ***************************************************************************************************
 //
 
+#include "sas/MathFunctions.h"
 #include "sas/SasExpr.h"
 #include "sas/SasLexico.h"
 #include <cmath>
@@ -74,18 +75,10 @@ namespace che {
 					return false;
 				}
 				const AstNode *second = p->subs[1]->next;
-				if (name == "sin") {
-					out = sin(a);
-				} else if (name == "cos") {
-					out = cos(a);
-				} else if (name == "exp") {
-					out = exp(a);
-				} else if (name == "sqrt") {
-					out = sqrt(a);
+				if (evalMathFunction(name, a, out)) {
+					// sin, cos, exp, sqrt, inv, log, atan, asin, acos, tan, sinh, cosh, tanh, log10
 				} else if (name == "abs") {
 					out = fabs(a);
-				} else if (name == "inv") {
-					out = 1.0 / a;
 				} else if (name == "min" || name == "max" || name == "pow") {
 					if (second == NULL || !evalConst(second, model, b)) {
 						return false;

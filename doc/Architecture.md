@@ -45,8 +45,17 @@ outside when-conditions (and of anything but one discrete variable), `when` insi
 switching points are located like any other state event and every mode is smooth for the Pade solver.
 Conditions and when-bodies are not rewritten; they are evaluated directly.
 With `PW_SMOOTH` (`--piecewise smooth`) the calls become smooth `sqrt(e*e + eps*eps)` forms instead, with
-no events; `abs` is multiplied by 1 because the solver cannot handle an equation side that is a bare
-function call.
+no events.
+
+### Elementary functions
+
+`sin`, `cos`, `exp`, `sqrt`, `log`, `atan`, `asin` and `acos` are solved natively: each is a temporary variable
+with an algebraic equation `f(x) = y` and its own series recurrence (`log`, `atan`, `asin` and `acos` use
+`y' = x' g(x)^alpha`). `tan`, `sinh`, `cosh`, `tanh` and `log10` are rewritten before solving, together with the
+piecewise functions, into `sin/cos`, `exp` and `log` expressions. `noEvent(e)` in a continuous equation is
+replaced by `e`: events for the relations inside are still generated, which the Modelica specification allows.
+`evalMathFunction` (`MathFunctions.h`) evaluates all of them numerically for parameters, start values,
+conditions and event expressions.
 
 ### Hybrid simulation
 

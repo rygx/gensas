@@ -131,7 +131,7 @@ namespace che {
 				}
 
 				void checkFunction(const string &n, int line) {
-					static const char *const supported[] = {"der", "sin", "cos", "exp", "sqrt", "inv", NULL};
+					static const char *const supported[] = {"der", "sin", "cos", "exp", "sqrt", "inv", "log", "atan", "asin", "acos", "tan", "sinh", "cosh", "tanh", "log10", NULL};
 					static const char *const piecewise[] = {"abs", "min", "max", "sign", "floor", NULL};
 					static const char *const events[] = {"pre", "edge", "change", "sample", "noEvent", "reinit", NULL};
 					static const char *const terminateAssert[] = {"terminate", "assert", NULL};

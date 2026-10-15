@@ -25,6 +25,7 @@
 // ***************************************************************************************************
 //
 #include "sas/HybridModel.h"
+#include "sas/MathFunctions.h"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -235,7 +236,10 @@ namespace che {
 					args.push_back(v);
 				}
 				size_t n = args.size();
-				if ((fn == "abs" || fn == "sign" || fn == "floor" || fn == "sin" || fn == "cos" || fn == "exp" || fn == "sqrt" || fn == "inv" || fn == "pre" || fn == "noEvent") && n == 1) {
+				if (n == 1 && evalMathFunction(fn, args[0], out)) {
+					return true;
+				}
+				if ((fn == "abs" || fn == "sign" || fn == "floor" || fn == "pre" || fn == "noEvent") && n == 1) {
 					double a = args[0];
 					if (fn == "abs") {
 						out = fabs(a);
@@ -243,16 +247,6 @@ namespace che {
 						out = (a > 0) ? 1.0 : (a < 0 ? -1.0 : 0.0);
 					} else if (fn == "floor") {
 						out = floor(a);
-					} else if (fn == "sin") {
-						out = sin(a);
-					} else if (fn == "cos") {
-						out = cos(a);
-					} else if (fn == "exp") {
-						out = exp(a);
-					} else if (fn == "sqrt") {
-						out = sqrt(a);
-					} else if (fn == "inv") {
-						out = 1.0 / a;
 					} else {
 						out = a; // pre, noEvent
 					}
@@ -370,9 +364,34 @@ namespace che {
 				callee->ty = TY_FUNCTION;
 				// The model's identifier table must know the function (the solver resolves names there).
 				callee->value.p = (decltype(callee->value.p))ctx.model->lookupIdentifier("sqrt", 4)->str;
-				// Multiplied by 1: the solver cannot handle an equation side that is a bare function call
-				// (der(x) = sqrt(y) fails), and abs(e) alone would be one.
-				return mkNode(OP_MUL, mkConst(1.0), mkNode(OP_CALL, callee, radicand));
+				return mkNode(OP_CALL, callee, radicand);
+			}
+
+			// A call of the function `name` with the single argument arg (takes ownership of arg).
+			AstNode *mkCall(const string &name, AstNode *arg, RewriteCtx &ctx) {
+				AstNode *callee = mkNode(OP_ID, NULL);
+				callee->ty = TY_FUNCTION;
+				callee->value.p = (decltype(callee->value.p))ctx.model->lookupIdentifier(name.c_str(), (int)name.size())->str;
+				return mkNode(OP_CALL, callee, arg);
+			}
+
+			// tan, sinh, cosh, tanh and log10 in terms of the functions the solver knows; NULL for other calls.
+			AstNode *rewriteDerivedFunction(const string &fn, const AstNode *a, RewriteCtx &ctx) {
+				if (fn == "tan") {
+					return mkNode(OP_DIV, mkCall("sin", cloneNode(a), ctx), mkCall("cos", cloneNode(a), ctx));
+				}
+				if (fn == "sinh" || fn == "cosh" || fn == "tanh") {
+					AstNode *up = mkCall("exp", cloneNode(a), ctx);
+					AstNode *down = mkCall("exp", mkNode(OP_MINUS, cloneNode(a)), ctx);
+					if (fn == "tanh") {
+						return mkNode(OP_DIV, mkNode(OP_SUB, up, down), mkNode(OP_ADD, cloneNode(up), cloneNode(down)));
+					}
+					return mkNode(OP_MUL, mkConst(0.5), mkNode(fn == "sinh" ? OP_SUB : OP_ADD, up, down));
+				}
+				if (fn == "log10") {
+					return mkNode(OP_MUL, mkConst(0.43429448190325176), mkCall("log", cloneNode(a), ctx));
+				}
+				return NULL;
 			}
 
 			// Rewrites the expression chain starting at p; returns the new head.
@@ -395,8 +414,14 @@ namespace che {
 				string fn = idName(p->subs[0]);
 				const AstNode *a = p->subs[1];
 				const AstNode *b = a != NULL ? a->next : NULL;
-				AstNode *repl = NULL;
-				if (ctx.mode == PW_SMOOTH) {
+				AstNode *repl = (a != NULL && b == NULL) ? rewriteDerivedFunction(fn, a, ctx) : NULL;
+				if (repl != NULL) {
+					// done
+				} else if (fn == "noEvent" && a != NULL && b == NULL) {
+					// noEvent(e) only asks the tool not to generate events for e. Keeping the events is
+					// always allowed and more accurate, so the call is dropped.
+					repl = cloneNode(a);
+				} else if (ctx.mode == PW_SMOOTH) {
 					if ((fn == "abs" || fn == "sign") && a != NULL && b == NULL) {
 						repl = fn == "abs" ? smoothAbs(cloneNode(a), ctx) : mkNode(OP_DIV, cloneNode(a), smoothAbs(cloneNode(a), ctx));
 					} else if ((fn == "min" || fn == "max") && a != NULL && b != NULL && b->next == NULL) {

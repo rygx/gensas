@@ -250,6 +250,10 @@ namespace che {
 				{"exp", 3, TK_F_EXP},
 				{"sqrt", 4, TK_F_SQRT},
 				{"inv", 3, TK_F_INV},
+				{"log", 3, TK_F_LOG},
+				{"atan", 4, TK_F_ATAN},
+				{"asin", 4, TK_F_ASIN},
+				{"acos", 4, TK_F_ACOS},
 				{NULL, 0, TK_ID}};
 
 		static int findDefaultFunctions(char *str, int len) {
@@ -274,6 +278,14 @@ namespace che {
 				return sqrt(x);
 			} else if (tk == TK_F_INV) {
 				return 1.0 / x;
+			} else if (tk == TK_F_LOG) {
+				return log(x);
+			} else if (tk == TK_F_ATAN) {
+				return atan(x);
+			} else if (tk == TK_F_ASIN) {
+				return asin(x);
+			} else if (tk == TK_F_ACOS) {
+				return acos(x);
 			}
 			return NAN;
 		}
@@ -657,25 +669,65 @@ namespace che {
 			return;
 		}
 
+		// True if every variable in the expression has an initial value.
+		static bool allIdsInitialized(AstNode *p, list<shared_ptr<SasModel>> &searchDomain) {
+			if (p == NULL) {
+				return true;
+			}
+			if (p->op == OP_ID && p->ty != TY_FUNCTION) {
+				char *b = (char *)p->value.p;
+				shared_ptr<IdPearl> id = IdLocator::findId(searchDomain, b, strlen(b));
+				return id != nullptr && id->initVal;
+			}
+			if (p->op == OP_CALL) {
+				return allIdsInitialized(p->subs[1], searchDomain) && allIdsInitialized(p->next, searchDomain);
+			}
+			return allIdsInitialized(p->subs[0], searchDomain) && allIdsInitialized(p->subs[1], searchDomain) && allIdsInitialized(p->next, searchDomain);
+		}
+
+		// Initial values of the variables that no start attribute covers: the value of a bare identifier on one
+		// side of an equation is taken from the other side. Definitions of temporaries come first
+		// (sqrt(u) = T, T temporary): an alias such as z = T must not give T a value before its definition does.
 		void SasComputationModel::processInitialValues() {
 			list<shared_ptr<SasModel>>::iterator modelIt;
 			for (modelIt = topModels.begin(); modelIt != topModels.end(); modelIt++) {
-				list<shared_ptr<AstTree>>::iterator treeIt;
 				list<shared_ptr<SasModel>> searchDomain;
 				searchDomain.push_back(*modelIt);
 				IdLocator locator(searchDomain);
-				for (treeIt = (*modelIt)->modelTrees.begin(); treeIt != (*modelIt)->modelTrees.end(); treeIt++) {
-					if ((*treeIt)->pHead != NULL && (*treeIt)->pHead->subs[0] != NULL && (*treeIt)->pHead->subs[1] != NULL && (*treeIt)->pHead->op == OP_EQN) {
+				for (int pass = 0; pass < 2; pass++) {
+					list<shared_ptr<AstTree>>::iterator treeIt;
+					for (treeIt = (*modelIt)->modelTrees.begin(); treeIt != (*modelIt)->modelTrees.end(); treeIt++) {
+						AstNode *head = (*treeIt)->pHead;
+						if (head == NULL || head->subs[0] == NULL || head->subs[1] == NULL || head->op != OP_EQN) {
+							continue;
+						}
 						// "der(x) = T" says nothing about the value of T at the start; only algebraic equations do.
 						if ((*treeIt)->eqnType == EQN_DIFF) {
 							continue;
 						}
-						if ((*treeIt)->pHead->subs[1]->op == OP_ID) { // must be an ID
-							char *b = (char *)(*treeIt)->pHead->subs[1]->value.p;
+						const bool definition = head->subs[0]->op != OP_ID;
+						if (definition != (pass == 0)) {
+							continue;
+						}
+						if (head->subs[1]->op == OP_ID) { // must be an ID
+							char *b = (char *)head->subs[1]->value.p;
 							shared_ptr<IdPearl> id = IdLocator::findId(searchDomain, b, strlen(b));
 							if (id != nullptr && !id->initVal) {
-								id->value.d = calcTreeValue((*treeIt)->pHead->subs[0], &locator);
+								id->value.d = calcTreeValue(head->subs[0], &locator);
 								id->initVal = true;
+							}
+						}
+						if (!definition) {
+							// a = expression: the left side takes the value of the expression if it has none and
+							// everything the expression uses has a value.
+							char *a = (char *)head->subs[0]->value.p;
+							shared_ptr<IdPearl> left = IdLocator::findId(searchDomain, a, strlen(a));
+							if (left != nullptr && !left->initVal && allIdsInitialized(head->subs[1], searchDomain)) {
+								double v = calcTreeValue(head->subs[1], &locator);
+								if (std::isfinite(v)) {
+									left->value.d = v;
+									left->initVal = true;
+								}
 							}
 						}
 					}
@@ -827,6 +879,55 @@ namespace che {
 			return state;
 		}
 
+		// The inverse functions y = log(x), atan(x), asin(x) and acos(x) satisfy y' = sign * w * x' with
+		// w = g(x)^alpha, where g = x, 1+x^2, 1-x^2 and 1-x^2 and alpha = -1, -1, -1/2 and -1/2.
+		static bool inverseFunction(int tok, double &sign, double &alpha) {
+			switch (tok) {
+			case TK_F_LOG:
+			case TK_F_ATAN:
+				sign = 1.0;
+				alpha = -1.0;
+				return true;
+			case TK_F_ASIN:
+				sign = 1.0;
+				alpha = -0.5;
+				return true;
+			case TK_F_ACOS:
+				sign = -1.0;
+				alpha = -0.5;
+				return true;
+			}
+			return false;
+		}
+
+		// Series w_0..w_{count-1} of w = g(x)^alpha, given the series x_0..x_{count-1} of the argument.
+		static vector<double> inverseFunctionFactor(int tok, double alpha, const vector<double> &x, int count) {
+			vector<double> g(count), w(count);
+			for (int k = 0; k < count; k++) {
+				if (tok == TK_F_LOG) {
+					g[k] = x[k];
+					continue;
+				}
+				double square = 0.0;
+				for (int i = 0; i <= k; i++) {
+					square += x[i] * x[k - i];
+				}
+				g[k] = (tok == TK_F_ATAN) ? square : -square;
+				if (k == 0) {
+					g[0] += 1.0;
+				}
+			}
+			w[0] = pow(g[0], alpha);
+			for (int m = 1; m < count; m++) {
+				double s = 0.0;
+				for (int k = 1; k <= m; k++) {
+					s += (alpha * k - (m - k)) * g[k] * w[m - k];
+				}
+				w[m] = s / (m * g[0]);
+			}
+			return w;
+		}
+
 		// Prerequisites: (1) the equation has been flattened; (2) the equations and IDs have been numbered.
 		void insertLHS(AstNode *p, const vec &init, vector<int> &locRow, vector<int> &locCol, vector<double> &value, int row, int colOffset, double coeff) {
 			if (p == NULL) {
@@ -856,6 +957,13 @@ namespace che {
 						} else if (tok == TK_F_SQRT) {																						  // sqrt(x)=y;
 							insertLHS(p->subs[0]->subs[1], init, locRow, locCol, value, row, colOffset, coeff / 2 / init(p->subs[1]->index)); // x coefficient
 							insertLHS(p->subs[1], init, locRow, locCol, value, row, colOffset, -coeff);										  // y coefficient
+						} else if (tok == TK_F_LOG || tok == TK_F_ATAN || tok == TK_F_ASIN || tok == TK_F_ACOS) {							  // y=f(x), y'=sign*w*x'
+							double sign = 1.0, alpha = 1.0;
+							inverseFunction(tok, sign, alpha);
+							const double x0 = init(p->subs[0]->subs[1]->index);
+							const double g0 = (tok == TK_F_LOG) ? x0 : (tok == TK_F_ATAN ? 1.0 + x0 * x0 : 1.0 - x0 * x0);
+							insertLHS(p->subs[0]->subs[1], init, locRow, locCol, value, row, colOffset, coeff * sign * pow(g0, alpha)); // x coefficient
+							insertLHS(p->subs[1], init, locRow, locCol, value, row, colOffset, -coeff);									// y coefficient
 						}
 						// There should not be der(x) because only AEs are processed.
 					} // TODO: There may be cases such as sin(x)=0;
@@ -961,6 +1069,20 @@ namespace che {
 								d += sol(p->subs[1]->index, k) * sol(p->subs[1]->index, lvl - k);
 							}
 							rhs(row) = coeff * d / 2 / sol(p->subs[1]->index, 0);
+						} else if (tok == TK_F_LOG || tok == TK_F_ATAN || tok == TK_F_ASIN || tok == TK_F_ACOS) {
+							double sign = 1.0, alpha = 1.0;
+							inverseFunction(tok, sign, alpha);
+							const int xIdx = p->subs[0]->subs[1]->index;
+							vector<double> x(lvl);
+							for (int k = 0; k < lvl; k++) {
+								x[k] = sol(xIdx, k);
+							}
+							vector<double> w = inverseFunctionFactor(tok, alpha, x, lvl);
+							double d = 0.0;
+							for (int k = 1; k <= lvl - 1; k++) {
+								d += k * x[k] * w[lvl - k];
+							}
+							rhs(row) = -coeff * sign * d / lvl;
 						}
 						// There should not be der(x) because only AEs are processed.
 					} // TODO: There may be cases such as sin(x)=0;

@@ -228,37 +228,35 @@ namespace che {
 			}
 
 			bool startsDeclaration(int tok) {
-				return tok == TK_K_PARA || tok == TK_K_CONSTANT || tok == TK_K_DISCRETE || tok == TK_K_REAL || tok == TK_K_INTEGER || tok == TK_K_BOOLEAN;
+				return tok == TK_K_PARA || tok == TK_K_CONSTANT || tok == TK_K_DISCRETE || tok == TK_K_INPUT || tok == TK_K_OUTPUT || tok == TK_K_REAL || tok == TK_K_INTEGER || tok == TK_K_BOOLEAN;
 			}
 
-			void parseDeclaration(SasModelParser *parser) {
-				bool isParam = false, isDiscrete = false;
-				while (parser->currentToken == TK_K_PARA || parser->currentToken == TK_K_CONSTANT || parser->currentToken == TK_K_DISCRETE) {
-					if (parser->currentToken == TK_K_DISCRETE) {
-						isDiscrete = true;
-					} else {
-						isParam = true;
+			// Skips `annotation(...)`, which does not change the equations. The tokens inside are scanned without
+			// entering their names into the id table.
+			void skipAnnotation(SasModelParser *parser) {
+				parser->noInject = true;
+				getNextToken(parser); // consume `annotation`
+				int depth = 0;
+				while (parser->currentToken != TK_EOF) {
+					if (parser->currentToken == TK_LPAREN) {
+						depth++;
+					} else if (parser->currentToken == TK_RPAREN) {
+						depth--;
+						if (depth <= 0) {
+							parser->noInject = false;
+							getNextToken(parser);
+							return;
+						}
+					} else if (depth == 0) {
+						break; // `annotation` without parentheses
 					}
 					getNextToken(parser);
 				}
-				Type ty = TY_REAL;
-				if (parser->currentToken == TK_K_REAL) {
-					ty = TY_REAL;
-				} else if (parser->currentToken == TK_K_INTEGER) {
-					ty = TY_INT;
-				} else if (parser->currentToken == TK_K_BOOLEAN) {
-					ty = TY_BOOL;
-				} else {
-					parser->error("Expect a type (Real, Integer or Boolean).");
-					skipStatement(parser);
-					return;
-				}
-				getNextToken(parser);
-				if (parser->currentToken != TK_ID) {
-					parser->error("actual token %s: expect identifier.", Lexer::getInstance().tokenStrings[parser->currentToken]);
-					skipStatement(parser);
-					return;
-				}
+				parser->noInject = false;
+			}
+
+			// One variable of a declaration: name, modification, binding and description string.
+			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isDiscrete, bool isInput) {
 				shared_ptr<IdPearl> var = parser->currentId;
 				const int line = parser->coord.line;
 				if (var->idTy != ID_NONE) {
@@ -301,10 +299,56 @@ namespace che {
 					}
 				} else if (isParam) {
 					parser->error("Parameter '%s' has no value.", (const char *)var->str);
+				} else if (isInput) {
+					parser->error("Input '%s' has no value; give it a binding, for example `input Real u = 1;`.", (const char *)var->str);
 				}
 
 				if (parser->currentToken == TK_STRING) {
 					var->setAnnotation((uchar *)parser->value.p);
+					getNextToken(parser);
+				}
+				if (parser->currentToken == TK_K_ANNOTATION) {
+					skipAnnotation(parser);
+				}
+			}
+
+			// One declaration statement: prefixes, a type and one or more declarators separated by commas.
+			void parseDeclaration(SasModelParser *parser) {
+				bool isParam = false, isDiscrete = false, isInput = false;
+				while (parser->currentToken == TK_K_PARA || parser->currentToken == TK_K_CONSTANT || parser->currentToken == TK_K_DISCRETE ||
+					   parser->currentToken == TK_K_INPUT || parser->currentToken == TK_K_OUTPUT) {
+					if (parser->currentToken == TK_K_DISCRETE) {
+						isDiscrete = true;
+					} else if (parser->currentToken == TK_K_INPUT) {
+						isInput = true;
+					} else if (parser->currentToken != TK_K_OUTPUT) { // an output is an ordinary variable
+						isParam = true;
+					}
+					getNextToken(parser);
+				}
+				Type ty = TY_REAL;
+				if (parser->currentToken == TK_K_REAL) {
+					ty = TY_REAL;
+				} else if (parser->currentToken == TK_K_INTEGER) {
+					ty = TY_INT;
+				} else if (parser->currentToken == TK_K_BOOLEAN) {
+					ty = TY_BOOL;
+				} else {
+					parser->error("Expect a type (Real, Integer or Boolean).");
+					skipStatement(parser);
+					return;
+				}
+				getNextToken(parser);
+				while (true) {
+					if (parser->currentToken != TK_ID) {
+						parser->error("actual token %s: expect identifier.", Lexer::getInstance().tokenStrings[parser->currentToken]);
+						skipStatement(parser);
+						return;
+					}
+					parseDeclarator(parser, ty, isParam, isDiscrete, isInput);
+					if (parser->currentToken != TK_COMMA) {
+						break;
+					}
 					getNextToken(parser);
 				}
 				expect(parser, TK_SEMICOLON);
@@ -324,7 +368,7 @@ namespace che {
 			AstNode *parseStatement(SasModelParser *parser, StmtContext ctx);
 
 			bool endsStatementList(int tok) {
-				return tok == TK_EOF || tok == TK_K_END || tok == TK_K_ELSE || tok == TK_K_ELSEIF || tok == TK_K_ELSEWHEN || tok == TK_K_EQN || tok == TK_K_INIT;
+				return tok == TK_EOF || tok == TK_K_END || tok == TK_K_ELSE || tok == TK_K_ELSEIF || tok == TK_K_ELSEWHEN || tok == TK_K_EQN || tok == TK_K_INIT || tok == TK_K_ANNOTATION;
 			}
 
 			// Statements are linked through AstNode::next.
@@ -523,12 +567,20 @@ namespace che {
 				getNextToken(parser);
 			}
 
-			while (startsDeclaration(parser->currentToken)) {
-				parseDeclaration(parser);
+			while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_K_ANNOTATION) {
+				if (parser->currentToken == TK_K_ANNOTATION) {
+					skipAnnotation(parser);
+					expect(parser, TK_SEMICOLON);
+				} else {
+					parseDeclaration(parser);
+				}
 			}
 
 			while (parser->currentToken != TK_K_END && parser->currentToken != TK_EOF) {
-				if (parser->currentToken == TK_K_INIT) {
+				if (parser->currentToken == TK_K_ANNOTATION) {
+					skipAnnotation(parser);
+					expect(parser, TK_SEMICOLON);
+				} else if (parser->currentToken == TK_K_INIT) {
 					getNextToken(parser);
 					expect(parser, TK_K_EQN);
 					parseEquationSection(parser, CTX_INITIAL);
@@ -538,6 +590,12 @@ namespace che {
 				} else {
 					if (startsDeclaration(parser->currentToken)) {
 						parser->error("Declarations must come before the equation sections.");
+					} else if (parser->currentToken == TK_K_EXTENDS) {
+						parser->error("Inheritance (extends) is not supported; flatten the model first.");
+					} else if (parser->currentToken == TK_K_ALGORITHM) {
+						parser->error("Algorithm sections are not supported; write the statements as equations.");
+					} else if (parser->currentToken == TK_K_FUNCTION || parser->currentToken == TK_K_PACKAGE || parser->currentToken == TK_K_CLASS) {
+						parser->error("Nested classes and user-defined functions are not supported.");
 					} else {
 						parser->error("actual token %s: expect `initial equation`, `equation` or `end`.", Lexer::getInstance().tokenStrings[parser->currentToken]);
 					}

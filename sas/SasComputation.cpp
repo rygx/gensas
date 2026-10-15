@@ -1152,20 +1152,24 @@ namespace che {
 			shared_ptr<SasSolution> sasSol = make_shared<SasSolution>(this, CHESOL_PADE, nState, options.nLvl);
 			sasSol->solution->solution.col(0) = init;
 
-			vector<int> locRow;
-			vector<int> locCol;
-			vector<double> value;
-
-			for (int iAE = 0; iAE < nAE; iAE++) {
-				insertLHS(eqnTable[nDE + iAE]->pHead, init, locRow, locCol, value, iAE, 0, 1.0);
-			}
-
-			uvec locRowVec = conv_to<uvec>::from(locRow);
-			uvec locColVec = conv_to<uvec>::from(locCol);
-			vec valueVec = conv_to<vec>::from(value);
-			sp_mat LHStotal(true, join_cols(locRowVec.t(), locColVec.t()), valueVec, nAE, nX + nY);
-			sp_mat LHSY = LHStotal.tail_cols(nY);
-			sp_mat LHSX = LHStotal.head_cols(nX);
+			// Jacobian of the algebraic equations at the given state, split into the parts for the
+			// differential (X) and algebraic (Y) variables.
+			sp_mat LHSY, LHSX;
+			auto buildLHS = [&](const vec &state) {
+				vector<int> locRow;
+				vector<int> locCol;
+				vector<double> value;
+				for (int iAE = 0; iAE < nAE; iAE++) {
+					insertLHS(eqnTable[nDE + iAE]->pHead, state, locRow, locCol, value, iAE, 0, 1.0);
+				}
+				uvec locRowVec = conv_to<uvec>::from(locRow);
+				uvec locColVec = conv_to<uvec>::from(locCol);
+				vec valueVec = conv_to<vec>::from(value);
+				sp_mat LHStotal(true, join_cols(locRowVec.t(), locColVec.t()), valueVec, nAE, nX + nY);
+				LHSY = LHStotal.tail_cols(nY);
+				LHSX = LHStotal.head_cols(nX);
+			};
+			buildLHS(init);
 
 			// A Pade solution caches its coefficients on the first evaluation. The series is changed after
 			// that (AE calibration, filling the higher orders), so the cache must be dropped each time.
@@ -1183,20 +1187,37 @@ namespace che {
 				vec diffAE = diff.tail(nAE);
 				double diffMax = norm(diffAE, "inf");
 				if (diffMax > tol / 2) {
+					// Newton's method; the Jacobian is rebuilt at each iterate.
 					int iter = 0;
 					int maxIter = 10;
+					bool singular = false;
 					while (diffMax > tol / 10 && iter < maxIter) {
-						sasSol->solution->solution.col(0).tail(nY) -= spsolve(LHSY, diffAE);
+						try {
+							buildLHS(sasSol->solution->solution.col(0));
+							sasSol->solution->solution.col(0).tail(nY) -= spsolve(LHSY, diffAE);
+						} catch (const std::runtime_error &) {
+							singular = true;
+							break;
+						}
 						resetPade();
 						diff = calcDiff(sasSol->solution, 0.0);
 						diffAE = diff.tail(nAE);
 						diffMax = norm(diffAE, "inf");
 						iter++;
 					}
-					if (diffMax > tol / 10 && iter >= maxIter) { // if not good, then restore original solution.
-						cerr << "Refinement of AE solution fails, restoring original solution" << endl;
+					if (singular || (diffMax > tol / 10 && iter >= maxIter) || !std::isfinite(diffMax)) { // if not good, then restore original solution.
 						sasSol->solution->solution.col(0).tail(nY) = initY;
+						resetPade();
+						const double before = norm(calcDiff(sasSol->solution, 0.0).tail(nAE), "inf");
+						if (!(before < 1e-4)) {
+							throw std::runtime_error("the algebraic equations cannot be solved consistently at t = " + std::to_string(startAbsAlpha) + " (residual " + std::to_string(before) + "); give the algebraic variables start values that are close to the solution");
+						}
+						if (options.log != nullptr) {
+							*options.log << "Refinement of AE solution fails, restoring original solution" << endl;
+						}
 					}
+					// the series is expanded around the refined point
+					buildLHS(sasSol->solution->solution.col(0));
 				}
 			}
 

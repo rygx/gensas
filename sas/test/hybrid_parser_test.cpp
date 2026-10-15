@@ -289,8 +289,9 @@ static void testSourceSyntax() {
 	CHECK_EQ(parseErrors("model M\n  output Real y;\n  input Real u = 1;\n  Real x(start=1);\nequation\n  der(x) = -x + u;\n  y = 2*x;\nend M;\n"), 0);
 	CHECK_EQ(parseErrors("model M\n  Real x(start=1) annotation(Dialog(group=\"g\"));\n  annotation(Icon(graphics={Rectangle(extent={{-1,-1},{1,1}})}));\nequation\n  der(x) = -x;\n  annotation(experiment(StopTime=1));\nend M;\n"), 0);
 	CHECK_EQ(parseErrors("model M\n  Real x(start=1) annotation(Dialog(group=\"g\")), y(start=2) \"d\" annotation(a=1);\nequation\n  der(x) = -x;\n  der(y) = -y;\nend M;\n"), 0);
-	CHECK(parseErrors("model M\n  input Real u;\nequation\nend M;\n") > 0);						 // input without a value
-	CHECK(parseErrors("model M\n  Real x;\n  /* open\nequation\n  der(x) = -x;\nend M;\n") > 0); // unterminated comment
+	CHECK(parseErrors("model M\n  discrete Real a(start=0);\nequation\n  when initial then\n    a = 1;\n  end when;\nend M;\n") > 0); // initial without ()
+	CHECK(parseErrors("model M\n  input Real u;\nequation\nend M;\n") > 0);															  // input without a value
+	CHECK(parseErrors("model M\n  Real x;\n  /* open\nequation\n  der(x) = -x;\nend M;\n") > 0);									  // unterminated comment
 	CHECK(parseErrors("model M\n  extends Base;\n  Real x;\nequation\n  der(x) = -x;\nend M;\n") > 0);
 	CHECK(parseErrors("model M\n  Real x;\nalgorithm\n  x := 1;\nend M;\n") > 0);
 }

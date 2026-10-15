@@ -129,6 +129,9 @@ namespace che {
 				expr->op = OP_ID;
 				expr->value.p = (decltype(expr->value.p))fn->str;
 				getNextToken(parser);
+				if (parser->currentToken != TK_LPAREN) {
+					parser->error("`initial` is a function: write initial().");
+				}
 				return expr;
 			}
 			case TK_LBRACE: { // array literal {a, b, ...}: the elements are linked through `next`

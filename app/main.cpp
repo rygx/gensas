@@ -319,7 +319,7 @@ static int runJobFile(int argc, char **argv) {
 	return runModelica(job, validateOnly);
 }
 
-int main(int argc, char **argv) {
+static int realMain(int argc, char **argv) {
 
 	if (argc < 2) {
 		printUsage();
@@ -492,4 +492,15 @@ int main(int argc, char **argv) {
 		printUsage();
 		return 1;
 	}
+}
+
+int main(int argc, char **argv) {
+	try {
+		return realMain(argc, argv);
+	} catch (const std::exception &e) {
+		cerr << "Error: " << e.what() << endl;
+	} catch (...) {
+		cerr << "Error: unknown failure." << endl;
+	}
+	return 1;
 }

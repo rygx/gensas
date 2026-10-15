@@ -278,7 +278,22 @@ namespace che {
 					AstNode *value = parseValueExpr(parser);
 					double v = 0.0;
 					if (!isParam) {
-						parser->error("Binding equations on variable '%s' are not supported; use an equation section.", (const char *)var->str);
+						if (var->idTy == ID_VAR) {
+							// Real y = expr; is the equation y = expr.
+							AstNode *lhs = new AstNode();
+							lhs->op = OP_ID;
+							lhs->value.p = (decltype(lhs->value.p))var->str;
+							AstNode *eqn = new AstNode();
+							eqn->op = OP_EQN;
+							eqn->subs[0] = lhs;
+							eqn->subs[1] = value;
+							shared_ptr<AstTree> tree = make_shared<AstTree>();
+							tree->pHead = eqn;
+							tree->line = line;
+							parser->currentModel->modelTrees.push_back(tree);
+						} else {
+							parser->error("Binding equations on discrete variable '%s' are not supported; assign it in a when-equation.", (const char *)var->str);
+						}
 					} else if (evalConst(value, parser->currentModel.get(), v)) {
 						setValue(var.get(), v);
 					} else {

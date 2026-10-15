@@ -194,6 +194,8 @@ cmake(
             # The directory structure of ":openblas_lib_bazel" are retained,
             # usually libraries are under /lib and headers are under /include
             "TPL_BLAS_LIBRARIES": "$EXT_BUILD_DEPS/lib/libopenblas.a",
+            # Linked into the shared C API library (//capi:libgensas.so).
+            "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
         },
     }),
     lib_source = "@superlu//:all_srcs",
@@ -225,6 +227,7 @@ cmake(
     name = "armadillo_lib",
     cache_entries = {
         "BUILD_SHARED_LIBS": "OFF",
+        "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
     },
     lib_source = "@armadillo//:all_srcs",
     out_static_libs = ["libarmadillo.a"],
@@ -263,6 +266,8 @@ cmake(
         },
         "//conditions:default": {
             "BUILD_SHARED_LIBS": "OFF",
+            # Linked into the shared C API library (//capi:libgensas.so).
+            "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
         },
     }),
     lib_source = "@jsoncpp//:all_srcs",

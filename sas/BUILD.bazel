@@ -166,7 +166,7 @@ cc_library(
     ]
 )
 
-# MAT v5 result writer; the only part of the solver that needs matio.
+# MAT v5 result writer.
 cc_library(
     name = "sas_result_mat_lib",
     hdrs = [
@@ -177,10 +177,8 @@ cc_library(
     ],
     deps = [
         ":sas_result_types_lib",
-    ] + select({
-        "//:windows": ["//:libmatio_lib_cmake"],
-        "//conditions:default": ["//:libmatio_lib"],
-    })
+        "//io:mat5_writer_lib",
+    ]
 )
 
 # Time-event simulation of flat hybrid models on top of the semi-analytical solver.

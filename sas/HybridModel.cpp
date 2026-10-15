@@ -557,6 +557,10 @@ namespace che {
 				tc.a = cond->subs[0];
 				return true;
 			}
+			if (isCall(cond, "initial") && cond->subs[1] == NULL) {
+				tc.kind = TC_INITIAL;
+				return true;
+			}
 			if (isCall(cond, "sample") && cond->subs[1] != NULL && cond->subs[1]->next != NULL && cond->subs[1]->next->next == NULL) {
 				tc.kind = TC_SAMPLE;
 				tc.a = cond->subs[1];
@@ -726,6 +730,9 @@ namespace che {
 				if (!classifyTimeCondition(link.cond, tc)) {
 					return true; // a state-event condition: detected by the simulator, not scheduled
 				}
+				if (tc.kind == TC_INITIAL) {
+					return true; // fires at the start time only
+				}
 				env.time = t;
 				double a;
 				if (!env.eval(tc.a, a, err)) {
@@ -764,6 +771,10 @@ namespace che {
 				TimeCond tc;
 				if (!classifyTimeCondition(link.cond, tc)) {
 					fires = fired != NULL && link.guardId >= 0 && fired->count(link.guardId) > 0;
+					return true;
+				}
+				if (tc.kind == TC_INITIAL) {
+					fires = initialOnly && !noTimeEvents;
 					return true;
 				}
 				if (noTimeEvents || (initialOnly && tc.kind != TC_SAMPLE)) {

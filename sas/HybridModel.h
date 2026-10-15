@@ -83,9 +83,11 @@ namespace che {
 		// Time-event condition forms:
 		//   TC_AT:     time >= a   (also >, and the mirrored a <= time, a < time)
 		//   TC_SAMPLE: sample(a, b), true at a, a + b, a + 2b, ...
+		//   TC_INITIAL: initial(), true once at the start time
 		enum TimeCondKind { TC_NONE,
 							TC_AT,
-							TC_SAMPLE };
+							TC_SAMPLE,
+							TC_INITIAL };
 
 		struct TimeCond {
 			TimeCondKind kind = TC_NONE;

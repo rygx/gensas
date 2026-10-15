@@ -134,6 +134,7 @@ namespace che {
 
 		static struct keyword keywordsO[] =
 			{
+				{"or", 2, TK_K_OR},
 				{"outer", 5, TK_K_OUTER},
 				{"output", 6, TK_K_OUTPUT},
 				{NULL, 0, TK_ID}};

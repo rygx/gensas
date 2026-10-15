@@ -26,6 +26,7 @@
 //
 
 #include "sas/ModelChecker.h"
+#include "sas/HybridModel.h"
 #include <cstring>
 #include <iostream>
 #include <set>
@@ -50,6 +51,11 @@ namespace che {
 					}
 					for (const shared_ptr<AstTree> &tree : model.modelTrees) {
 						walkStatement(tree->pHead, tree->line);
+					}
+					if (features.timeEventsOnly) {
+						for (const shared_ptr<AstTree> &tree : model.modelTrees) {
+							strictStatement(tree->pHead, tree->line, true);
+						}
 					}
 					return errors;
 				}
@@ -146,6 +152,142 @@ namespace che {
 						}
 					} else {
 						report(line, "unknown function '" + n + "'");
+					}
+				}
+
+				// ---- Rules for the time-event simulator (features.timeEventsOnly) ----
+
+				enum ExprCtx { CTX_CONT,  // continuous equation
+							   CTX_COND,  // evaluated from parameters and discrete variables only
+							   CTX_EVENT, // evaluated at an event: also continuous values and `time`
+				};
+
+				shared_ptr<IdPearl> lookup(const AstNode *p) {
+					const char *n = (const char *)p->value.p;
+					return n == NULL ? nullptr : model.lookupIdFromModel(n, (int)strlen(n));
+				}
+
+				static bool isRelational(Op op) {
+					return op == OP_EQUAL || op == OP_UNEQUAL || op == OP_GREAT || op == OP_LESS || op == OP_GREAT_EQ || op == OP_LESS_EQ || op == OP_AND || op == OP_OR || op == OP_NOT;
+				}
+
+				void strictExpr(const AstNode *p, int line, ExprCtx ctx) {
+					if (p == NULL) {
+						return;
+					}
+					if (p->op == OP_ID && p->ty != TY_FUNCTION && p->value.p != NULL) {
+						string n = (const char *)p->value.p;
+						if (n == "time") {
+							if (ctx != CTX_EVENT) {
+								report(line, "'time' may only be used in when-conditions and when-bodies");
+							}
+							return;
+						}
+						shared_ptr<IdPearl> id = lookup(p);
+						if (id != nullptr && ctx == CTX_COND && (id->idTy == ID_VAR || id->idTy == ID_IVAR || id->idTy == ID_TMPVAR)) {
+							report(line, "condition depends on continuous variable '" + n + "'; state events are not supported yet");
+						}
+						return;
+					}
+					if (p->op == OP_IFEXPR) {
+						strictExpr(p->subs[0], line, ctx == CTX_EVENT ? CTX_EVENT : CTX_COND);
+						if (p->subs[1] != NULL) {
+							strictExpr(p->subs[1]->subs[0], line, ctx);
+							strictExpr(p->subs[1]->subs[1], line, ctx);
+						}
+						return;
+					}
+					if (isRelational(p->op) && ctx == CTX_CONT) {
+						report(line, "relational and logical operators can only be used in conditions");
+					}
+					if (p->op == OP_CALL) {
+						const AstNode *callee = p->subs[0];
+						string fn = (callee != NULL && callee->value.p != NULL) ? (const char *)callee->value.p : "";
+						if (fn == "der") {
+							if (ctx != CTX_CONT) {
+								report(line, "der() cannot be used in conditions or event bodies");
+							}
+						} else if (fn == "abs" || fn == "min" || fn == "max" || fn == "sign" || fn == "floor" || fn == "pre" || fn == "noEvent") {
+							if (ctx == CTX_CONT) {
+								report(line, "function " + fn + "() is not supported in continuous equations yet");
+							}
+						} else if (fn == "edge" || fn == "change") {
+							report(line, "function " + fn + "() requires state events, which are not supported yet");
+						} else if (fn == "sample") {
+							report(line, "sample() can only be used as a when-condition");
+						}
+						for (const AstNode *a = p->subs[1]; a != NULL; a = a->next) {
+							strictExpr(a, line, ctx);
+						}
+						return;
+					}
+					strictExpr(p->subs[0], line, ctx);
+					strictExpr(p->subs[1], line, ctx);
+				}
+
+				void strictWhen(const AstNode *w, int line) {
+					for (; w != NULL && w->nodeKind == NK_WhenEquation; w = w->subs[1] != NULL ? w->subs[1]->subs[1] : NULL) {
+						if (w->line > 0) {
+							line = w->line;
+						}
+						TimeCond tc;
+						if (!classifyTimeCondition(w->subs[0], tc)) {
+							report(line, "when-condition must be `time >= e` or `sample(start, interval)`; state events are not supported yet");
+						} else {
+							strictExpr(tc.a, line, CTX_COND);
+							strictExpr(tc.b, line, CTX_COND);
+						}
+						if (w->subs[1] == NULL) {
+							continue;
+						}
+						for (const AstNode *s = w->subs[1]->subs[0]; s != NULL; s = s->next) {
+							if (s->op == OP_EQN && s->subs[0] != NULL && s->subs[0]->op == OP_ID) {
+								shared_ptr<IdPearl> id = lookup(s->subs[0]);
+								if (id != nullptr && id->idTy != ID_DISC) {
+									report(line, "only discrete variables can be assigned in a when-equation; use reinit() for '" + string((const char *)s->subs[0]->value.p) + "'");
+								}
+								strictExpr(s->subs[1], line, CTX_EVENT);
+							} else if (s->op == OP_CALL && s->subs[0] != NULL && s->subs[0]->value.p != NULL && string((const char *)s->subs[0]->value.p) == "reinit") {
+								if (s->subs[1] != NULL && s->subs[1]->next != NULL) {
+									strictExpr(s->subs[1]->next, line, CTX_EVENT);
+								}
+							} else {
+								report(line, "unsupported statement in when-equation; expect `d = expr;` or `reinit(x, expr);`");
+							}
+						}
+					}
+				}
+
+				// `top` is true for statements outside any if-equation.
+				void strictStatement(const AstNode *p, int line, bool top) {
+					for (; p != NULL; p = p->next) {
+						if (p->line > 0) {
+							line = p->line;
+						}
+						if (p->nodeKind == NK_WhenEquation) {
+							if (!top) {
+								report(line, "when-equations inside if-equations are not supported yet");
+							} else {
+								strictWhen(p, line);
+							}
+						} else if (p->nodeKind == NK_IfEquation) {
+							strictExpr(p->subs[0], line, CTX_COND);
+							if (p->subs[1] != NULL) {
+								strictStatement(p->subs[1]->subs[0], line, false);
+								strictStatement(p->subs[1]->subs[1], line, false);
+							}
+						} else if (p->op == OP_EQN) {
+							const AstNode *lhs = p->subs[0];
+							if (lhs != NULL && lhs->op == OP_ID && lhs->ty != TY_FUNCTION) {
+								shared_ptr<IdPearl> id = lookup(lhs);
+								if (id != nullptr && id->idTy == ID_DISC) {
+									report(line, "discrete variable '" + string((const char *)lhs->value.p) + "' can only be assigned in a when-equation");
+									continue;
+								}
+							}
+							strictExpr(lhs, line, CTX_CONT);
+							strictExpr(p->subs[1], line, CTX_CONT);
+						}
 					}
 				}
 

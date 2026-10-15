@@ -48,7 +48,8 @@ namespace che {
 
 		class SasComputationOptions {
 		public:
-			double endTime = 10.0;
+			double startTime = 0.0; // absolute time at which the initial values apply
+			double endTime = 10.0;	// absolute end time
 			double segment = 1.0;
 			double alphaTol = 1e-4;
 			double errorTol = 1e-6;
@@ -72,6 +73,9 @@ namespace che {
 			SasSolutionSet();
 
 			std::list<std::shared_ptr<SasSolution>> solutionLink;
+
+			// Computation models referenced by the solutions (SasSolution::linkCompModel is a raw pointer).
+			std::vector<std::shared_ptr<SasComputationModel>> keepAlive;
 
 			std::list<std::shared_ptr<SasSolution>> findSasSolution(double time);
 
@@ -100,6 +104,9 @@ namespace che {
 			SasComputationModel();
 
 			void generateCompModel(GlobalPool &);
+
+			// Copies a single model (and its equations) from the pool into this computation model.
+			void generateCompModel(const std::shared_ptr<SasModel> &);
 
 			void preprocessModels();
 

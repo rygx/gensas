@@ -92,9 +92,7 @@ namespace che {
 				pNewNode->value = ori->value;
 			}
 
-			if (ori->next != NULL) {
-				pNewNode->next = copyAstNodeItself(pModel, ori->next);
-			}
+			pNewNode->line = ori->line;
 			return pNewNode;
 		}
 
@@ -106,6 +104,10 @@ namespace che {
 			if (ori->subs[1] != NULL) {
 				pNewNode->subs[1] = copyAstTree(pModel, ori->subs[1]);
 			}
+			// The `next` chain (call arguments, statement lists) is copied with its subtrees.
+			if (ori->next != NULL) {
+				pNewNode->next = copyAstTree(pModel, ori->next);
+			}
 			return pNewNode;
 		}
 
@@ -116,36 +118,36 @@ namespace che {
 			// Only considered top-level models currently
 			list<shared_ptr<SasModel>>::iterator oldModelIt;
 			for (oldModelIt = pool.topModels.begin(); oldModelIt != pool.topModels.end(); oldModelIt++) {
-				// currently do not consider the crossing-reference of the IDs in models
-				// Inside a model
-				// First copy the idTables and necklaces
-				shared_ptr<SasModel> pNewModel = make_shared<SasModel>();
-				pNewModel->modelInfo = make_shared<IdPearl>(*(*oldModelIt)->modelInfo); // Copy model information
-				// Copy the id table
-				for (int idxNck = 0; idxNck < pNewModel->idNecklaces.size(); idxNck++) {
-					list<shared_ptr<IdPearl>>::iterator idIt;
-					for (idIt = (*oldModelIt)->idNecklaces[idxNck].begin();
-						 idIt != (*oldModelIt)->idNecklaces[idxNck].end();
-						 idIt++) {
-						shared_ptr<IdPearl> pNewIdPearl = make_shared<IdPearl>(*(*idIt));
-						pNewModel->idNecklaces[idxNck].push_back(pNewIdPearl);
-						pNewModel->idTable.push_back(pNewIdPearl);
-					}
-				}
-				this->topModels.push_back(pNewModel);
+				generateCompModel(*oldModelIt);
 			}
+		}
 
-			list<shared_ptr<SasModel>>::iterator newModelIt;
-			oldModelIt = pool.topModels.begin();
-			for (newModelIt = this->topModels.begin(); newModelIt != this->topModels.end(); newModelIt++) {
-				// Copy the Lexico tree (and check undefined identifiers)
-				list<shared_ptr<AstTree>>::iterator oldTreeIt;
-				for (oldTreeIt = (*oldModelIt)->modelTrees.begin(); oldTreeIt != (*oldModelIt)->modelTrees.end(); oldTreeIt++) {
-					shared_ptr<AstTree> pNewTree = make_shared<AstTree>();
-					pNewTree->pHead = copyAstTree((*newModelIt), (*oldTreeIt)->pHead);
-					(*newModelIt)->modelTrees.push_back(pNewTree);
+		void SasComputationModel::generateCompModel(const shared_ptr<SasModel> &oldModel) {
+			// currently do not consider the crossing-reference of the IDs in models
+			// Inside a model
+			// First copy the idTables and necklaces
+			shared_ptr<SasModel> pNewModel = make_shared<SasModel>();
+			pNewModel->modelInfo = make_shared<IdPearl>(*oldModel->modelInfo); // Copy model information
+			// Copy the id table
+			for (int idxNck = 0; idxNck < pNewModel->idNecklaces.size(); idxNck++) {
+				list<shared_ptr<IdPearl>>::iterator idIt;
+				for (idIt = oldModel->idNecklaces[idxNck].begin();
+					 idIt != oldModel->idNecklaces[idxNck].end();
+					 idIt++) {
+					shared_ptr<IdPearl> pNewIdPearl = make_shared<IdPearl>(*(*idIt));
+					pNewModel->idNecklaces[idxNck].push_back(pNewIdPearl);
+					pNewModel->idTable.push_back(pNewIdPearl);
 				}
-				oldModelIt++;
+			}
+			this->topModels.push_back(pNewModel);
+
+			// Copy the Lexico tree (and check undefined identifiers)
+			list<shared_ptr<AstTree>>::iterator oldTreeIt;
+			for (oldTreeIt = oldModel->modelTrees.begin(); oldTreeIt != oldModel->modelTrees.end(); oldTreeIt++) {
+				shared_ptr<AstTree> pNewTree = make_shared<AstTree>();
+				pNewTree->pHead = copyAstTree(pNewModel, (*oldTreeIt)->pHead);
+				pNewTree->line = (*oldTreeIt)->line;
+				pNewModel->modelTrees.push_back(pNewTree);
 			}
 		}
 
@@ -1107,7 +1109,7 @@ namespace che {
 			vec init = getStartStateIVP();
 			cout << "Init values generated." << endl;
 			SasSolutionSet *solLink = new SasSolutionSet();
-			double alpha = 0.0;
+			double alpha = options.startTime;
 			int noMoveCnt = 0;
 			while (alpha < options.endTime - options.alphaTol) {
 				double seg = options.endTime - alpha;

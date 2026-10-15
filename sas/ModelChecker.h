@@ -48,6 +48,11 @@ namespace che {
 			bool eventFunctions = false;	 // pre, edge, change, sample, noEvent, reinit
 			bool simulationTime = false;	 // `time`
 			bool terminateAndAssert = false; // terminate(), assert()
+			// Restricts hybrid constructs to what the time-event simulator can run: when-conditions are
+			// `time >= e` or `sample(start, interval)`, if-conditions depend only on parameters and
+			// discrete variables (no state events), and discrete-only operators stay out of
+			// continuous equations. Use together with the flags above.
+			bool timeEventsOnly = false;
 		};
 
 		// Checks a parsed model: undeclared identifiers, unknown functions, and use of

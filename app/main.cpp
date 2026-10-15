@@ -35,6 +35,7 @@
 #include "sas/SasLexico.h"
 #include "sas/SasExpr.h"
 #include "sas/SasComputation.h"
+#include "sas/HybridSimulator.h"
 #include "sas/ModelChecker.h"
 #include <memory>
 // #include <memory>
@@ -262,62 +263,90 @@ int main(int argc, char **argv) {
 			return -1;
 		}
 
-		// The default SolverFeatures describe what the solver can run today.
+		// The default SolverFeatures describe what the solver can run today. Models with discrete
+		// variables, if/when statements or `time` go to the time-event simulator.
 		SolverFeatures solverFeatures;
+		const bool hybrid = isHybridModel(*parser.currentModel);
+		if (hybrid) {
+			solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;
+			solverFeatures.whenEquations = solverFeatures.piecewiseFunctions = solverFeatures.eventFunctions = true;
+			solverFeatures.simulationTime = true;
+			solverFeatures.timeEventsOnly = true;
+		}
 		if (checkModel(*parser.currentModel, solverFeatures, fileMode ? input : string("<string>"), cerr) > 0) {
 			cerr << "Error: The model uses constructs that are not supported yet." << endl;
 			return -1;
 		}
 
-		SasComputationModel compModel;
-		compModel.generateCompModel(GlobalPool::getInstance());
-		compModel.preprocessModels();
-		// check if all the ids are initialized, need to be repacked in the future.
-		list<shared_ptr<SasModel>>::iterator modelIt;
-		int nonInitCnt = 0;
-		for (modelIt = compModel.topModels.begin(); modelIt != compModel.topModels.end(); modelIt++) {
-			list<shared_ptr<IdPearl>>::iterator idIt;
-			for (idIt = (*modelIt)->idTable.begin(); idIt != (*modelIt)->idTable.end(); idIt++) {
-				IdType idt = (*idIt)->idTy;
-				if (idt == ID_VAR || idt == ID_TMPVAR || idt == ID_IVAR) {
-					if (!(*idIt)->initVal) {
-						nonInitCnt++;
+		SasSolutionSet *sasSolLink = NULL;
+		SasComputationModel compModel; // must outlive sasSolLink
+		HybridSimulator hybridSim(parser.currentModel);
+		if (hybrid) {
+			sasSolLink = hybridSim.run(options);
+			if (sasSolLink == NULL) {
+				cerr << "Error: " << hybridSim.error() << endl;
+				return -1;
+			}
+			for (const HybridEvent &ev : hybridSim.events()) {
+				cout << "Event at t=" << ev.time << ":";
+				for (const auto &a : ev.assignments) {
+					cout << " " << a.first << "=" << a.second;
+				}
+				for (const auto &r : ev.reinits) {
+					cout << " reinit(" << r.first << ")=" << r.second;
+				}
+				cout << endl;
+			}
+		} else {
+			compModel.generateCompModel(GlobalPool::getInstance());
+			compModel.preprocessModels();
+			// check if all the ids are initialized, need to be repacked in the future.
+			list<shared_ptr<SasModel>>::iterator modelIt;
+			int nonInitCnt = 0;
+			for (modelIt = compModel.topModels.begin(); modelIt != compModel.topModels.end(); modelIt++) {
+				list<shared_ptr<IdPearl>>::iterator idIt;
+				for (idIt = (*modelIt)->idTable.begin(); idIt != (*modelIt)->idTable.end(); idIt++) {
+					IdType idt = (*idIt)->idTy;
+					if (idt == ID_VAR || idt == ID_TMPVAR || idt == ID_IVAR) {
+						if (!(*idIt)->initVal) {
+							nonInitCnt++;
+						}
 					}
 				}
 			}
-		}
-		if (nonInitCnt > 0) {
-			cerr << "Error: There are " << nonInitCnt << " uninitialized variables." << endl;
-		}
-		compModel.generateDAEs();
-
-		if (verbose) {
-			cout << "Original model:" << endl;
-			parser.currentModel->printAllModelTrees();
-			cout << "Copied model:" << endl;
-
-			list<shared_ptr<SasModel>>::iterator modelIt;
-			for (modelIt = compModel.topModels.begin(); modelIt != compModel.topModels.end(); modelIt++) {
-				(*modelIt)->printAllModelTrees();
-				(*modelIt)->printIdTable();
+			if (nonInitCnt > 0) {
+				cerr << "Error: There are " << nonInitCnt << " uninitialized variables." << endl;
 			}
-		}
+			compModel.generateDAEs();
 
-		// Check if DAEs are valid.
-		bool isValidDAE = true;
-		if (compModel.nX != compModel.nDE) {
-			cerr << "Error: Number of state variable (" << compModel.nX << ") not equal number of diff. eqs. (" << compModel.nDE << ")." << endl;
-			isValidDAE = false;
+			if (verbose) {
+				cout << "Original model:" << endl;
+				parser.currentModel->printAllModelTrees();
+				cout << "Copied model:" << endl;
+
+				list<shared_ptr<SasModel>>::iterator modelIt;
+				for (modelIt = compModel.topModels.begin(); modelIt != compModel.topModels.end(); modelIt++) {
+					(*modelIt)->printAllModelTrees();
+					(*modelIt)->printIdTable();
+				}
+			}
+
+			// Check if DAEs are valid.
+			bool isValidDAE = true;
+			if (compModel.nX != compModel.nDE) {
+				cerr << "Error: Number of state variable (" << compModel.nX << ") not equal number of diff. eqs. (" << compModel.nDE << ")." << endl;
+				isValidDAE = false;
+			}
+			if (compModel.nY != compModel.nAE) {
+				cerr << "Error: Number of algebraic variable (" << compModel.nY << ") not equal number of algeb. eqs. (" << compModel.nAE << ")." << endl;
+				isValidDAE = false;
+			}
+			if (!isValidDAE) {
+				cerr << "Error: DAE is not well defined." << endl;
+				return -1;
+			}
+			sasSolLink = compModel.solve(options);
 		}
-		if (compModel.nY != compModel.nAE) {
-			cerr << "Error: Number of algebraic variable (" << compModel.nY << ") not equal number of algeb. eqs. (" << compModel.nAE << ")." << endl;
-			isValidDAE = false;
-		}
-		if (!isValidDAE) {
-			cerr << "Error: DAE is not well defined." << endl;
-			return -1;
-		}
-		SasSolutionSet *sasSolLink = compModel.solve(options);
 
 		pctimer_t endTime = pctimer();
 

@@ -274,6 +274,8 @@ int main(int argc, char **argv) {
 		// The default SolverFeatures describe what the solver can run today. Models with discrete
 		// variables, if/when statements or `time` go to the time-event simulator.
 		SolverFeatures solverFeatures;
+		// abs/min/max/sign in continuous equations become if-expressions: their switching points are state events.
+		rewritePiecewiseFunctions(*parser.currentModel);
 		const bool hybrid = isHybridModel(*parser.currentModel);
 		if (hybrid) {
 			solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;

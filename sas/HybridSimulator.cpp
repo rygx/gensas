@@ -368,7 +368,9 @@ namespace che {
 								}
 							};
 							for (int iter = 0; prevA < a1 && iter < 5000000; iter++) {
-								double step = min(base, max(floorStep, (prevA - a0) / 32.0));
+								// The step must stay representable next to the time (events that follow each
+								// other at 1e-16 intervals would otherwise give a step of zero).
+								double step = min(base, max(max(floorStep, (prevA - a0) / 32.0), 1e-13 * (1.0 + fabs(prevA))));
 								double a = prevA + step;
 								if (a1 - a < 0.25 * step) {
 									a = a1;
@@ -428,6 +430,11 @@ namespace che {
 									}
 								}
 								dynT = hi;
+								return true;
+							}
+							if (prevA < a1) {
+								err = "the state-event scan does not advance at t=" + to_string(prevA);
+								scanFailed = true;
 								return true;
 							}
 							return false;

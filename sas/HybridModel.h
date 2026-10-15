@@ -60,6 +60,13 @@ namespace che {
 		// Builds an environment from a parsed model: parameters and the initial values of the discrete variables.
 		HybridEnv makeHybridEnv(const SasModel &model);
 
+		// Rewrites abs(), min(), max() and sign() calls in continuous equations into if-expressions
+		// (abs(e) = if e >= 0 then e else -e, ...), so that the switching points become state events
+		// and every mode is smooth. Conditions and when-bodies are left alone (they are evaluated
+		// directly). Returns the number of calls rewritten. Call before isHybridModel() and
+		// checkModel().
+		int rewritePiecewiseFunctions(SasModel &model);
+
 		// True if the model uses discrete variables, if/when statements, if-expressions or `time`.
 		bool isHybridModel(const SasModel &model);
 

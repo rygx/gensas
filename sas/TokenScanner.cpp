@@ -289,20 +289,24 @@ namespace che {
 							parser->reader.cursur++;
 						}
 					} else {
-						parser->reader.cursur++;
-						while (parser->reader.cursur[1] != '*' && parser->reader.cursur[1] != '/') {
-							if (*(parser->reader.cursur) != '\n') {
+						parser->reader.cursur++; // past the '*'
+						for (;;) {
+							const int c = *(parser->reader.cursur);
+							if (c == '*' && parser->reader.cursur[1] == '/') {
+								parser->reader.cursur += 2;
+								break;
+							}
+							if (c == END_OF_FILE && parser->hasReachedBufferSize()) {
+								parser->error("Comment block is not closed.");
+								return;
+							}
+							if (c == '\n') {
 								parser->coord.line++;
 								parser->reader.line++;
 								parser->reader.lineHead = parser->reader.cursur + 1;
-							} else if ((*(parser->reader.cursur) == END_OF_FILE && parser->hasReachedBufferSize()) ||
-									   (*(parser->reader.cursur + 1) == END_OF_FILE && parser->bufferMargin() <= 1)) {
-								parser->error(parser->reader.filename, parser->reader.line, "Comment block is not closed.");
-								return;
 							}
 							parser->reader.cursur++;
 						}
-						parser->reader.cursur += 2;
 					}
 					break;
 
@@ -339,7 +343,7 @@ namespace che {
 				return *(parser->reader.cursur - 1);
 			case 'x':
 				if (!isHexDigit(*(parser->reader.cursur))) {
-					parser->error(parser->reader.filename, parser->reader.line, "Expect Hex digit.");
+					parser->error("Expect Hex digit.");
 					return 'x';
 				}
 				v = 0;
@@ -508,7 +512,7 @@ namespace che {
 					parser->reader.cursur++;
 				}
 				if (!isDigit(*(parser->reader.cursur))) {
-					parser->error(parser->reader.filename, parser->reader.line, "Expect exponent in float.");
+					parser->error("Expect exponent in float.");
 				} else {
 					while (isDigit(*(parser->reader.cursur))) {
 						parser->reader.cursur++;
@@ -538,7 +542,7 @@ namespace che {
 				start = parser->reader.cursur;
 				base = 16;
 				if (!isHexDigit(*(parser->reader.cursur))) {
-					parser->error(parser->reader.filename, parser->reader.line, "Expect HEX digit.");
+					parser->error("Expect HEX digit.");
 					parser->value.i[0] = 0;
 					return TK_INTCONST;
 				}
@@ -593,7 +597,7 @@ namespace che {
 				}
 			}
 			if (*(parser->reader.cursur) != '"') {
-				parser->error(parser->reader.filename, parser->reader.line, "Expect end of string \".");
+				parser->error("Expect end of string \".");
 			} else {
 				parser->reader.cursur++;
 			}
@@ -720,7 +724,7 @@ namespace che {
 		int getNextToken(SasModelParser *parser);
 
 		static int scanBadChar(SasModelParser *parser) {
-			parser->error(parser->reader.filename, parser->reader.line, "Illegal char: \\x%x.", *(parser->reader.cursur));
+			parser->error("Illegal char: \\x%x.", *(parser->reader.cursur));
 			parser->reader.cursur++;
 			return getNextToken(parser);
 		}

@@ -214,7 +214,55 @@ static void testBindingEquations() {
 	CHECK(bad.error().find("discrete variable 'd'") != std::string::npos);
 }
 
+// A model written the way Modelica sources usually are.
+static void testSourceLayout() {
+	const char *src =
+		"model M \"a model\"\n"
+		"  /* block\n     comment */\n"
+		"  parameter Real k = 2 \"gain\"; // trailing\n"
+		"  Real x(start = 1) \"state\", z(start = 2);\n"
+		"  output Real y;\n"
+		"  input Real u = 0.5;\n"
+		"  annotation(Icon(coordinateSystem(extent = {{-100, -100}, {100, 100}})));\n"
+		"equation\n"
+		"  der(x) = -k*x + u; /* inline */\n"
+		"  der(z) = -z;\n"
+		"  y = x + z;\n"
+		"  annotation(experiment(StopTime = 1, Tolerance = 1e-6));\n"
+		"end M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	double t = sim.result().time.back();
+	double x = 0.25 + 0.75 * std::exp(-2.0 * t);
+	CHECK_NEAR(lastValue(sim.result(), "x"), x, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "y"), x + 2.0 * std::exp(-t), 1e-4);
+}
+
+// Implicit algebraic equations are solved with Newton's method from the start values; a missing
+// start value that makes the Jacobian singular is reported instead of giving a wrong result.
+static void testImplicitAlgebraicEquations() {
+	const char *src =
+		"model M\n  Real x(start = 4);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  y*y = x;\nend M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	CHECK_NEAR(lastValue(sim.result(), "y"), std::sqrt(4.0 * std::exp(-sim.result().time.back())), 1e-4);
+
+	const char *cubic =
+		"model M\n  Real x(start = 4);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  x = y*y*y;\nend M;\n";
+	Simulation c(job(cubic, 1.0));
+	CHECK(c.run());
+	CHECK_NEAR(lastValue(c.result(), "y"), std::cbrt(4.0 * std::exp(-c.result().time.back())), 1e-4);
+
+	const char *noStart =
+		"model M\n  Real x(start = 4);\n  Real y;\nequation\n  der(x) = -x;\n  y*y = x;\nend M;\n";
+	Simulation bad(job(noStart, 1.0));
+	CHECK(!bad.run());
+	CHECK(bad.error().find("cannot be solved consistently") != std::string::npos);
+}
+
 int main() {
+	testSourceLayout();
+	testImplicitAlgebraicEquations();
 	testBindingEquations();
 	testBareFunctionCall();
 	testNoEvent();

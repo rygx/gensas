@@ -25,6 +25,7 @@ cc_test(
         ":test_util",
         "//sas:sas_computation_lib",
         "//sas:sas_expr_parser_lib",
+        "//sas:sas_model_parser_lib",
         "//util:safe_armadillo_headers",
     ],
 )

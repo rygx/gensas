@@ -31,7 +31,9 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <string>
+#include <vector>
 
 using namespace std;
 
@@ -173,13 +175,332 @@ namespace che {
 			}
 
 			// ---------------------------------------------------------------------
+			// Arrays and for-equations
+			//
+			// An array is a set of ordinary variables named like "x[2,3]". Subscripts must be constant
+			// (numbers, parameters, loop variables) and are resolved while parsing, and for-equations are
+			// unrolled, so the solver never sees either.
+			// ---------------------------------------------------------------------
+
+			const long kMaxArrayElements = 100000;
+			const long kMaxLoopIterations = 1000000;
+
+			void freeAst(AstNode *p) {
+				while (p != NULL) {
+					AstNode *next = p->next;
+					freeAst(p->subs[0]);
+					freeAst(p->subs[1]);
+					delete p;
+					p = next;
+				}
+			}
+
+			struct LoopVar {
+				string name;
+				long value;
+			};
+
+			struct Elab {
+				SasModelParser *parser;
+				int line;
+				vector<LoopVar> env;
+				long iterations = 0;
+				Elab(SasModelParser *p, int l) : parser(p), line(l) {}
+			};
+
+			AstNode *elabChain(Elab &ctx, const AstNode *p);
+
+			AstNode *mkIntConst(long v) {
+				AstNode *n = new AstNode();
+				n->op = OP_CONST;
+				n->ty = TY_INT;
+				n->nodeKind = NK_Expression;
+				n->value.i[0] = (int)v;
+				n->value.i[1] = 0;
+				return n;
+			}
+
+			string elementName(const string &base, const vector<int> &idx) {
+				string s = base + "[";
+				for (size_t k = 0; k < idx.size(); k++) {
+					s += (k > 0 ? "," : "") + std::to_string(idx[k]);
+				}
+				return s + "]";
+			}
+
+			// All index tuples of an array, last subscript varying fastest.
+			vector<vector<int>> allIndices(const vector<int> &dims) {
+				vector<vector<int>> out;
+				vector<int> idx(dims.size(), 1);
+				while (true) {
+					out.push_back(idx);
+					size_t k = dims.size();
+					while (k > 0 && idx[k - 1] == dims[k - 1]) {
+						idx[k - 1] = 1;
+						k--;
+					}
+					if (k == 0) {
+						break;
+					}
+					idx[k - 1]++;
+				}
+				return out;
+			}
+
+			bool evalInteger(Elab &ctx, const AstNode *e, long &out) {
+				double v = 0.0;
+				if (!evalConst(e, ctx.parser->currentModel.get(), v) || v != std::floor(v) || std::fabs(v) > 1e9) {
+					return false;
+				}
+				out = (long)v;
+				return true;
+			}
+
+			AstNode *elabNode(Elab &ctx, const AstNode *p);
+
+			AstNode *elabIndex(Elab &ctx, const AstNode *p) {
+				SasModelParser *parser = ctx.parser;
+				const AstNode *base = p->subs[0];
+				if (base == NULL || base->op != OP_ID || base->ty == TY_FUNCTION || base->value.p == NULL) {
+					parser->error("Line %d: only declared arrays can have subscripts.", ctx.line);
+					return mkIntConst(0);
+				}
+				const string name = (const char *)base->value.p;
+				map<string, vector<int>>::const_iterator it = parser->arrayDims.find(name);
+				if (it == parser->arrayDims.end()) {
+					parser->error("Line %d: '%s' is not an array.", ctx.line, name.c_str());
+					return mkIntConst(0);
+				}
+				const vector<int> &dims = it->second;
+				vector<int> idx;
+				for (const AstNode *s = p->subs[1]; s != NULL; s = s->next) {
+					AstNode *e = elabNode(ctx, s);
+					long v = 0;
+					const bool ok = evalInteger(ctx, e, v);
+					freeAst(e);
+					if (!ok) {
+						parser->error("Line %d: the subscript of '%s' must be a constant integer expression (numbers, parameters, loop variables).", ctx.line, name.c_str());
+						return mkIntConst(0);
+					}
+					idx.push_back((int)v);
+				}
+				if (idx.size() != dims.size()) {
+					parser->error("Line %d: '%s' has %d dimension(s) and needs one subscript for each.", ctx.line, name.c_str(), (int)dims.size());
+					return mkIntConst(0);
+				}
+				for (size_t k = 0; k < idx.size(); k++) {
+					if (idx[k] < 1 || idx[k] > dims[k]) {
+						parser->error("Line %d: subscript %d of '%s' is out of range 1..%d.", ctx.line, idx[k], name.c_str(), dims[k]);
+						return mkIntConst(0);
+					}
+				}
+				const string full = elementName(name, idx);
+				shared_ptr<IdPearl> id = parser->currentModel->lookupIdFromModel(full.c_str(), (int)full.size());
+				if (id == nullptr) {
+					parser->error("Line %d: '%s' is not declared.", ctx.line, full.c_str());
+					return mkIntConst(0);
+				}
+				AstNode *n = new AstNode();
+				n->op = OP_ID;
+				n->nodeKind = base->nodeKind;
+				n->line = p->line;
+				n->value.p = (decltype(n->value.p))id->str;
+				return n;
+			}
+
+			// size(x, k), sum(x) and prod(x) on a declared array; NULL for other calls.
+			AstNode *elabArrayCall(Elab &ctx, const AstNode *p) {
+				const string fn = calleeName(p);
+				if (fn != "size" && fn != "sum" && fn != "prod") {
+					return NULL;
+				}
+				const AstNode *arg = p->subs[1];
+				if (arg == NULL || arg->op != OP_ID || arg->ty == TY_FUNCTION || arg->value.p == NULL) {
+					return NULL;
+				}
+				map<string, vector<int>>::const_iterator it = ctx.parser->arrayDims.find((const char *)arg->value.p);
+				if (it == ctx.parser->arrayDims.end()) {
+					return NULL;
+				}
+				const vector<int> &dims = it->second;
+				if (fn == "size") {
+					long k = 0;
+					AstNode *e = arg->next != NULL ? elabNode(ctx, arg->next) : NULL;
+					const bool ok = e != NULL && arg->next->next == NULL && evalInteger(ctx, e, k) && k >= 1 && k <= (long)dims.size();
+					freeAst(e);
+					if (!ok) {
+						ctx.parser->error("Line %d: size() needs an array and a constant dimension number, for example size(x, 1).", ctx.line);
+						return mkIntConst(1);
+					}
+					return mkIntConst(dims[k - 1]);
+				}
+				if (arg->next != NULL) {
+					return NULL;
+				}
+				AstNode *acc = NULL;
+				for (const vector<int> &idx : allIndices(dims)) {
+					const string full = elementName((const char *)arg->value.p, idx);
+					shared_ptr<IdPearl> id = ctx.parser->currentModel->lookupIdFromModel(full.c_str(), (int)full.size());
+					if (id == nullptr) {
+						continue;
+					}
+					AstNode *n = new AstNode();
+					n->op = OP_ID;
+					n->nodeKind = arg->nodeKind;
+					n->value.p = (decltype(n->value.p))id->str;
+					if (acc == NULL) {
+						acc = n;
+					} else {
+						AstNode *both = new AstNode();
+						both->op = fn == "sum" ? OP_ADD : OP_MUL;
+						both->nodeKind = NK_Expression;
+						both->subs[0] = acc;
+						both->subs[1] = n;
+						acc = both;
+					}
+				}
+				return acc != NULL ? acc : mkIntConst(fn == "sum" ? 0 : 1);
+			}
+
+			// Unrolls a for-equation: the body once per value of the iterator.
+			AstNode *expandFor(Elab &ctx, const AstNode *p) {
+				SasModelParser *parser = ctx.parser;
+				const string iter = p->value.p != NULL ? (const char *)p->value.p : "";
+				vector<long> bounds;
+				for (const AstNode *r = p->subs[0]; r != NULL; r = r->next) {
+					AstNode *e = elabNode(ctx, r);
+					long v = 0;
+					const bool ok = evalInteger(ctx, e, v);
+					freeAst(e);
+					if (!ok) {
+						parser->error("Line %d: the range of the for-loop over '%s' must be constant integer expressions.", ctx.line, iter.c_str());
+						return NULL;
+					}
+					bounds.push_back(v);
+				}
+				if (bounds.size() < 2 || bounds.size() > 3) {
+					parser->error("Line %d: the range of the for-loop over '%s' must be `first:last` or `first:step:last`.", ctx.line, iter.c_str());
+					return NULL;
+				}
+				const long lo = bounds[0];
+				const long step = bounds.size() == 3 ? bounds[1] : 1;
+				const long hi = bounds.back();
+				if (step == 0) {
+					parser->error("Line %d: the step of the for-loop over '%s' is zero.", ctx.line, iter.c_str());
+					return NULL;
+				}
+				long count = 0;
+				if (step > 0 && hi >= lo) {
+					count = (hi - lo) / step + 1;
+				} else if (step < 0 && lo >= hi) {
+					count = (lo - hi) / (-step) + 1;
+				}
+				if (ctx.iterations + count > kMaxLoopIterations) {
+					parser->error("Line %d: the for-loops unroll to more than %ld iterations.", ctx.line, kMaxLoopIterations);
+					return NULL;
+				}
+				ctx.iterations += count;
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				for (long k = 0; k < count; k++) {
+					ctx.env.push_back(LoopVar{iter, lo + k * step});
+					AstNode *body = elabChain(ctx, p->subs[1]);
+					ctx.env.pop_back();
+					*tail = body;
+					while (*tail != NULL) {
+						tail = &(*tail)->next;
+					}
+				}
+				return head;
+			}
+
+			// Copy of one node (without `next`) with loop variables replaced by their values and subscripts resolved.
+			AstNode *elabNode(Elab &ctx, const AstNode *p) {
+				if (p->op == OP_INDEX) {
+					return elabIndex(ctx, p);
+				}
+				if (p->op == OP_ID && p->ty != TY_FUNCTION && p->value.p != NULL) {
+					const string name = (const char *)p->value.p;
+					for (size_t k = ctx.env.size(); k > 0; k--) {
+						if (ctx.env[k - 1].name == name) {
+							return mkIntConst(ctx.env[k - 1].value);
+						}
+					}
+					if (ctx.parser->arrayDims.count(name) > 0) {
+						ctx.parser->error("Line %d: array '%s' is used without subscripts; whole-array expressions are not supported, use a for-equation.", ctx.line, name.c_str());
+					}
+				}
+				if (p->op == OP_CALL) {
+					AstNode *r = elabArrayCall(ctx, p);
+					if (r != NULL) {
+						return r;
+					}
+				}
+				AstNode *c = new AstNode(*p);
+				c->next = NULL;
+				c->index = -1;
+				c->subs[0] = elabChain(ctx, p->subs[0]);
+				c->subs[1] = elabChain(ctx, p->subs[1]);
+				return c;
+			}
+
+			// Elaborates a chain of expressions or statements; a for-equation becomes the statements it unrolls to.
+			AstNode *elabChain(Elab &ctx, const AstNode *p) {
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				for (; p != NULL; p = p->next) {
+					AstNode *r = p->nodeKind == NK_ForEquation ? expandFor(ctx, p) : elabNode(ctx, p);
+					*tail = r;
+					while (*tail != NULL) {
+						tail = &(*tail)->next;
+					}
+				}
+				return head;
+			}
+
+			// A value in a declaration (parameter value, start value, binding) with subscripts resolved.
+			AstNode *parseDeclValue(SasModelParser *parser) {
+				Elab ctx(parser, parser->coord.line);
+				AstNode *raw = parseValueExpr(parser);
+				AstNode *value = elabChain(ctx, raw);
+				freeAst(raw);
+				return value;
+			}
+
+			// The elements of an array literal, nested literals flattened (a scalar gives itself).
+			void flattenValues(const AstNode *v, vector<const AstNode *> &out) {
+				if (v != NULL && v->op == OP_ARRAY) {
+					for (const AstNode *e = v->subs[0]; e != NULL; e = e->next) {
+						flattenValues(e, out);
+					}
+				} else {
+					out.push_back(v);
+				}
+			}
+
+			// One value per element for an attribute: an array literal of the right size, or one value for all.
+			bool valuesPerElement(SasModelParser *parser, const AstNode *value, size_t n, const string &what, vector<const AstNode *> &per) {
+				vector<const AstNode *> vals;
+				flattenValues(value, vals);
+				if (vals.size() == n) {
+					per = vals;
+				} else if (vals.size() == 1) {
+					per.assign(n, vals[0]);
+				} else {
+					parser->error("%s has %d value(s) but the array has %d element(s).", what.c_str(), (int)vals.size(), (int)n);
+					return false;
+				}
+				return true;
+			}
+
+			// ---------------------------------------------------------------------
 			// Declarations
 			// ---------------------------------------------------------------------
 
-			// Parses  ( name = value {, name = value} )  after a variable name.
-			// `start` becomes the initial value; `unit` is stored; other attributes are
-			// parsed and ignored with a warning.
-			void parseModification(SasModelParser *parser, const shared_ptr<IdPearl> &var) {
+			// Parses  ( [each] name = value {, [each] name = value} )  after a variable name.
+			// `start` becomes the initial value of every element (an array literal gives one value per
+			// element); `unit` is stored; other attributes are parsed and ignored with a warning.
+			void parseModification(SasModelParser *parser, const vector<shared_ptr<IdPearl>> &elems, const string &name) {
 				// Attribute names (start, fixed, ...) are not model symbols: scan them
 				// without entering them into the id table.
 				parser->noInject = true;
@@ -187,6 +508,11 @@ namespace che {
 				parser->noInject = false;
 				while (true) {
 					string attr;
+					if (parser->currentToken == TK_K_EACH) {
+						parser->noInject = true;
+						getNextToken(parser);
+						parser->noInject = false;
+					}
 					if (parser->currentToken == TK_K_UNIT) {
 						attr = "unit";
 					} else if (parser->currentToken == TK_ID && parser->value.p != NULL) {
@@ -199,23 +525,32 @@ namespace che {
 					expect(parser, TK_EQN);
 					if (attr == "unit") {
 						if (parser->currentToken == TK_STRING) {
-							var->setUnit((uchar *)parser->value.p);
+							for (const shared_ptr<IdPearl> &e : elems) {
+								e->setUnit((uchar *)parser->value.p);
+							}
 							getNextToken(parser);
 						} else {
 							parser->error("Expect a string for the unit.");
 						}
 					} else {
-						AstNode *value = parseValueExpr(parser);
+						AstNode *value = parseDeclValue(parser);
 						if (attr == "start") {
-							double v = 0.0;
-							if (evalConst(value, parser->currentModel.get(), v)) {
-								setValue(var.get(), v);
-							} else {
-								parser->error("Attribute start of '%s' must be a constant expression.", (const char *)var->str);
+							vector<const AstNode *> per;
+							if (valuesPerElement(parser, value, elems.size(), "Attribute start of '" + name + "'", per)) {
+								for (size_t k = 0; k < elems.size(); k++) {
+									double v = 0.0;
+									if (evalConst(per[k], parser->currentModel.get(), v)) {
+										setValue(elems[k].get(), v);
+									} else {
+										parser->error("Attribute start of '%s' must be a constant expression.", name.c_str());
+										break;
+									}
+								}
 							}
 						} else if (attr != "fixed") {
-							parser->warn("Attribute '%s' of '%s' is ignored.", attr.c_str(), (const char *)var->str);
+							parser->warn("Attribute '%s' of '%s' is ignored.", attr.c_str(), name.c_str());
 						}
+						freeAst(value);
 					}
 					if (parser->currentToken != TK_COMMA) {
 						break;
@@ -255,56 +590,118 @@ namespace che {
 				parser->noInject = false;
 			}
 
-			// One variable of a declaration: name, modification, binding and description string.
-			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isDiscrete, bool isInput) {
-				shared_ptr<IdPearl> var = parser->currentId;
-				const int line = parser->coord.line;
-				if (var->idTy != ID_NONE) {
-					parser->error("Redeclaration of '%s'.", (const char *)var->str);
+			// Array dimensions  [n, m]  after a type or a name.
+			void parseDims(SasModelParser *parser, vector<int> &dims) {
+				getNextToken(parser); // consume '['
+				while (true) {
+					AstNode *e = parseDeclValue(parser);
+					double v = 0.0;
+					if (!evalConst(e, parser->currentModel.get(), v) || v != std::floor(v) || v < 1 || v > kMaxArrayElements) {
+						parser->error("Line %d: array sizes must be constant positive integers (numbers or earlier parameters).", parser->coord.line);
+						v = 1;
+					}
+					freeAst(e);
+					dims.push_back((int)v);
+					if (parser->currentToken != TK_COMMA) {
+						break;
+					}
+					getNextToken(parser);
 				}
-				var->ty = ty;
-				var->line = line;
-				var->idTy = isParam ? ID_PARAM : ((isDiscrete || ty != TY_REAL) ? ID_DISC : ID_VAR);
+				expect(parser, TK_RBRACKET);
+			}
+
+			// One variable (or array) of a declaration: name, dimensions, modification, binding and description.
+			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isDiscrete, bool isInput, const vector<int> &typeDims) {
+				shared_ptr<IdPearl> var = parser->currentId;
+				const string name = (const char *)var->str;
+				const int line = parser->coord.line;
 				getNextToken(parser);
+				vector<int> dims = typeDims;
+				if (parser->currentToken == TK_LBRACKET) {
+					parseDims(parser, dims);
+				}
+				const IdType idTy = isParam ? ID_PARAM : ((isDiscrete || ty != TY_REAL) ? ID_DISC : ID_VAR);
+
+				// The variable itself, or one variable per array element.
+				vector<shared_ptr<IdPearl>> elems;
+				if (var->idTy != ID_NONE || parser->arrayDims.count(name) > 0) {
+					parser->error("Redeclaration of '%s'.", name.c_str());
+				}
+				if (dims.empty()) {
+					elems.push_back(var);
+				} else {
+					long total = 1;
+					for (int d : dims) {
+						total *= d;
+					}
+					if (total > kMaxArrayElements) {
+						parser->error("Line %d: array '%s' has more than %ld elements.", line, name.c_str(), kMaxArrayElements);
+						dims.assign(1, 1);
+					}
+					parser->arrayDims[name] = dims;
+					for (const vector<int> &idx : allIndices(dims)) {
+						const string full = elementName(name, idx);
+						shared_ptr<IdPearl> el = parser->currentModel->lookupIdentifier(full.c_str(), (int)full.size());
+						elems.push_back(el);
+					}
+				}
+				for (const shared_ptr<IdPearl> &el : elems) {
+					el->ty = ty;
+					el->line = line;
+					el->idTy = idTy;
+				}
 
 				if (parser->currentToken == TK_LPAREN) {
-					parseModification(parser, var);
+					parseModification(parser, elems, name);
 				}
 
 				if (parser->currentToken == TK_EQN) {
 					getNextToken(parser);
-					AstNode *value = parseValueExpr(parser);
-					double v = 0.0;
-					if (!isParam) {
-						if (var->idTy == ID_VAR) {
-							// Real y = expr; is the equation y = expr.
-							AstNode *lhs = new AstNode();
-							lhs->op = OP_ID;
-							lhs->value.p = (decltype(lhs->value.p))var->str;
-							AstNode *eqn = new AstNode();
-							eqn->op = OP_EQN;
-							eqn->subs[0] = lhs;
-							eqn->subs[1] = value;
-							shared_ptr<AstTree> tree = make_shared<AstTree>();
-							tree->pHead = eqn;
-							tree->line = line;
-							parser->currentModel->modelTrees.push_back(tree);
-						} else {
-							parser->error("Binding equations on discrete variable '%s' are not supported; assign it in a when-equation.", (const char *)var->str);
-						}
-					} else if (evalConst(value, parser->currentModel.get(), v)) {
-						setValue(var.get(), v);
+					AstNode *value = parseDeclValue(parser);
+					vector<const AstNode *> vals;
+					flattenValues(value, vals);
+					if (vals.size() != elems.size()) {
+						parser->error("Line %d: the binding of '%s' has %d value(s) but it has %d element(s).", line, name.c_str(), (int)vals.size(), (int)elems.size());
+					} else if (!isParam && idTy != ID_VAR) {
+						parser->error("Binding equations on discrete variable '%s' are not supported; assign it in a when-equation.", name.c_str());
 					} else {
-						parser->error("Value of parameter '%s' must be a constant expression.", (const char *)var->str);
+						for (size_t k = 0; k < elems.size(); k++) {
+							double v = 0.0;
+							if (isParam) {
+								if (evalConst(vals[k], parser->currentModel.get(), v)) {
+									setValue(elems[k].get(), v);
+								} else {
+									parser->error("Value of parameter '%s' must be a constant expression.", name.c_str());
+									break;
+								}
+							} else {
+								// Real y = expr; is the equation y = expr.
+								AstNode *lhs = new AstNode();
+								lhs->op = OP_ID;
+								lhs->value.p = (decltype(lhs->value.p))elems[k]->str;
+								Elab ctx(parser, line);
+								AstNode *eqn = new AstNode();
+								eqn->op = OP_EQN;
+								eqn->subs[0] = lhs;
+								eqn->subs[1] = elabNode(ctx, vals[k]);
+								shared_ptr<AstTree> tree = make_shared<AstTree>();
+								tree->pHead = eqn;
+								tree->line = line;
+								parser->currentModel->modelTrees.push_back(tree);
+							}
+						}
 					}
+					freeAst(value);
 				} else if (isParam) {
-					parser->error("Parameter '%s' has no value.", (const char *)var->str);
+					parser->error("Parameter '%s' has no value.", name.c_str());
 				} else if (isInput) {
-					parser->error("Input '%s' has no value; give it a binding, for example `input Real u = 1;`.", (const char *)var->str);
+					parser->error("Input '%s' has no value; give it a binding, for example `input Real u = 1;`.", name.c_str());
 				}
 
 				if (parser->currentToken == TK_STRING) {
-					var->setAnnotation((uchar *)parser->value.p);
+					for (const shared_ptr<IdPearl> &el : elems) {
+						el->setAnnotation((uchar *)parser->value.p);
+					}
 					getNextToken(parser);
 				}
 				if (parser->currentToken == TK_K_ANNOTATION) {
@@ -339,13 +736,17 @@ namespace che {
 					return;
 				}
 				getNextToken(parser);
+				vector<int> typeDims; // Real[3] x;
+				if (parser->currentToken == TK_LBRACKET) {
+					parseDims(parser, typeDims);
+				}
 				while (true) {
 					if (parser->currentToken != TK_ID) {
 						parser->error("actual token %s: expect identifier.", Lexer::getInstance().tokenStrings[parser->currentToken]);
 						skipStatement(parser);
 						return;
 					}
-					parseDeclarator(parser, ty, isParam, isDiscrete, isInput);
+					parseDeclarator(parser, ty, isParam, isDiscrete, isInput, typeDims);
 					if (parser->currentToken != TK_COMMA) {
 						break;
 					}
@@ -475,10 +876,61 @@ namespace che {
 				return node;
 			}
 
-			// Returns the statement node, or NULL when nothing is to be kept (error
-			// recovery, or an initial equation that was applied directly).
+			// for i in 1:n loop ... end for;  and  for i in 1:n, j in 1:m loop ... end for;
+			// The result is a NK_ForEquation node (nested for several iterators); elaboration unrolls it.
+			AstNode *parseForEquation(SasModelParser *parser, StmtContext ctx) {
+				const int line = parser->coord.line;
+				getNextToken(parser); // consume `for`
+				vector<pair<uchar *, AstNode *>> iterators;
+				while (true) {
+					if (parser->currentToken != TK_ID) {
+						parser->error("Line %d: expect a loop variable after `for`.", line);
+						skipStatement(parser);
+						return NULL;
+					}
+					uchar *name = parser->currentId->str;
+					getNextToken(parser);
+					expect(parser, TK_K_IN);
+					AstNode *first = parseValueExpr(parser);
+					AstNode *last = first;
+					int parts = 1;
+					while (parser->currentToken == TK_COLON && parts < 3) {
+						getNextToken(parser);
+						AstNode *e = parseValueExpr(parser);
+						last->next = e;
+						last = e;
+						parts++;
+					}
+					if (parts < 2) {
+						parser->error("Line %d: the range of a for-loop must be `first:last` or `first:step:last`.", line);
+					}
+					iterators.push_back(make_pair(name, first));
+					if (parser->currentToken != TK_COMMA) {
+						break;
+					}
+					getNextToken(parser);
+				}
+				expect(parser, TK_K_LOOP);
+				AstNode *node = parseStatementList(parser, ctx);
+				expectEnd(parser, TK_K_FOR);
+				for (size_t k = iterators.size(); k > 0; k--) {
+					AstNode *loop = new AstNode();
+					loop->nodeKind = NK_ForEquation;
+					loop->line = line;
+					loop->value.p = (decltype(loop->value.p))iterators[k - 1].first;
+					loop->subs[0] = iterators[k - 1].second;
+					loop->subs[1] = node;
+					node = loop;
+				}
+				return node;
+			}
+
+			// Returns the statement node, or NULL when nothing is to be kept (error recovery).
 			AstNode *parseStatement(SasModelParser *parser, StmtContext ctx) {
 				const int line = parser->coord.line;
+				if (parser->currentToken == TK_K_FOR) {
+					return parseForEquation(parser, ctx);
+				}
 				if (parser->currentToken == TK_K_IF) {
 					if (ctx == CTX_INITIAL) {
 						parser->error("Line %d: if-equations are not supported in initial equation sections.", line);
@@ -518,15 +970,11 @@ namespace che {
 					return NULL;
 				}
 				expect(parser, TK_SEMICOLON);
-				if (ctx == CTX_INITIAL) {
-					if (expr->op == OP_EQN) {
-						applyInitialEquation(parser, expr, line);
-					} else {
-						parser->error("Line %d: unsupported statement in initial equation section.", line);
-					}
+				if (ctx == CTX_INITIAL && expr->op != OP_EQN) {
+					parser->error("Line %d: unsupported statement in initial equation section.", line);
 					return NULL;
 				}
-				return expr;
+				return expr; // initial equations are applied by parseEquationSection, after subscripts are resolved
 			}
 
 			void parseEquationSection(SasModelParser *parser, StmtContext ctx) {
@@ -535,10 +983,24 @@ namespace che {
 					const int line = parser->coord.line;
 					AstNode *st = parseStatement(parser, ctx);
 					if (st != NULL) {
-						shared_ptr<AstTree> tree = make_shared<AstTree>();
-						tree->pHead = st;
-						tree->line = line;
-						parser->currentModel->modelTrees.push_back(tree);
+						// Subscripts are resolved and for-equations unrolled: one statement may become many.
+						Elab elab(parser, line);
+						AstNode *chain = elabChain(elab, st);
+						freeAst(st);
+						while (chain != NULL) {
+							AstNode *s = chain;
+							chain = chain->next;
+							s->next = NULL;
+							if (ctx == CTX_INITIAL) {
+								applyInitialEquation(parser, s, line);
+								freeAst(s);
+							} else {
+								shared_ptr<AstTree> tree = make_shared<AstTree>();
+								tree->pHead = s;
+								tree->line = line;
+								parser->currentModel->modelTrees.push_back(tree);
+							}
+						}
 					}
 					if (parser->reader.cursur == before) {
 						getNextToken(parser);

@@ -57,6 +57,16 @@ replaced by `e`: events for the relations inside are still generated, which the 
 `evalMathFunction` (`MathFunctions.h`) evaluates all of them numerically for parameters, start values,
 conditions and event expressions.
 
+### Arrays and for-equations
+
+Arrays never reach the solver. `parseDeclarator` declares one scalar variable per element, named `x[1]` or
+`A[2,3]` (the base name is recorded in `SasModelParser::arrayDims`). Each equation section statement is then
+*elaborated* (`elabChain` in `ModelParser.cpp`): loop variables become integer constants, `x[i+1]` is
+evaluated with `evalConst` and replaced by the identifier of that element, `size`/`sum`/`prod` of an array are
+expanded, and an `NK_ForEquation` node is unrolled into its statements (one `AstTree` each). The same
+elaboration resolves subscripts in parameter values, start values and bindings. The iterator and element
+counts are limited (1e5 elements, 1e6 unrolled iterations).
+
 ### Hybrid simulation
 
 `HybridSimulator::run` repeats:

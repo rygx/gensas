@@ -260,7 +260,96 @@ static void testImplicitAlgebraicEquations() {
 	CHECK(bad.error().find("cannot be solved consistently") != std::string::npos);
 }
 
+// Arrays are sets of scalar variables; for-equations are unrolled.
+static void testArrays() {
+	// A cascade of first-order lags: x1 = exp(-t), x2 = t exp(-t), x3 = t^2/2 exp(-t), x4 = t^3/6 exp(-t).
+	const char *cascade =
+		"model M\n"
+		"  parameter Integer n = 4;\n"
+		"  Real x[n](start = {1, 0, 0, 0});\n"
+		"equation\n"
+		"  der(x[1]) = -x[1];\n"
+		"  for i in 2:n loop\n"
+		"    der(x[i]) = x[i-1] - x[i];\n"
+		"  end for;\n"
+		"end M;\n";
+	Simulation a(job(cascade, 2.0));
+	CHECK(a.run());
+	double t = a.result().time.back();
+	CHECK_NEAR(lastValue(a.result(), "x[1]"), std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(a.result(), "x[2]"), t * std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(a.result(), "x[3]"), t * t / 2.0 * std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(a.result(), "x[4]"), t * t * t / 6.0 * std::exp(-t), 1e-4);
+
+	// Two dimensions, nested iterators, a parameter array, sum(), size() and `each`.
+	const char *matrix =
+		"model M\n"
+		"  parameter Real k[2] = {1, 2};\n"
+		"  Real A[2,3](each start = 1);\n"
+		"  Real s = sum(A) + size(A, 2);\n"
+		"equation\n"
+		"  for i in 1:2, j in 1:size(A, 2) loop\n"
+		"    der(A[i,j]) = -k[i]*j*A[i,j];\n"
+		"  end for;\n"
+		"end M;\n";
+	Simulation m(job(matrix, 1.0));
+	CHECK(m.run());
+	t = m.result().time.back();
+	double total = 0.0;
+	for (int i = 1; i <= 2; i++) {
+		for (int j = 1; j <= 3; j++) {
+			double expected = std::exp(-i * j * t); // k[i] = i
+			char name[16];
+			std::snprintf(name, sizeof name, "A[%d,%d]", i, j);
+			CHECK_NEAR(lastValue(m.result(), name), expected, 1e-4);
+			total += expected;
+		}
+	}
+	CHECK_NEAR(lastValue(m.result(), "s"), total + 3.0, 1e-3);
+
+	// Reverse and stepped ranges; the dimensions in front of the name apply to every declarator.
+	const char *ranges =
+		"model M\n"
+		"  Real[2] x(each start = 1), y(each start = 2);\n"
+		"equation\n"
+		"  for i in 1:2 loop der(x[i]) = -x[i]; end for;\n"
+		"  for i in 2:-1:1 loop der(y[i]) = -2*y[i]; end for;\n"
+		"end M;\n";
+	Simulation r(job(ranges, 1.0));
+	CHECK(r.run());
+	t = r.result().time.back();
+	CHECK_NEAR(lastValue(r.result(), "x[2]"), std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(r.result(), "y[1]"), 2.0 * std::exp(-2.0 * t), 1e-4);
+
+	// Initial equations in a loop; when-equations in a loop.
+	const char *events =
+		"model M\n"
+		"  discrete Real a[2](each start = 0);\n"
+		"  Real x[2];\n"
+		"equation\n"
+		"  for i in 1:2 loop\n"
+		"    der(x[i]) = -a[i] - x[i];\n"
+		"    when time >= i then\n"
+		"      a[i] = 2*i;\n"
+		"    end when;\n"
+		"  end for;\n"
+		"initial equation\n"
+		"  for i in 1:2 loop x[i] = i; end for;\n"
+		"end M;\n";
+	Simulation e(job(events, 3.0));
+	CHECK(e.run());
+	CHECK_EQ(e.result().events.size(), (size_t)2);
+	if (e.result().events.size() == 2) {
+		CHECK_NEAR(e.result().events[0].time, 1.0, 1e-9);
+		CHECK_NEAR(e.result().events[1].time, 2.0, 1e-9);
+	}
+	t = e.result().time.back();
+	// x1: -x - a with a = 2 after t = 1: x1(t) = -2 + (x1(1) + 2) exp(-(t-1)), x1(1) = exp(-1)
+	CHECK_NEAR(lastValue(e.result(), "x[1]"), -2.0 + (std::exp(-1.0) + 2.0) * std::exp(-(t - 1.0)), 1e-3);
+}
+
 int main() {
+	testArrays();
 	testSourceLayout();
 	testImplicitAlgebraicEquations();
 	testBindingEquations();

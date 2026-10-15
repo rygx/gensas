@@ -121,6 +121,28 @@ namespace che {
 				expr = parseExpr(parser);
 				expect(parser, TK_RPAREN);
 				return expr;
+			case TK_LBRACE: { // array literal {a, b, ...}: the elements are linked through `next`
+				expr = new AstNode();
+				expr->op = OP_ARRAY;
+				expr->nodeKind = NK_Expression;
+				getNextToken(parser);
+				AstNode *tail = NULL;
+				while (parser->currentToken != TK_RBRACE && parser->currentToken != TK_EOF) {
+					AstNode *element = parseConditionalExpr(parser);
+					if (tail == NULL) {
+						expr->subs[0] = element;
+					} else {
+						tail->next = element;
+					}
+					tail = element;
+					if (parser->currentToken != TK_COMMA) {
+						break;
+					}
+					getNextToken(parser);
+				}
+				expect(parser, TK_RBRACE);
+				return expr;
+			}
 			default:
 				if (parser->currentToken >= TK_F_DER && parser->currentToken < NUM_TK) {
 					expr = new AstNode();
@@ -143,7 +165,21 @@ namespace che {
 
 			while (true) {
 				switch (parser->currentToken) {
-					// brackets [] for array to be added in the future
+				case TK_LBRACKET: // subscripts x[i, j]: subs[0]=array, subs[1]=subscripts linked through `next`
+					p = new AstNode();
+					p->op = OP_INDEX;
+					p->nodeKind = NK_Expression;
+					p->subs[0] = expr;
+					getNextToken(parser);
+					p->subs[1] = parseConditionalExpr(parser);
+					for (AstNode *tail = p->subs[1]; parser->currentToken == TK_COMMA;) {
+						getNextToken(parser);
+						tail->next = parseConditionalExpr(parser);
+						tail = tail->next;
+					}
+					expect(parser, TK_RBRACKET);
+					expr = p;
+					break;
 				case TK_LPAREN:
 					p = new AstNode();
 					p->op = OP_CALL;

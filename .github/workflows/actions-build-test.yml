@@ -1,6 +1,13 @@
 name: Build checks
 run-name: ${{ github.actor }} Build test
-on: [push]
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  # Bump to start from empty Bazel caches (the disk cache only grows).
+  CACHE_VERSION: v1
+
 jobs:
   Build-Test-Linux:
     runs-on: ubuntu-latest
@@ -15,13 +22,31 @@ jobs:
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
-      - name: Mount bazel cache  # Optional
-        uses: actions/cache@v3
+      # Bazel's disk cache holds action outputs (including the foreign_cc builds of
+      # OpenBLAS, HDF5, ...); the repository cache holds downloaded archives.
+      - name: Configure Bazel caches
+        run: |
+          printf 'build --disk_cache=%s/.bazel-ci-cache/disk\nbuild --repository_cache=%s/.bazel-ci-cache/repo\n' "$HOME" "$HOME" > .bazelrc.local
+      - name: Restore Bazel caches
+        id: bazel-cache
+        uses: actions/cache/restore@v4
         with:
-            path: "~/.cache/bazel"
-            key: bazel_debian-${{ hashFiles('WORKSPACE', 'BUILD.bazel') }}
+          path: ~/.bazel-ci-cache
+          key: bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-${{ github.run_id }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
       - run: bazel build //...
       - run: bazel test //...
+      # Saved from main only: caches written on a branch are not visible to other
+      # branches, and every save is a new multi-hundred-MB entry.  Runs even when
+      # the build failed, so partial progress is kept.
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.bazel-ci-cache
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
       - run: echo "This job's status is ${{ job.status }}."
 
   Build-Test-MacOs:
@@ -43,13 +68,28 @@ jobs:
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
-      - name: Mount bazel cache  # Optional
-        uses: actions/cache@v3
+      # On macOS Bazel's output base is under /private/var/tmp, not ~/.cache/bazel,
+      # so cache explicit disk/repository cache directories instead.
+      - name: Configure Bazel caches
+        run: |
+          printf 'build --disk_cache=%s/.bazel-ci-cache/disk\nbuild --repository_cache=%s/.bazel-ci-cache/repo\n' "$HOME" "$HOME" > .bazelrc.local
+      - name: Restore Bazel caches
+        id: bazel-cache
+        uses: actions/cache/restore@v4
         with:
-            path: "~/.cache/bazel"
-            key: bazel_macos-${{ hashFiles('WORKSPACE', 'BUILD.bazel') }}
+          path: ~/.bazel-ci-cache
+          key: bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-${{ github.run_id }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
       - run: bazel build //...
       - run: bazel test //...
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.bazel-ci-cache
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
       - run: echo "This job's status is ${{ job.status }}."
 
   # Windows (MSYS2 / MinGW-w64), see doc/Installation.md.  Not yet proven on
@@ -80,15 +120,26 @@ jobs:
             mingw-w64-x86_64-make
       - name: Set up Bazelisk
         uses: bazelbuild/setup-bazelisk@v3
-      - name: Mount bazel disk cache
-        uses: actions/cache@v3
+      - name: Configure Bazel caches
+        run: |
+          printf 'build --disk_cache=C:/bazel-ci-cache/disk\nbuild --repository_cache=C:/bazel-ci-cache/repo\n' > .bazelrc.local
+      - name: Restore Bazel caches
+        id: bazel-cache
+        uses: actions/cache/restore@v4
         with:
-          path: C:/bazel-disk-cache
-          key: bazel_windows-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc') }}
-          restore-keys: bazel_windows-
-      - name: Use the disk cache
-        run: echo "build --disk_cache=C:/bazel-disk-cache" > .bazelrc.local
+          path: C:/bazel-ci-cache
+          key: bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-${{ github.run_id }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
       # //... skips the targets that are Linux/macOS-only (autotools builds).
       - run: bazel build //...
       - run: bazel test //...
-
+      # Save even when the build failed so progress (e.g. finished dependency
+      # builds) is not lost; main only, see the Linux job.
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: C:/bazel-ci-cache
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}

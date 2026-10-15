@@ -98,6 +98,20 @@ cc_library(
     ]
 )
 
+# Evaluation, time events and specialization of hybrid (discrete + continuous) models.
+cc_library(
+    name = "sas_hybrid_model_lib",
+    hdrs = [
+        "HybridModel.h",
+    ],
+    srcs = [
+        "HybridModel.cpp",
+    ],
+    deps = [
+        ":sas_model_lib",
+    ]
+)
+
 # Semantic checks on a parsed model (undeclared ids, features the solver lacks).
 cc_library(
     name = "sas_model_checker_lib",
@@ -108,6 +122,7 @@ cc_library(
         "ModelChecker.cpp",
     ],
     deps = [
+        ":sas_hybrid_model_lib",
         ":sas_model_lib",
     ]
 )
@@ -131,5 +146,20 @@ cc_library(
     }) + [
         "//:superlu_lib",
         "//:libjsoncpp",
+    ]
+)
+
+# Time-event simulation of flat hybrid models on top of the semi-analytical solver.
+cc_library(
+    name = "sas_hybrid_sim_lib",
+    hdrs = [
+        "HybridSimulator.h",
+    ],
+    srcs = [
+        "HybridSimulator.cpp",
+    ],
+    deps = [
+        ":sas_computation_lib",
+        ":sas_hybrid_model_lib",
     ]
 )

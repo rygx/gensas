@@ -31,7 +31,7 @@ bazel-bin/app/app -p -f resources/psat_mat/d_70k_070.mat -s 0.5 -l 28 -d 1e-5 -o
 ```
 
 ### ModelicaSAS
-Currently, ModelicaSAS supports simulation of a single Modelica .mo model without discrete events. The simulation can be called as follows:
+ModelicaSAS simulates a single flat Modelica .mo model. Besides continuous `Real` variables, parameters, `der()` and algebraic equations, it supports a hybrid subset driven by time events: `Integer`/`Boolean`/`discrete` variables, `if` expressions and `if` equations whose conditions depend only on parameters and discrete variables, and `when time >= e` / `when sample(start, interval)` equations with discrete assignments (`d = expr;`) and `reinit(x, expr);`. State events (conditions on continuous variables) are not supported yet and are reported as errors. See `resources/mofile/test_hybrid_time_events.mo`. The simulation can be called as follows:
 
 ```bash
 bazel-bin/app/app -g \

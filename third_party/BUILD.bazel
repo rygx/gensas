@@ -37,58 +37,6 @@ cc_test(
 )
 
 cc_binary(
-    name = "test_szcomp",
-    srcs=[
-        "TestSzLib.cc",
-    ],
-    deps = [
-        "//:libaec"
-    ],
-)
-
-cc_binary(
-    name = "test_zlib",
-    srcs=[
-        "TestZlib.cc",
-    ],
-    deps = [
-        "//:z_lib"
-    ],
-)
-
-cc_library(
-    name = "libaec_lib",
-    hdrs = [
-        "TestLibAec.h",
-    ],
-    deps = [
-        "//:libaec",
-    ],
-)
-
-cc_binary(
-    name = "test_hdf5_compress",
-    srcs=[
-        "TestHdf5.cc",
-    ],
-    deps = [
-        "//:hdf5_lib"
-    ],
-)
-
-
-cc_binary(
-    name = "run_matio",
-    srcs = [
-        "TestLibMatio.cc",
-    ],
-    deps = select({
-        "//:windows": ["//:libmatio_lib_cmake"],
-        "//conditions:default": ["//:libmatio_lib"],
-    })
-)
-
-cc_binary(
     name = "run_pctimer",
     srcs = [
         "TestPcTimer.cc",

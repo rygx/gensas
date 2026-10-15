@@ -24,7 +24,7 @@ Header `time,<continuous variables>,<discrete variables>`, then one row per samp
 
 ## MAT (`-o`)
 
-MATLAB level 5 file, readable by MATLAB, Octave, SciPy (`scipy.io.loadmat`) and matio without HDF5.
+MATLAB level 5 file, readable by MATLAB, Octave, SciPy (`scipy.io.loadmat`) and matio; the writer is `io/Mat5Writer`, with no third-party code.
 
 | Variable | Content |
 |----------|---------|
@@ -37,4 +37,4 @@ MATLAB level 5 file, readable by MATLAB, Octave, SciPy (`scipy.io.loadmat`) and 
 
 ## In code
 
-`buildResult(solutionSet, interval)` in `sas/SasResult.h` returns a `SasResult`; `makeResultWriter("json" | "csv")` and `makeMatResultWriter()` (`sas/SasResultMat.h`, the only part that needs matio) write it. New formats implement `ResultWriter`.
+`buildResult(solutionSet, interval)` in `sas/SasResult.h` returns a `SasResult`; `makeResultWriter("json" | "csv")` and `makeMatResultWriter()` (`sas/SasResultMat.h`) write it. New formats implement `ResultWriter`.

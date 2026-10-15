@@ -41,4 +41,4 @@ Each matrix is an array of rows. Both encodings are recognized automatically by 
 
 ## Notes
 
-Direct reading of PSAT `.mat` files is a transitional feature and is removed together with matio and HDF5.
+The solver reads no `.mat` files: it has no matio, HDF5 or zlib dependency. MATLAB, Octave and SciPy read the `.mat` result files it writes (level 5 format).

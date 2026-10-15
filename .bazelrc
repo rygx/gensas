@@ -42,12 +42,12 @@ build:windows --action_env=BAZEL_SH=C:/msys64/usr/bin/bash.exe
 build:windows --action_env=PATH=C:/msys64/mingw64/bin;C:/msys64/usr/bin;C:/Windows/System32;C:/Windows
 build:windows --host_action_env=PATH=C:/msys64/mingw64/bin;C:/msys64/usr/bin;C:/Windows/System32;C:/Windows
 # GCC 15+ (current MSYS2) defaults to C23, where `f()` means "no arguments";
-# the older C code of OpenBLAS (f2c LAPACK), HDF5, SuperLU, ... then fails to
+# the older C code of OpenBLAS (f2c LAPACK), SuperLU, ... then fails to
 # compile ("too many arguments to function").  rules_foreign_cc forwards
 # --conlyopt to the C flags of the CMake-built dependencies (not to C++).
 build:windows --conlyopt=-std=gnu17
 # GCC 14+ also turned several old-C diagnostics into hard errors.  The bundled
-# third-party C code (OpenBLAS' f2c LAPACK, HDF5, ...) predates that; keep these
+# third-party C code (OpenBLAS' f2c LAPACK, ...) predates that; keep these
 # as warnings, as they were with the GCC versions those libraries target.  E.g.
 # OpenBLAS 0.3.23 passes a float* to a double helper in spstrf/cpstrf and calls
 # XBLAS helpers it never provides (both in routines this application does not use).

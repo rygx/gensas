@@ -23,7 +23,7 @@ jobs:
         run: |
           ls ${{ github.workspace }}
       # Bazel's disk cache holds action outputs (including the foreign_cc builds of
-      # OpenBLAS, HDF5, ...); the repository cache holds downloaded archives.
+      # OpenBLAS, SuperLU, ...); the repository cache holds downloaded archives.
       - name: Configure Bazel caches
         run: |
           printf 'build --disk_cache=%s/.bazel-ci-cache/disk\nbuild --repository_cache=%s/.bazel-ci-cache/repo\n' "$HOME" "$HOME" > .bazelrc.local
@@ -132,7 +132,7 @@ jobs:
           restore-keys: |
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
-      # //... skips the targets that are Linux/macOS-only (autotools builds).
+      # //... skips the targets that are Linux/macOS-only (e.g. pcre).
       - run: bazel build //...
       - run: bazel test //...
       # Save even when the build failed so progress (e.g. finished dependency

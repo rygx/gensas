@@ -77,7 +77,8 @@ Power flow can be run using the `-p` mode. There are sample input data represent
 
 An example for running the synthetic 210,000-bus system (use `app.exe` on Windows):
 ``` shell
-bazel-bin/app/app -p -f resources/psat_mat/d_210k.mat -l 25 -s 0.2 -o res.mat
+python3 scripts/psat_to_case.py resources/psat_mat/d_210k.mat d_210k.case   # needs numpy, scipy, h5py
+bazel-bin/app/app -p -f d_210k.case -l 25 -s 0.2 -o res.mat
 ```
 
 You should see output like
@@ -97,8 +98,7 @@ Computation time: 89.9048 s.
 
 Windows is built natively with the MSYS2 MinGW-w64 GCC toolchain (not MSVC); it
 has been verified with MSYS2 GCC 16.2 and Bazel 7.0.0.
-Dependencies that use autotools on Linux/macOS (HDF5, libmatio) and `make`
-(OpenBLAS) are built with CMake on Windows, and OpenBLAS is built with
+OpenBLAS (`make` on Linux/macOS) is built with CMake on Windows, and OpenBLAS is built with
 `C_LAPACK=ON`, so **no Fortran compiler is needed on Windows**. OpenBLAS is built
 for the `HASWELL` target (AVX2), so a CPU with AVX2 is required.
 
@@ -123,12 +123,13 @@ for the `HASWELL` target (AVX2), so a CPU with AVX2 is required.
    `C:\msys64`, copy those lines into `.bazelrc.local` and adjust the paths.
 4. Run, for example:
    ```shell
-   bazel-bin/app/app.exe -p -f resources/psat_mat/d_014_ind_zip1.mat -s 0.5 -l 28 -d 1e-5 -o out.mat
+   python scripts/psat_to_case.py resources/psat_mat/d_014_ind_zip1.mat d_014.case
+   bazel-bin/app/app.exe -p -f d_014.case -s 0.5 -l 28 -d 1e-5 -o out.mat
    ```
    or run `bash scripts/run_integration_test.sh`.
 
 Use `bazel build //app:app` rather than `//...` on Windows: targets that only make
-sense with the autotools build (e.g. `//:hdf5_lib`, `//:libaec`, `//:pcre`) are
+sense on Linux/macOS only (e.g. `//:pcre`) are
 marked incompatible and are skipped.
 
 ### Local overrides

@@ -133,7 +133,7 @@ namespace che {
 				void checkFunction(const string &n, int line) {
 					static const char *const supported[] = {"der", "sin", "cos", "exp", "sqrt", "inv", "log", "atan", "asin", "acos", "tan", "sinh", "cosh", "tanh", "log10", "atan2", NULL};
 					static const char *const piecewise[] = {"abs", "min", "max", "sign", "floor", NULL};
-					static const char *const events[] = {"pre", "edge", "change", "sample", "noEvent", "reinit", NULL};
+					static const char *const events[] = {"pre", "edge", "change", "sample", "initial", "noEvent", "reinit", NULL};
 					static const char *const terminateAssert[] = {"terminate", "assert", NULL};
 					if (inList(n, supported)) {
 						return;
@@ -228,6 +228,8 @@ namespace che {
 							return;
 						} else if (fn == "sample") {
 							report(line, "sample() can only be used as a when-condition");
+						} else if (fn == "initial") {
+							report(line, "initial() can only be used as the whole condition of a when-equation");
 						}
 						for (const AstNode *a = p->subs[1]; a != NULL; a = a->next) {
 							strictExpr(a, line, ctx);

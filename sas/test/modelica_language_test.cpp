@@ -180,6 +180,51 @@ static void testAtan2() {
 	CHECK_NEAR(lastValue(c.result(), "x"), std::exp(-0.75 * pi * c.result().time.back()), 1e-4);
 }
 
+// when initial() runs once at the start time.
+static void testWhenInitial() {
+	const char *src =
+		"model M\n"
+		"  discrete Real a(start = 0);\n"
+		"  Real x(start = 1);\n"
+		"equation\n"
+		"  der(x) = -a*x - x;\n"
+		"  when initial() then\n"
+		"    reinit(x, 2);\n"
+		"    a = 3;\n"
+		"  elsewhen time >= 1 then\n"
+		"    a = 0;\n"
+		"  end when;\n"
+		"end M;\n";
+	Simulation sim(job(src, 2.0));
+	CHECK(sim.run());
+	CHECK_EQ(sim.result().events.size(), (size_t)2);
+	if (sim.result().events.size() == 2) {
+		const SasEventRecord &first = sim.result().events[0];
+		CHECK_NEAR(first.time, 0.0, 1e-12);
+		CHECK_EQ(first.reinits.size(), (size_t)1);
+		CHECK_EQ(first.assignments.size(), (size_t)1);
+		CHECK_NEAR(sim.result().events[1].time, 1.0, 1e-9);
+	}
+	// x starts at 2, decays with rate 4 until t = 1, then with rate 1.
+	double t = sim.result().time.back();
+	CHECK_NEAR(lastValue(sim.result(), "x"), 2.0 * std::exp(-4.0) * std::exp(-(t - 1.0)), 1e-4);
+
+	// `or` in conditions (it was missing from the keyword table).
+	const char *either =
+		"model M\n  Real x(start = 1);\n  discrete Real a(start = 0);\nequation\n  der(x) = -x;\n  when x < 0.5 or x > 3 then\n    a = 1;\n  end when;\nend M;\n";
+	Simulation o(job(either, 2.0));
+	CHECK(o.run());
+	CHECK_EQ(o.result().events.size(), (size_t)1);
+	if (!o.result().events.empty()) {
+		CHECK_NEAR(o.result().events[0].time, std::log(2.0), 1e-6);
+	}
+
+	// initial() is only a when-condition by itself.
+	Simulation bad(job("model M\n  Real x(start = 1);\n  discrete Real a(start = 0);\nequation\n  der(x) = -x;\n  when initial() or x < 0.5 then\n    a = 1;\n  end when;\nend M;\n", 1.0));
+	CHECK(!bad.run());
+	CHECK(bad.error().find("initial()") != std::string::npos);
+}
+
 // noEvent(e) in a continuous equation is accepted; the switch is still located as an event.
 static void testNoEvent() {
 	const char *src =
@@ -373,6 +418,7 @@ static void testArrays() {
 
 int main() {
 	testAtan2();
+	testWhenInitial();
 	testArrays();
 	testSourceLayout();
 	testImplicitAlgebraicEquations();

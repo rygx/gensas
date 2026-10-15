@@ -121,6 +121,19 @@ namespace che {
 				expr = parseExpr(parser);
 				expect(parser, TK_RPAREN);
 				return expr;
+			case TK_K_INIT: { // initial(), the only use of the keyword in an expression
+				shared_ptr<IdPearl> fn = parser->currentModel->lookupIdentifier("initial", 7);
+				fn->idTy = ID_FUNC;
+				expr = new AstNode();
+				expr->ty = TY_FUNCTION;
+				expr->op = OP_ID;
+				expr->value.p = (decltype(expr->value.p))fn->str;
+				getNextToken(parser);
+				if (parser->currentToken != TK_LPAREN) {
+					parser->error("`initial` is a function: write initial().");
+				}
+				return expr;
+			}
 			case TK_LBRACE: { // array literal {a, b, ...}: the elements are linked through `next`
 				expr = new AstNode();
 				expr->op = OP_ARRAY;

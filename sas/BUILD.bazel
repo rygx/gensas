@@ -98,6 +98,20 @@ cc_library(
     ]
 )
 
+# Semantic checks on a parsed model (undeclared ids, features the solver lacks).
+cc_library(
+    name = "sas_model_checker_lib",
+    hdrs = [
+        "ModelChecker.h",
+    ],
+    srcs = [
+        "ModelChecker.cpp",
+    ],
+    deps = [
+        ":sas_model_lib",
+    ]
+)
+
 # TODO - rygx: verify armadillo works with superlu
 # can be done with a test solving an equation.
 cc_library(

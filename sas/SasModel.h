@@ -79,7 +79,10 @@ namespace che {
 			NK_ParameterStatement,
 			NK_InitialBlock,
 			NK_InitialCondition,
-			NK_EquationBlock
+			NK_EquationBlock,
+			NK_IfEquation,	 // subs[0]=condition; subs[1]=OP_BRANCH{ subs[0]=then-statements, subs[1]=else-statements }.
+							 // Statement lists are linked through `next`; `elseif` is desugared to a nested if in the else list.
+			NK_WhenEquation, // subs[0]=condition; subs[1]=OP_BRANCH{ subs[0]=body-statements, subs[1]=next `elsewhen` NK_WhenEquation or NULL }
 		} NodeKind;
 
 		typedef enum {
@@ -88,6 +91,7 @@ namespace che {
 			TY_INT,
 			TY_STR,
 			TY_FUNCTION,
+			TY_BOOL,
 		} Type;
 
 		typedef enum {
@@ -97,7 +101,8 @@ namespace che {
 			ID_IVAR,
 			ID_TMPVAR,
 			ID_MODEL,
-			ID_FUNC
+			ID_FUNC,
+			ID_DISC // discrete (Integer/Boolean/discrete Real) variable
 		} IdType;
 
 		enum Op {
@@ -128,6 +133,7 @@ namespace che {
 			int isfunc = 0;
 			int index = -1;
 			int pairIdx = -1;
+			int line = 0; // source line, set on if/when statement nodes (for diagnostics)
 			AstNode *subs[2] = {NULL, NULL};
 		};
 
@@ -144,6 +150,7 @@ namespace che {
 			int depth = 0;
 			EqnType eqnType = EQN_NONE;
 			int eqnIdx = -1;
+			int line = 0; // source line of the statement (for diagnostics)
 
 			AstTree() {
 				pHead = NULL;
@@ -173,6 +180,7 @@ namespace che {
 			bool initVal = false;
 			bool initDer = false;
 			int index = -1;
+			int line = 0; // source line of the declaration (for diagnostics)
 
 			IdPearl(const unsigned char *s, int sz, const unsigned char *ann, const unsigned char *un, Type ty, IdType idTy);
 

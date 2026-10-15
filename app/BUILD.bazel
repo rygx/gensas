@@ -12,6 +12,7 @@ cc_binary(
         "//io:mat_psat_rw_lib",
         "//sas:sas_expr_parser_lib",
         "//sas:sas_model_parser_lib",
+        "//sas:sas_model_checker_lib",
         "@nvwa//:nvwa_pctimer_headers",
     ],
     env = {

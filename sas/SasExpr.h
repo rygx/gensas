@@ -39,6 +39,10 @@ namespace che {
 
 		AstNode *parseExpr(SasModelParser *parser);
 
+		// Like parseExpr() but without the comma operator and without a top-level `=`:
+		// a single value expression (attribute values, bindings, conditions).
+		AstNode *parseValueExpr(SasModelParser *parser);
+
 		void parseSingleSasModel(SasModelParser *parser);
 	} // namespace core
 } // namespace che

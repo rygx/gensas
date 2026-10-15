@@ -6,7 +6,10 @@
 #include "sas/SasLexico.h"
 #include "sas/test/test_util.h"
 
+#include "json/json.h"
+
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -377,7 +380,68 @@ static void testZenoIsReported() {
 	delete sol;
 }
 
+// The JSON result carries the discrete variables (sampled per solution segment, so the two samples at an
+// event time show the values before and after) and the list of events.
+static void testJsonResult() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  discrete Real a(start = 1);\n"
+				  "  Real x(start = 1);\n"
+				  "equation\n"
+				  "  der(x) = -a*x;\n"
+				  "  when time >= 1 then\n"
+				  "    a = 3;\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	const char *fileName = "hybrid_sim_result.json";
+	run.sol->writeJSONFile(fileName, 0.25);
+	std::ifstream in(fileName);
+	Json::Value root;
+	Json::CharReaderBuilder builder;
+	std::string errs;
+	CHECK(Json::parseFromStream(builder, in, &root, &errs));
+	CHECK(root.isMember("time") && root.isMember("x") && root.isMember("discrete") && root.isMember("events"));
+	if (!(root.isMember("time") && root.isMember("x") && root.isMember("discrete") && root.isMember("events"))) {
+		return;
+	}
+	const Json::Value &time = root["time"];
+	const Json::Value &a = root["discrete"]["a"];
+	CHECK_EQ(a.size(), time.size());
+	CHECK(time.size() >= 8);
+	int nBefore = 0;
+	int nAfter = 0;
+	for (Json::ArrayIndex i = 0; i < time.size() && i < a.size(); i++) {
+		double ti = time[i].asDouble();
+		double ai = a[i].asDouble();
+		if (ti < 1.0 - 1e-9) {
+			CHECK_NEAR(ai, 1.0, 0.0);
+			nBefore++;
+		} else if (ti > 1.0 + 1e-9) {
+			CHECK_NEAR(ai, 3.0, 0.0);
+			nAfter++;
+		}
+	}
+	CHECK(nBefore >= 3 && nAfter >= 3);
+	// At t = 1 two samples exist: before (a = 1) and after (a = 3) the event.
+	int atEvent = 0;
+	for (Json::ArrayIndex i = 0; i < time.size() && i < a.size(); i++) {
+		if (std::fabs(time[i].asDouble() - 1.0) < 1e-9) {
+			CHECK_NEAR(a[i].asDouble(), atEvent == 0 ? 1.0 : 3.0, 0.0);
+			atEvent++;
+		}
+	}
+	CHECK_EQ(atEvent, 2);
+	CHECK_EQ(root["events"].size(), (Json::ArrayIndex)1);
+	CHECK_NEAR(root["events"][0]["time"].asDouble(), 1.0, 1e-12);
+	CHECK_NEAR(root["events"][0]["assignments"]["a"].asDouble(), 3.0, 0.0);
+}
+
 int main() {
+	testJsonResult();
 	testZenoIsReported();
 	testBouncingBall();
 	testThermostat();

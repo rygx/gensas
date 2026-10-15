@@ -73,9 +73,29 @@ namespace che {
 			virtual ~SasSolution();
 		};
 
+		// An event of a hybrid simulation: the discrete variables it assigned and the continuous
+		// variables it reinitialized.
+		struct SasEventRecord {
+			double time = 0.0;
+			std::vector<std::pair<std::string, double>> assignments;
+			std::vector<std::pair<std::string, double>> reinits;
+		};
+
+		// Values of the discrete variables after the events at each time in `times`; the first entry is
+		// the state at the start time. values[k][i] belongs to names[i].
+		struct SasDiscreteTrace {
+			std::vector<std::string> names;
+			std::vector<double> times;
+			std::vector<std::vector<double>> values;
+		};
+
 		class SasSolutionSet {
 		public:
 			SasSolutionSet();
+
+			// Hybrid simulations only: the events that fired and the discrete variables over time.
+			std::vector<SasEventRecord> events;
+			SasDiscreteTrace discrete;
 
 			std::list<std::shared_ptr<SasSolution>> solutionLink;
 

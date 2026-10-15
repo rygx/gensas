@@ -81,6 +81,11 @@ namespace che {
 					// sin, cos, exp, sqrt, inv, log, atan, asin, acos, tan, sinh, cosh, tanh, log10
 				} else if (name == "abs") {
 					out = fabs(a);
+				} else if (name == "atan2") {
+					if (second == NULL || !evalConst(second, model, b)) {
+						return false;
+					}
+					out = atan2(a, b);
 				} else if (name == "min" || name == "max" || name == "pow") {
 					if (second == NULL || !evalConst(second, model, b)) {
 						return false;

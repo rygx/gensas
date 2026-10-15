@@ -248,6 +248,7 @@ namespace che {
 				{"cosh", 4, TK_F_COSH},
 				{"tanh", 4, TK_F_TANH},
 				{"log10", 5, TK_F_LOG10},
+				{"atan2", 5, TK_F_ATAN2},
 				{NULL, 0, TK_ID}};
 
 		inline bool isDigit(char c) { return c >= '0' && c <= '9'; }

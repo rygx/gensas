@@ -239,6 +239,15 @@ namespace che {
 				{"reinit", 6, TK_F_REINIT},
 				{"terminate", 9, TK_F_TERMINATE},
 				{"assert", 6, TK_F_ASSERT},
+				{"log", 3, TK_F_LOG},
+				{"atan", 4, TK_F_ATAN},
+				{"asin", 4, TK_F_ASIN},
+				{"acos", 4, TK_F_ACOS},
+				{"tan", 3, TK_F_TAN},
+				{"sinh", 4, TK_F_SINH},
+				{"cosh", 4, TK_F_COSH},
+				{"tanh", 4, TK_F_TANH},
+				{"log10", 5, TK_F_LOG10},
 				{NULL, 0, TK_ID}};
 
 		inline bool isDigit(char c) { return c >= '0' && c <= '9'; }

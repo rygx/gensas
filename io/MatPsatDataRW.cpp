@@ -25,7 +25,7 @@
 // ***************************************************************************************************
 //
 #include "io/MatPsatDataRW.h"
-#include "matio.h"
+#include "io/CaseFile.h"
 #include <iostream>
 #include <cmath>
 
@@ -43,39 +43,45 @@ namespace che {
 			}
 
 			int MatPsatReader::parse(const char *filePath) {
-				mat_t *matfp;
-				matvar_t *matvar;
-				double *matdata;
-
-				matfp = Mat_Open(filePath, MAT_ACC_RDONLY);
-				if (NULL == matfp) {
-					cerr << "Error opening MAT file \"" << filePath << "\"!" << endl;
+				MatrixSet matrices;
+				string error;
+				if (!readCaseFile(filePath, matrices, error)) {
+					cerr << "Error reading case file: " << error << endl;
 					return CHE_IO_FAIL;
 				}
+				return parse(matrices);
+			}
+
+			int MatPsatReader::parse(const MatrixSet &matrices, PsatDataSet *psatData) {
+				this->psatData = psatData;
+				return parse(matrices);
+			}
+
+			int MatPsatReader::parse(const MatrixSet &matrices) {
+				const Matrix *matvar;
+				const double *matdata;
 
 				psatData->reset(); // Drop all existing data and get ready to obtain new data.
 
 #define NEXT_C matdata[IND2(row, col++, matvar->dims[0])]
 
 				// Read bus data
-				matvar = Mat_VarRead(matfp, "bus");
+				matvar = matrices.find("bus");
 				if (matvar == NULL) {
 					cerr << "Does not contain bus data." << endl;
 					return CHE_IO_FAIL;
 				}
 				if (matvar->rank != 2) {
 					cerr << "Bus data rank not 2." << endl;
-					Mat_VarFree(matvar);
 					return CHE_IO_FAIL;
 				}
 				if (matvar->dims[1] != 6) {
 					cerr << "Expect 6 columns in bus data." << endl;
-					Mat_VarFree(matvar);
 					return CHE_IO_FAIL;
 				}
 
 				psatData->nBus = matvar->dims[0];
-				matdata = (double *)matvar->data;
+				matdata = matvar->values.data();
 				if (psatData->nBus > 0) {
 					psatData->buses = new Bus[psatData->nBus];
 					for (int row = 0; row < psatData->nBus; row++) {
@@ -88,24 +94,21 @@ namespace che {
 						psatData->buses[row].regionNumber = (int)NEXT_C;
 					}
 				}
-				Mat_VarFree(matvar);
 
 				// Read SW data
-				matvar = Mat_VarRead(matfp, "sw");
+				matvar = matrices.find("sw");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "SW data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 13) {
 						cerr << "Expect 13 columns in SW data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nSw = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nSw > 0) {
 						psatData->sws = new SW[psatData->nSw];
 						for (int row = 0; row < psatData->nSw; row++) {
@@ -125,25 +128,22 @@ namespace che {
 							psatData->sws[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read PV data
-				matvar = Mat_VarRead(matfp, "pv");
+				matvar = matrices.find("pv");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "PV data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 11) {
 						cerr << "Expect 11 columns in PV data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nPv = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nPv > 0) {
 						psatData->pvs = new PV[psatData->nPv];
 						for (int row = 0; row < psatData->nPv; row++) {
@@ -161,25 +161,22 @@ namespace che {
 							psatData->pvs[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read PQ data
-				matvar = Mat_VarRead(matfp, "pq");
+				matvar = matrices.find("pq");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "PQ data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 9) {
 						cerr << "Expect 9 columns in PQ data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nPq = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nPq > 0) {
 						psatData->pqs = new PQ[psatData->nPq];
 						for (int row = 0; row < psatData->nPq; row++) {
@@ -195,25 +192,22 @@ namespace che {
 							psatData->pqs[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read Shunt data
-				matvar = Mat_VarRead(matfp, "shunt");
+				matvar = matrices.find("shunt");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "Shunt data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 7) {
 						cerr << "Expect 7 columns in Shunt data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nShunt = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nShunt > 0) {
 						psatData->shunts = new Shunt[psatData->nShunt];
 						for (int row = 0; row < psatData->nShunt; row++) {
@@ -227,25 +221,22 @@ namespace che {
 							psatData->shunts[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read Line data
-				matvar = Mat_VarRead(matfp, "line");
+				matvar = matrices.find("line");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "Line data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 16) {
 						cerr << "Expect 16 columns in Line data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nLine = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nLine > 0) {
 						psatData->lines = new Line[psatData->nLine];
 						for (int row = 0; row < psatData->nLine; row++) {
@@ -268,25 +259,22 @@ namespace che {
 							psatData->lines[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read ZIP data
-				matvar = Mat_VarRead(matfp, "zip");
+				matvar = matrices.find("zip");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "Zip data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 12) {
 						cerr << "Expect 12 columns in Zip data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nPl = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nPl > 0) {
 						psatData->pls = new Pl[psatData->nPl];
 						for (int row = 0; row < psatData->nPl; row++) {
@@ -305,25 +293,22 @@ namespace che {
 							psatData->pls[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read Syn data
-				matvar = Mat_VarRead(matfp, "syn");
+				matvar = matrices.find("syn");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "Syn data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] < 19) {
 						cerr << "Expect >=19 columns in Syn data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nSyn = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nSyn > 0) {
 						psatData->syns = new Syn[psatData->nSyn];
 						for (int row = 0; row < psatData->nSyn; row++) {
@@ -358,25 +343,22 @@ namespace che {
 							psatData->syns[row].status = (matvar->dims[1] >= 28) ? (unsigned char)NEXT_C : 1;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read Ind data
-				matvar = Mat_VarRead(matfp, "ind");
+				matvar = matrices.find("ind");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "Ind data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 20) {
 						cerr << "Expect 20 columns in Ind data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nInd = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nInd > 0) {
 						psatData->inds = new Ind[psatData->nInd];
 						for (int row = 0; row < psatData->nInd; row++) {
@@ -403,25 +385,22 @@ namespace che {
 							psatData->inds[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read Tg data
-				matvar = Mat_VarRead(matfp, "tg");
+				matvar = matrices.find("tg");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "Tg data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] < 8) {
 						cerr << "Expect at least 8 columns in Tg data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nTg = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nTg > 0) {
 						psatData->tgs = new Tg[psatData->nTg];
 						for (int row = 0; row < psatData->nTg; row++) {
@@ -431,7 +410,6 @@ namespace che {
 							if (psatData->tgs[row].tgType == 1) {
 								if (matvar->dims[1] < 11) {
 									cerr << "Expect at least 11 columns in Tg1 data." << endl;
-									Mat_VarFree(matvar);
 									return CHE_IO_FAIL;
 								}
 								psatData->tgs[row].tgData.tg1.wref0 = NEXT_C;
@@ -458,25 +436,22 @@ namespace che {
 							psatData->tgs[row].status = (matvar->dims[1] >= 12) ? (unsigned char)NEXT_C : 1;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
 
 				// Read Esc data
-				matvar = Mat_VarRead(matfp, "exc");
+				matvar = matrices.find("exc");
 				if (matvar != NULL) {
 					if (matvar->rank != 2) {
 						cerr << "Exc data rank not 2." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 					if (matvar->dims[1] != 14) {
 						cerr << "Expect 14 columns in Exc data." << endl;
-						Mat_VarFree(matvar);
 						return CHE_IO_FAIL;
 					}
 
 					psatData->nExc = matvar->dims[0];
-					matdata = (double *)matvar->data;
+					matdata = matvar->values.data();
 					if (psatData->nExc > 0) {
 						psatData->excs = new Exc[psatData->nExc];
 						for (int row = 0; row < psatData->nExc; row++) {
@@ -524,10 +499,7 @@ namespace che {
 							psatData->excs[row].status = (unsigned char)NEXT_C;
 						}
 					}
-					Mat_VarFree(matvar);
 				}
-
-				Mat_Close(matfp);
 
 				return CHE_IO_SUCCESS;
 			}

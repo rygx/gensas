@@ -134,6 +134,36 @@ else
   check_fingerprint "d_014_ind_zip1" "${SMALL_OUTPUT}" 153 4.061145417 11.64662517
 fi
 
+# ── Case files: the converted PSAT data gives the same results ──────────────
+# scripts/psat_to_case.py needs python with numpy, scipy and h5py.
+PY="$(command -v python3 || command -v python || true)"
+CASE_DIR="gensas_integration_cases"
+rm -rf "${REPO_DIR}/${CASE_DIR}"
+mkdir -p "${REPO_DIR}/${CASE_DIR}"
+run_case() {
+  local name="$1" want_n="$2" want_norm="$3" want_sum="$4"
+  if [ -z "${PY}" ] || ! "${PY}" scripts/psat_to_case.py "resources/psat_mat/${name}.mat" "${CASE_DIR}/${name}.case" >/dev/null; then
+    echo "FAIL: ${name}: could not convert the PSAT file to a case file (python3 with numpy, scipy and h5py required)"
+    PASS=0
+    return
+  fi
+  local out code
+  set +e
+  out=$("${APP_BIN}" -p -f "${INPUT_DIR}/${CASE_DIR}/${name}.case" -s 0.5 -l 28 -d 1e-5 -o "gensas_integration_test_case.mat" 2>&1)
+  code=$?
+  set -e
+  rm -f "${REPO_DIR}/gensas_integration_test_case.mat"
+  if [ "${code}" -ne 0 ]; then
+    echo "FAIL: ${name}.case: app exited with code ${code}"
+    PASS=0
+  else
+    check_fingerprint "${name}.case" "${out}" "${want_n}" "${want_norm}" "${want_sum}"
+  fi
+}
+run_case d_014_ind_zip1 153 4.061145417 11.64662517
+run_case d_70k_070 490000 282.7520234 69169.68943
+rm -rf "${REPO_DIR}/${CASE_DIR}"
+
 # ── Check 4: output .mat file exists and is non-empty ───────────────────────
 if [ -f "${OUTPUT_MAT}" ]; then
   MAT_SIZE=$(wc -c < "${OUTPUT_MAT}")

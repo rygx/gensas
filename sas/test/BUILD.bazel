@@ -113,3 +113,14 @@ cc_test(
         "//conditions:default": ["//:libmatio_lib"],
     }),
 )
+
+# GenSAS case files (binary and JSON) and the PSAT reader on top of them.
+cc_test(
+    name = "case_file_test",
+    srcs = ["case_file_test.cpp"],
+    deps = [
+        ":test_util",
+        "//io:case_file_lib",
+        "//io:mat_psat_rw_lib",
+    ],
+)

@@ -28,6 +28,7 @@
 #define _Che_MatPsatDataRW_H_
 
 #include "io/CheIoDefs.h"
+#include "io/CaseFile.h"
 #include "io/CheDataFormat.h"
 
 namespace che {
@@ -39,9 +40,15 @@ namespace che {
 
 				MatPsatReader(PsatDataSet *psatData) { this->psatData = psatData; }
 
+				// Reads a GenSAS case file (see doc/CaseFormat.md).
 				int parse(const char *filePath);
 
 				int parse(const char *filePath, PsatDataSet *psatData);
+
+				// Builds the data set from the matrices of a case.
+				int parse(const MatrixSet &matrices);
+
+				int parse(const MatrixSet &matrices, PsatDataSet *psatData);
 
 			private:
 				PsatDataSet *psatData;

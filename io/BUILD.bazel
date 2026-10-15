@@ -47,6 +47,37 @@ cc_library(
     ],
 )
 
+# GenSAS case files (binary and JSON encodings of the PSAT matrices).
+cc_library(
+    name = "case_file_lib",
+    hdrs = [
+        "CaseFile.h",
+    ],
+    srcs = [
+        "CaseFile.cpp",
+    ],
+    deps = [
+        "//:libjsoncpp",
+    ]
+)
+
+# Transitional: reads PSAT .mat files with matio (removed once the case format is the only input).
+cc_library(
+    name = "legacy_mat_loader_lib",
+    hdrs = [
+        "LegacyMatLoader.h",
+    ],
+    srcs = [
+        "LegacyMatLoader.cpp",
+    ],
+    deps = [
+        ":case_file_lib",
+    ] + select({
+        "//:windows": ["//:libmatio_lib_cmake"],
+        "//conditions:default": ["//:libmatio_lib"],
+    })
+)
+
 cc_library(
     name = "mat_psat_rw_lib",
     hdrs = [
@@ -56,12 +87,10 @@ cc_library(
         "MatPsatDataRW.cpp",
     ],
     deps = [
+        ":case_file_lib",
         ":che_io_defs_header",
         ":che_data_format_lib",
-    ] + select({
-        "//:windows": ["//:libmatio_lib_cmake"],
-        "//conditions:default": ["//:libmatio_lib"],
-    })
+    ]
 )
 
 cc_library(

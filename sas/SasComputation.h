@@ -30,6 +30,7 @@
 #include "sas/SasConfig.h"
 #include "sas/SasInput.h"
 #include "sas/SasLexico.h"
+#include <functional>
 #include <list>
 #include <vector>
 #include "util/AbstractCheCalculator.h"
@@ -45,6 +46,7 @@ namespace che {
 		};
 
 		class SasComputationModel;
+		class SasSolution;
 
 		class SasComputationOptions {
 		public:
@@ -54,6 +56,9 @@ namespace che {
 			double alphaTol = 1e-4;
 			double errorTol = 1e-6;
 			int nLvl = 15;
+			// Called with each solution segment right after it was computed. If it returns true, solve()
+			// stops after this segment (used to cut the simulation at a detected event).
+			std::function<bool(const std::shared_ptr<SasSolution> &)> onSolution;
 		};
 
 		class SasSolution {

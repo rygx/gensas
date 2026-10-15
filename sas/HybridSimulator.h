@@ -37,12 +37,19 @@
 namespace che {
 	namespace core {
 
-		// Simulates a flat hybrid model with time events. Between events the model is specialized for
-		// the current discrete state (see specializeModel) and solved with the semi-analytical solver;
-		// at each event the when-equations run, discrete variables and continuous states are updated, and
-		// the next segment starts from the new state.
+		// Simulates a flat hybrid model with time and state events. Between events the model is
+		// specialized for the current discrete state (see specializeModel) and solved with the
+		// semi-analytical solver; at each event the when-equations run, discrete variables and continuous
+		// states are updated, and the next segment starts from the new state.
 		//
-		// The model must have passed checkModel() with `timeEventsOnly` set.
+		// Time events (`time >= e`, `sample(...)`) are scheduled exactly. State events are conditions on
+		// continuous variables or `time`; they are detected by sampling each solution segment and are
+		// located by bisection on the Pade solution. A condition that flips true -> false needs no
+		// action; a when-condition that flips false -> true fires, and an if-condition that flips
+		// switches the mode of the model for the next segment. Crossings that start and end within one
+		// sample interval of a segment are not detected (see setGuardSamples).
+		//
+		// The model must have passed checkModel() with `timeEventsOnly` (and `stateEvents`) set.
 		class HybridSimulator {
 		public:
 			explicit HybridSimulator(std::shared_ptr<SasModel> model);
@@ -62,12 +69,16 @@ namespace che {
 			// Number of solver segments (between events) that were run.
 			int segmentCount() const { return nSegments; }
 
+			// Number of samples per solution segment used to detect state events (default 48).
+			void setGuardSamples(int n) { guardSamples = n < 2 ? 2 : n; }
+
 		private:
 			std::shared_ptr<SasModel> model;
 			std::string err;
 			std::vector<HybridEvent> firedEvents;
 			std::map<std::string, double> finalVals;
 			int nSegments = 0;
+			int guardSamples = 48;
 
 			bool fail(const std::string &msg);
 		};

@@ -53,6 +53,11 @@ namespace che {
 			}
 
 			HybridEnv env = makeHybridEnv(*model);
+			vector<Guard> guards = collectGuards(*model, env); // before the continuous variables enter env
+			bool hasDynamic = false;
+			for (const Guard &g : guards) {
+				hasDynamic = hasDynamic || g.dynamic;
+			}
 			// Start values of the continuous variables, for event expressions at the start time.
 			for (const shared_ptr<IdPearl> &id : model->idTable) {
 				if ((id->idTy == ID_VAR || id->idTy == ID_IVAR) && id->str != NULL) {
@@ -63,8 +68,17 @@ namespace che {
 			unique_ptr<SasSolutionSet> total(new SasSolutionSet());
 			map<string, double> state; // continuous variables by name, from the previous segment and reinits
 			vector<string> stateNames; // names of the continuous variables, to detect structure changes
+			map<int, bool> cur;		   // truth of the dynamic guards
+			int closeEvents = 0;	   // consecutive events within 1e-8 of each other, to detect chattering
+			double lastEventT = -1.0;  // times of the last two handled events (< 0: none), to size the
+			double prevEventT = -1.0;  // detection sampling after an event
+
 			const double endTol = 1e-9 * max(1.0, fabs(options.endTime));
 			double t = options.startTime;
+			env.time = t;
+			if (!evalGuards(guards, env, cur, err)) {
+				return NULL;
+			}
 
 			auto record = [&](const HybridEvent &ev) {
 				if (ev.assignments.empty() && ev.reinits.empty()) {
@@ -77,30 +91,73 @@ namespace che {
 				firedEvents.push_back(ev);
 			};
 
-			// Events at the start time (sample() with start == startTime).
-			{
-				HybridEvent ev;
-				if (!fireEvents(clauses, env, t, true, ev, err)) {
-					return NULL;
+			// Runs the events at time T: time events (if `timeEvents`), sample() events at the start time
+			// (if `initial`) and the when-conditions that became true. Repeats while the event's own
+			// changes make further conditions true.
+			auto handleEvents = [&](double T, bool timeEvents, bool initial) -> bool {
+				env.time = T;
+				closeEvents = (lastEventT >= 0.0 && T - lastEventT < 1e-8 * (1.0 + fabs(T))) ? closeEvents + 1 : 0;
+				if (closeEvents >= 10) {
+					ostringstream os;
+					os << "events accumulate at t=" << T << " (chattering or Zeno behavior)";
+					fail(os.str());
+					return false;
 				}
-				record(ev);
+				prevEventT = lastEventT;
+				lastEventT = T;
+				for (const pair<const string, double> &s : state) {
+					env.values[s.first] = s.second;
+				}
+				set<int> fired;
+				for (int iter = 0; iter < 50; iter++) {
+					map<int, bool> now;
+					if (!evalGuards(guards, env, now, err)) {
+						return false;
+					}
+					fired.clear();
+					for (const Guard &g : guards) {
+						if (g.dynamic && g.kind == G_WHEN && now[g.id] && !cur[g.id]) {
+							fired.insert(g.id);
+						}
+					}
+					cur = now;
+					bool timeNow = (iter == 0) && (timeEvents || initial);
+					if (fired.empty() && !timeNow) {
+						return true;
+					}
+					HybridEvent ev;
+					if (!fireEvents(clauses, env, T, initial && iter == 0, ev, err, &fired, !timeNow)) {
+						return false;
+					}
+					record(ev);
+				}
+				ostringstream os;
+				os << "event iteration does not converge at t=" << T;
+				fail(os.str());
+				return false;
+			};
+
+			if (!handleEvents(t, false, true)) { // sample() events at the start time
+				return NULL;
 			}
 
 			const size_t maxEvents = 1000000;
+			int stuck = 0; // consecutive iterations that hardly advance the time
 			while (true) {
 				double te = 0.0;
 				bool hasEvent = nextEventTime(clauses, env, t, te, err);
 				if (!err.empty()) {
 					return NULL;
 				}
-				bool atEvent = hasEvent && te < options.endTime - endTol;
-				double segEnd = atEvent ? te : options.endTime;
+				bool timeEvent = hasEvent && te < options.endTime - endTol;
+				double segEnd = timeEvent ? te : options.endTime;
+				double dynT = -1.0; // time of a detected state event, if any
 
 				if (segEnd - t > options.alphaTol) {
 					shared_ptr<SasComputationModel> comp = make_shared<SasComputationModel>();
 					comp->generateCompModel(model);
 					SasModel &cm = *comp->topModels.front();
-					if (!specializeModel(cm, env, err)) {
+					if (!specializeModel(cm, env, err, &cur)) {
 						return NULL;
 					}
 					for (const shared_ptr<IdPearl> &id : cm.idTable) {
@@ -119,9 +176,11 @@ namespace che {
 						return NULL;
 					}
 					vector<string> names;
+					vector<pair<string, int>> nameIdx;
 					for (const shared_ptr<IdPearl> &id : comp->idTable) {
 						if (id->idTy == ID_VAR || id->idTy == ID_IVAR) {
 							names.push_back((const char *)id->str);
+							nameIdx.push_back(make_pair(string((const char *)id->str), id->index));
 						}
 					}
 					if (!stateNames.empty() && names != stateNames) {
@@ -132,28 +191,129 @@ namespace che {
 					}
 					stateNames = names;
 
+					// State-event detection: samples the guards along each new solution segment.
+					HybridEnv scanEnv = env;
+					map<int, bool> scanCur = cur;
+					bool scanFailed = false;
+					auto truthAt = [&](const shared_ptr<SasSolution> &sol, double alpha, map<int, bool> &out) -> bool {
+						arma::vec v = sol->solution->getSolValue(alpha - sol->absStart);
+						for (const pair<string, int> &ni : nameIdx) {
+							if (ni.second >= 0 && ni.second < (int)v.n_rows) {
+								scanEnv.values[ni.first] = v(ni.second);
+							}
+						}
+						scanEnv.time = alpha;
+						if (!evalGuards(guards, scanEnv, out, err)) {
+							scanFailed = true;
+							return false;
+						}
+						return true;
+					};
+					// A guard has flipped if its truth differs from the tracked one, except when-conditions
+					// going true -> false, which only re-arm.
+					auto flipped = [&](const map<int, bool> &now) {
+						for (const Guard &g : guards) {
+							if (g.dynamic && now.at(g.id) != scanCur.at(g.id) && !(g.kind == G_WHEN && !now.at(g.id))) {
+								return true;
+							}
+						}
+						return false;
+					};
+
 					SasComputationOptions opts = options;
 					opts.startTime = t;
 					opts.endTime = segEnd;
+					if (hasDynamic) {
+						opts.onSolution = [&](const shared_ptr<SasSolution> &sol) -> bool {
+							double a0 = sol->absStart;
+							double a1 = sol->absEnd;
+							if (!(a1 > a0)) {
+								return false;
+							}
+							// Sample at least guardSamples times per segment. Right after an event the
+							// spacing is a fraction of the previous gap between events (bouncing and
+							// chattering systems have geometrically shrinking gaps) and then grows with
+							// the time since the event, so that quiet stretches stay cheap.
+							double span = a1 - a0;
+							double base = span / guardSamples;
+							double floorStep = base;
+							if (prevEventT >= 0.0 && lastEventT > prevEventT) {
+								floorStep = min(base, (lastEventT - prevEventT) / 8.0);
+							}
+							double prevA = a0;
+							for (int iter = 0; prevA < a1 && iter < 5000000; iter++) {
+								double step = min(base, max(floorStep, (prevA - a0) / 32.0));
+								double a = prevA + step;
+								if (a1 - a < 0.25 * step) {
+									a = a1;
+								}
+								a = min(a, a1);
+								map<int, bool> now;
+								if (!truthAt(sol, a, now)) {
+									return true;
+								}
+								if (!flipped(now)) {
+									for (const Guard &g : guards) { // re-arm
+										if (g.dynamic && g.kind == G_WHEN && !now[g.id]) {
+											scanCur[g.id] = false;
+										}
+									}
+									prevA = a;
+									continue;
+								}
+								double lo = prevA;
+								double hi = a;
+								for (int it = 0; it < 100 && hi - lo > 1e-13 * (1.0 + fabs(hi)); it++) {
+									double mid = 0.5 * (lo + hi);
+									map<int, bool> m;
+									if (!truthAt(sol, mid, m)) {
+										return true;
+									}
+									if (flipped(m)) {
+										hi = mid;
+									} else {
+										lo = mid;
+									}
+								}
+								dynT = hi;
+								return true;
+							}
+							return false;
+						};
+					}
 					unique_ptr<SasSolutionSet> sols(comp->solve(opts));
-					if (sols->solutionLink.empty()) {
+					if (scanFailed) {
+						return NULL;
+					}
+					if (dynT >= 0.0) {
+						segEnd = dynT;
+						while (!sols->solutionLink.empty() && sols->solutionLink.back()->absStart >= dynT) {
+							sols->solutionLink.pop_back();
+						}
+						if (!sols->solutionLink.empty()) {
+							sols->solutionLink.back()->absEnd = dynT;
+						}
+					} else if (sols->solutionLink.empty()) {
 						ostringstream os;
 						os << "the solver made no progress at t=" << t;
 						fail(os.str());
 						return NULL;
-					}
-					shared_ptr<SasSolution> last = sols->solutionLink.back();
-					if (segEnd - last->absEnd > 100.0 * options.alphaTol) {
+					} else if (segEnd - sols->solutionLink.back()->absEnd > 100.0 * options.alphaTol) {
 						ostringstream os;
-						os << "the solver stalled at t=" << last->absEnd << " before the segment end t=" << segEnd;
+						os << "the solver stalled at t=" << sols->solutionLink.back()->absEnd << " before the segment end t=" << segEnd;
 						fail(os.str());
 						return NULL;
+					} else {
+						shared_ptr<SasSolution> last = sols->solutionLink.back();
+						last->absEnd = max(last->absEnd, segEnd); // close the sub-tolerance gap
 					}
-					last->absEnd = max(last->absEnd, segEnd); // close the sub-tolerance gap
-					arma::vec v = last->solution->getSolValue(segEnd - last->absStart);
-					for (const shared_ptr<IdPearl> &id : comp->idTable) {
-						if ((id->idTy == ID_VAR || id->idTy == ID_IVAR) && id->index >= 0 && id->index < (int)v.n_rows) {
-							state[(const char *)id->str] = v(id->index);
+					if (!sols->solutionLink.empty()) {
+						shared_ptr<SasSolution> last = sols->solutionLink.back();
+						arma::vec v = last->solution->getSolValue(max(0.0, min(segEnd, last->absEnd) - last->absStart));
+						for (const shared_ptr<IdPearl> &id : comp->idTable) {
+							if ((id->idTy == ID_VAR || id->idTy == ID_IVAR) && id->index >= 0 && id->index < (int)v.n_rows) {
+								state[(const char *)id->str] = v(id->index);
+							}
 						}
 					}
 					for (const shared_ptr<SasSolution> &s : sols->solutionLink) {
@@ -161,21 +321,26 @@ namespace che {
 					}
 					total->keepAlive.push_back(comp);
 					nSegments++;
+					cur = scanCur; // truth at the end of the scanned part of the segment
 				}
 
-				if (!atEvent) {
+				bool dynEvent = dynT >= 0.0;
+				if (!timeEvent && !dynEvent) {
 					t = segEnd;
 					break;
 				}
-				t = segEnd;
-				for (const pair<const string, double> &s : state) {
-					env.values[s.first] = s.second;
-				}
-				HybridEvent ev;
-				if (!fireEvents(clauses, env, t, false, ev, err)) {
+				stuck = (segEnd - t < 1e-9 * (1.0 + fabs(t))) ? stuck + 1 : 0;
+				if (stuck > 1000) {
+					ostringstream os;
+					os << "the simulation does not advance at t=" << t << " (chattering or Zeno behavior)";
+					fail(os.str());
 					return NULL;
 				}
-				record(ev);
+				t = segEnd;
+				bool timeNow = timeEvent && (!dynEvent || fabs(dynT - te) <= 1e-9 * max(1.0, fabs(te)));
+				if (!handleEvents(t, timeNow, false)) {
+					return NULL;
+				}
 				if (firedEvents.size() > maxEvents) {
 					fail("too many events");
 					return NULL;

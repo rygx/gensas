@@ -313,6 +313,142 @@ static void testStrictChecker() {
 	}
 }
 
+static const char *kBallModel =
+	"model Ball\n"
+	"  parameter Real g = 9.81;\n"
+	"  Real h(start = 1);\n"
+	"  Real v(start = 0);\n"
+	"  Boolean up(start = false);\n"
+	"equation\n"
+	"  der(h) = v;\n"
+	"  der(v) = if up then -g else -2*g;\n"
+	"  when h < 0 then\n"
+	"    reinit(v, -0.5*pre(v));\n"
+	"    up = true;\n"
+	"  end when;\n"
+	"  when time >= 5 then\n"
+	"    up = false;\n"
+	"  end when;\n"
+	"end Ball;\n";
+
+static SolverFeatures stateFeatures() {
+	SolverFeatures f = hybridFeatures();
+	f.stateEvents = true;
+	return f;
+}
+
+static void testGuards() {
+	Parsed p;
+	parseInto(p, kBallModel);
+	CHECK_EQ(p.parser.errCount, 0);
+	HybridEnv env = makeHybridEnv(*p.model);
+	std::vector<Guard> guards = collectGuards(*p.model, env);
+	// if-expression on the discrete `up` (static), when h < 0 (dynamic), when time >= 5 (a time event).
+	CHECK_EQ(guards.size(), (size_t)3);
+	if (guards.size() == 3) {
+		CHECK(guards[0].kind == G_IFEXPR && !guards[0].dynamic);
+		CHECK(guards[1].kind == G_WHEN && guards[1].dynamic);
+		CHECK(guards[2].kind == G_WHEN && !guards[2].dynamic);
+	}
+	std::vector<WhenClause> clauses = collectWhenClauses(*p.model);
+	CHECK_EQ(clauses.size(), (size_t)2);
+	if (clauses.size() == 2) {
+		CHECK_EQ(clauses[0].links[0].guardId, 1);
+		CHECK_EQ(clauses[1].links[0].guardId, 2);
+	}
+
+	// evalGuards needs the continuous values.
+	env.values["h"] = -0.5;
+	env.values["v"] = -3.0;
+	std::map<int, bool> truth;
+	string err;
+	CHECK(evalGuards(guards, env, truth, err));
+	CHECK_EQ(truth.size(), (size_t)1);
+	CHECK(truth.count(1) == 1 && truth[1]);
+	env.values["h"] = 0.5;
+	CHECK(evalGuards(guards, env, truth, err));
+	CHECK(!truth[1]);
+
+	// A when-branch with a dynamic guard fires only if its guard is in the fired set.
+	std::set<int> fired;
+	HybridEvent ev;
+	CHECK(fireEvents(clauses, env, 1.0, false, ev, err, &fired, true));
+	CHECK(ev.assignments.empty() && ev.reinits.empty());
+	fired.insert(1);
+	env.values["v"] = -4.0;
+	CHECK(fireEvents(clauses, env, 1.0, false, ev, err, &fired, true));
+	CHECK_EQ(ev.reinits.size(), (size_t)1);
+	if (ev.reinits.size() == 1) {
+		CHECK_NEAR(ev.reinits[0].second, 2.0, 1e-12);
+	}
+	CHECK_NEAR(env.values["up"], 1.0, 0.0);
+	// Time events are not scheduled for state-event branches.
+	double te = 0;
+	CHECK(nextEventTime(clauses, env, 0.0, te, err));
+	CHECK_NEAR(te, 5.0, 1e-12);
+}
+
+static void testDynamicTruthSpecialization() {
+	const char *src =
+		"model M\n"
+		"  Real x(start = 0);\n"
+		"equation\n"
+		"  der(x) = if x < 1 then 1 else 0;\n"
+		"end M;\n";
+	for (int truth = 1; truth >= 0; truth--) {
+		Parsed p;
+		parseInto(p, src);
+		HybridEnv env = makeHybridEnv(*p.model);
+		std::vector<Guard> guards = collectGuards(*p.model, env);
+		CHECK_EQ(guards.size(), (size_t)1);
+		CHECK(guards.size() == 1 && guards[0].dynamic);
+		std::map<int, bool> dyn;
+		dyn[0] = truth != 0;
+		string err;
+		CHECK(specializeModel(*p.model, env, err, &dyn));
+		const AstNode *eq = p.model->modelTrees.front()->pHead;
+		CHECK_EQ(countNodes(eq, NULL, OP_IFEXPR), 0);
+		const AstNode *rhs = eq->subs[1];
+		CHECK(rhs != NULL && rhs->op == OP_CONST);
+		if (rhs) {
+			CHECK_NEAR(rhs->ty == TY_REAL ? rhs->value.d : (double)rhs->value.i[0], truth ? 1.0 : 0.0, 0.0);
+		}
+		// The guard ids survive copying through the index field of the if-expression node.
+		CHECK_EQ(countNodes(eq, "x", OP_NONE), 1); // only der(x)
+	}
+}
+
+static void testStateEventChecker() {
+	string text;
+	{
+		Parsed p;
+		parseInto(p, kBallModel);
+		std::ostringstream os;
+		CHECK_EQ(checkModel(*p.model, stateFeatures(), "test.mo", os), 0);
+		// Without stateEvents the state-event condition is rejected.
+		CHECK(check(p, text) > 0);
+		CHECK(contains(text, "when-condition must be `time >= e`"));
+	}
+	{
+		Parsed p;
+		parseInto(p, "model M\n  Real x(start=1);\nequation\n  der(x) = if x > 0 then -1 else 1;\nend M;\n");
+		std::ostringstream os;
+		CHECK_EQ(checkModel(*p.model, stateFeatures(), "test.mo", os), 0);
+	}
+	{
+		Parsed p;
+		parseInto(p, "model M\n  Real x(start=1);\nequation\n  der(x) = -abs(x);\nend M;\n");
+		std::ostringstream os;
+		CHECK(checkModel(*p.model, stateFeatures(), "test.mo", os) > 0); // still not allowed in continuous equations
+	}
+	{
+		Parsed p;
+		parseInto(p, "model M\n  Real x(start=1);\n  Boolean b(start=false);\nequation\n  der(x) = -x;\n  when edge(b) then\n    reinit(x, 1);\n  end when;\nend M;\n");
+		std::ostringstream os;
+		CHECK(checkModel(*p.model, stateFeatures(), "test.mo", os) > 0); // edge() is not supported yet
+	}
+}
+
 static void testNotHybrid() {
 	Parsed p;
 	parseInto(p, "model M\n  Real x(start=1);\nequation\n  der(x) = -x;\nend M;\n");
@@ -332,6 +468,9 @@ int main() {
 	testTimeEvents();
 	testInitialSampleAndReinit();
 	testStrictChecker();
+	testGuards();
+	testDynamicTruthSpecialization();
+	testStateEventChecker();
 	testNotHybrid();
 	return sastest::finish("hybrid_model_test");
 }

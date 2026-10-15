@@ -190,7 +190,7 @@ namespace che {
 						return;
 					}
 					if (p->op == OP_IFEXPR) {
-						strictExpr(p->subs[0], line, ctx == CTX_EVENT ? CTX_EVENT : CTX_COND);
+						strictExpr(p->subs[0], line, (ctx == CTX_EVENT || features.stateEvents) ? CTX_EVENT : CTX_COND);
 						if (p->subs[1] != NULL) {
 							strictExpr(p->subs[1]->subs[0], line, ctx);
 							strictExpr(p->subs[1]->subs[1], line, ctx);
@@ -232,7 +232,11 @@ namespace che {
 						}
 						TimeCond tc;
 						if (!classifyTimeCondition(w->subs[0], tc)) {
-							report(line, "when-condition must be `time >= e` or `sample(start, interval)`; state events are not supported yet");
+							if (!features.stateEvents) {
+								report(line, "when-condition must be `time >= e` or `sample(start, interval)`; state events are not supported yet");
+							} else {
+								strictExpr(w->subs[0], line, CTX_EVENT);
+							}
 						} else {
 							strictExpr(tc.a, line, CTX_COND);
 							strictExpr(tc.b, line, CTX_COND);
@@ -271,7 +275,7 @@ namespace che {
 								strictWhen(p, line);
 							}
 						} else if (p->nodeKind == NK_IfEquation) {
-							strictExpr(p->subs[0], line, CTX_COND);
+							strictExpr(p->subs[0], line, features.stateEvents ? CTX_EVENT : CTX_COND);
 							if (p->subs[1] != NULL) {
 								strictStatement(p->subs[1]->subs[0], line, false);
 								strictStatement(p->subs[1]->subs[1], line, false);

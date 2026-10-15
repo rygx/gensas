@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+env:
+  # Must match the Build checks workflow.
+  CACHE_VERSION: v1
+
 jobs:
   Integration-Test-Linux:
     runs-on: ubuntu-latest
@@ -12,11 +16,18 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-      - name: Mount bazel cache
-        uses: actions/cache@v3
+      - name: Configure Bazel caches
+        run: |
+          printf 'build --disk_cache=%s/.bazel-ci-cache/disk\nbuild --repository_cache=%s/.bazel-ci-cache/repo\n' "$HOME" "$HOME" > .bazelrc.local
+      # Restore only: the Build checks workflow saves these caches from main.
+      - name: Restore Bazel caches
+        uses: actions/cache/restore@v4
         with:
-          path: "~/.cache/bazel"
-          key: bazel_debian_integration-${{ hashFiles('WORKSPACE', 'BUILD.bazel') }}
+          path: ~/.bazel-ci-cache
+          key: bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-${{ github.run_id }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
       - name: Run integration test
         run: bash scripts/run_integration_test.sh
 
@@ -30,11 +41,18 @@ jobs:
         # gcc provides gfortran (required by armadillo/linear-algebra targets).
         # cmake is required by rules_foreign_cc cmake() rules.
         run: brew install gcc cmake
-      - name: Mount bazel cache
-        uses: actions/cache@v3
+      - name: Configure Bazel caches
+        run: |
+          printf 'build --disk_cache=%s/.bazel-ci-cache/disk\nbuild --repository_cache=%s/.bazel-ci-cache/repo\n' "$HOME" "$HOME" > .bazelrc.local
+      # Restore only: the Build checks workflow saves these caches from main.
+      - name: Restore Bazel caches
+        uses: actions/cache/restore@v4
         with:
-          path: "~/.cache/bazel"
-          key: bazel_macos_integration-${{ hashFiles('WORKSPACE', 'BUILD.bazel') }}
+          path: ~/.bazel-ci-cache
+          key: bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-${{ github.run_id }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
       - name: Run integration test
         run: bash scripts/run_integration_test.sh
 
@@ -70,13 +88,17 @@ jobs:
             mingw-w64-x86_64-make
       - name: Set up Bazelisk
         uses: bazelbuild/setup-bazelisk@v3
-      - name: Mount bazel disk cache
-        uses: actions/cache@v3
+      - name: Configure Bazel caches
+        run: |
+          printf 'build --disk_cache=C:/bazel-ci-cache/disk\nbuild --repository_cache=C:/bazel-ci-cache/repo\n' > .bazelrc.local
+      # Restore only: the Build checks workflow saves these caches from main.
+      - name: Restore Bazel caches
+        uses: actions/cache/restore@v4
         with:
-          path: C:/bazel-disk-cache
-          key: bazel_windows_integration-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc') }}
-          restore-keys: bazel_windows_integration-
-      - name: Use the disk cache
-        run: echo "build --disk_cache=C:/bazel-disk-cache" > .bazelrc.local
+          path: C:/bazel-ci-cache
+          key: bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-${{ github.run_id }}
+          restore-keys: |
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
+            bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
       - name: Run integration test
         run: bash scripts/run_integration_test.sh

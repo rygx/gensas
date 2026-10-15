@@ -34,7 +34,7 @@ struct Parsed {
 
 static void parseInto(Parsed &p, const std::string &src) {
 	p.parser.parseString(src.c_str());
-	p.model = GlobalPool::getInstance().createNewTopModel();
+	p.model = p.parser.pool.createNewTopModel();
 	p.parser.currentModel = p.model;
 	parseSingleSasModel(&p.parser);
 }

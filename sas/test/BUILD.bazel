@@ -68,6 +68,21 @@ cc_test(
     ],
 )
 
+# Several threads parse and solve independent models at the same time (no shared mutable state).
+cc_test(
+    name = "concurrent_run_test",
+    srcs = ["concurrent_run_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_computation_lib",
+        "//sas:sas_expr_parser_lib",
+        "//sas:sas_hybrid_sim_lib",
+        "//sas:sas_model_checker_lib",
+        "//sas:sas_model_parser_lib",
+        "//util:safe_armadillo_headers",
+    ],
+)
+
 # Solver with an algebraic equation (guards the Pade coefficient cache during AE calibration).
 cc_test(
     name = "dae_regression_test",

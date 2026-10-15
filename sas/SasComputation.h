@@ -109,7 +109,7 @@ namespace che {
 
 			SasComputationModel();
 
-			void generateCompModel(GlobalPool &);
+			void generateCompModel(ModelPool &);
 
 			// Copies a single model (and its equations) from the pool into this computation model.
 			void generateCompModel(const std::shared_ptr<SasModel> &);

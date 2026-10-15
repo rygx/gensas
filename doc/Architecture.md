@@ -88,6 +88,14 @@ survives copying the AST into the computation model.
   rely on that.
 * Segments shorter than `alphaTol` are not solved.
 
+### Re-entrancy
+
+There is no process-wide mutable state in the Modelica path: each `SasModelParser` owns a `ModelPool`
+(the top-level models it creates), string literals live in the model that owns the AST pointing at
+them, and every simulation works on its own `SasComputationModel`. Independent runs (parse, check,
+solve) may therefore execute on different threads at the same time; `concurrent_run_test` does this.
+A single model, parser or simulator is not thread safe and must stay on one thread.
+
 ## Testing
 
 * Unit tests live in `sas/test` and run in CI with `bazel test //...`.

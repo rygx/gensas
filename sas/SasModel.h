@@ -126,7 +126,7 @@ namespace che {
 		class AstNode {
 		public:
 			AstNode *next = NULL;
-			TokenValue value;
+			TokenValue value = {};
 			NodeKind nodeKind = NK_NA;
 			Op op = OP_NONE;
 			Type ty = TY_NULL;
@@ -174,8 +174,8 @@ namespace che {
 			unsigned char *unit = NULL;
 			Type ty = TY_NULL;
 			IdType idTy = ID_NONE;
-			NumValue value;
-			NumValue derVal;
+			NumValue value = {};
+			NumValue derVal = {};
 			IdPearl *pair = NULL;
 			bool initVal = false;
 			bool initDer = false;
@@ -216,6 +216,8 @@ namespace che {
 			std::vector<std::list<std::shared_ptr<IdPearl>>> idNecklaces;
 
 			std::list<std::shared_ptr<SasModel>> subModels;
+			// String literals scanned for this model; AST nodes point into these.
+			std::list<std::shared_ptr<StrPearl>> strTable;
 
 			SasModel();
 
@@ -236,21 +238,23 @@ namespace che {
 			virtual ~SasModel();
 		};
 
-		class GlobalPool {
+		// Owns the top-level models created for one parse/run. There is no process-wide
+		// instance: every parser holds its own pool, so independent runs can proceed
+		// concurrently without sharing mutable state.
+		class ModelPool {
 		public:
-			std::list<std::shared_ptr<StrPearl>> strTable;
 			std::list<std::shared_ptr<SasModel>> topModels;
 
-			static GlobalPool &getInstance();
+			ModelPool() = default;
+
+			ModelPool(const ModelPool &) = delete;
+			ModelPool &operator=(const ModelPool &) = delete;
 
 			std::shared_ptr<SasModel> createNewTopModel();
 
-			virtual ~GlobalPool();
+			virtual ~ModelPool() = default;
 
 			static std::shared_ptr<SasModel> findModel(std::list<std::shared_ptr<SasModel>> &, AstNode *);
-
-		private:
-			GlobalPool();
 		};
 
 	} // namespace core

@@ -287,7 +287,7 @@ int main(int argc, char **argv) {
 			return -1;
 		}
 
-		parser.currentModel = GlobalPool::getInstance().createNewTopModel();
+		parser.currentModel = parser.pool.createNewTopModel();
 		parseSingleSasModel(&parser);
 		if (parser.errCount > 0) {
 			cerr << "Error: Parsing model has errors." << endl;
@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
 				cout << endl;
 			}
 		} else {
-			compModel.generateCompModel(GlobalPool::getInstance());
+			compModel.generateCompModel(parser.pool);
 			compModel.preprocessModels();
 			// check if all the ids are initialized, need to be repacked in the future.
 			list<shared_ptr<SasModel>>::iterator modelIt;

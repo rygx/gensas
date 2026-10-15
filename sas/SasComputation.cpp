@@ -113,7 +113,7 @@ namespace che {
 		SasComputationModel::SasComputationModel() : strTable(), topModels() {
 		}
 
-		void SasComputationModel::generateCompModel(GlobalPool &pool) {
+		void SasComputationModel::generateCompModel(ModelPool &pool) {
 			// Only considered top-level models currently
 			list<shared_ptr<SasModel>>::iterator oldModelIt;
 			for (oldModelIt = pool.topModels.begin(); oldModelIt != pool.topModels.end(); oldModelIt++) {

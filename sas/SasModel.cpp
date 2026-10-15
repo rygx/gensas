@@ -262,27 +262,15 @@ namespace che {
 			return injectNewId(iden, len);
 		}
 
-		GlobalPool &GlobalPool::getInstance() {
-			static GlobalPool instance;
-			return instance;
-		}
-
-		shared_ptr<SasModel> GlobalPool::createNewTopModel() {
+		shared_ptr<SasModel> ModelPool::createNewTopModel() {
 			shared_ptr<SasModel> pModel = make_shared<SasModel>();
 			topModels.push_back(pModel);
 			return pModel;
 		}
 
-		GlobalPool::~GlobalPool() {
-			strTable.clear();
-			topModels.clear();
-		}
-
-		GlobalPool::GlobalPool() : strTable(), topModels() {}
-
 		shared_ptr<IdPearl> lookupIdFromModel(shared_ptr<SasModel> &model, const char *iden, int len);
 
-		shared_ptr<SasModel> GlobalPool::findModel(list<shared_ptr<SasModel>> &modelTree, AstNode *p) {
+		shared_ptr<SasModel> ModelPool::findModel(list<shared_ptr<SasModel>> &modelTree, AstNode *p) {
 			return nullptr;
 		}
 

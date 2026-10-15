@@ -35,7 +35,7 @@ static const char *kInconsistent =
 static void solveAndCheck(const char *src) {
 	SasModelParser parser;
 	parser.parseString(src);
-	std::shared_ptr<SasModel> model = GlobalPool::getInstance().createNewTopModel();
+	std::shared_ptr<SasModel> model = parser.pool.createNewTopModel();
 	parser.currentModel = model;
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);

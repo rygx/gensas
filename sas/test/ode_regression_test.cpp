@@ -1,7 +1,7 @@
 // End-to-end regression test of the Modelica path (parse -> DAE -> SAS solve)
 // on resources/mofile/test_solve_ode.mo, a 3-state linear ODE x' = A x.
 // The exact solution x(t) = expm(A t) x0 is computed with Armadillo and the SAS
-// solution is compared against it. One model per process (GlobalPool is a singleton).
+// solution is compared against it. One model per process (each parser owns its model pool).
 #include "util/SafeArmadillo.h"
 #include "sas/SasComputation.h"
 #include "sas/SasExpr.h"
@@ -42,12 +42,12 @@ static const char *kModel =
 int main() {
 	SasModelParser parser;
 	parser.parseString(kModel);
-	parser.currentModel = GlobalPool::getInstance().createNewTopModel();
+	parser.currentModel = parser.pool.createNewTopModel();
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);
 
 	SasComputationModel compModel;
-	compModel.generateCompModel(GlobalPool::getInstance());
+	compModel.generateCompModel(parser.pool);
 	compModel.preprocessModels();
 	compModel.generateDAEs();
 	CHECK_EQ(compModel.nDE, 3);

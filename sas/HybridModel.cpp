@@ -307,6 +307,144 @@ namespace che {
 			}
 		} // namespace
 
+		namespace {
+			AstNode *cloneChain(const AstNode *p);
+
+			// Deep copy of one expression node (without its `next` sibling).
+			AstNode *cloneNode(const AstNode *p) {
+				if (p == NULL) {
+					return NULL;
+				}
+				AstNode *c = new AstNode(*p);
+				c->next = NULL;
+				c->index = -1;
+				c->subs[0] = cloneChain(p->subs[0]);
+				c->subs[1] = cloneChain(p->subs[1]);
+				return c;
+			}
+
+			AstNode *cloneChain(const AstNode *p) {
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				for (; p != NULL; p = p->next) {
+					*tail = cloneNode(p);
+					tail = &(*tail)->next;
+				}
+				return head;
+			}
+
+			AstNode *mkNode(Op op, AstNode *a, AstNode *b = NULL) {
+				AstNode *n = new AstNode();
+				n->op = op;
+				n->nodeKind = NK_Expression;
+				n->subs[0] = a;
+				n->subs[1] = b;
+				return n;
+			}
+
+			AstNode *mkConst(double v) {
+				AstNode *n = mkNode(OP_CONST, NULL);
+				n->ty = TY_REAL;
+				n->value.d = v;
+				return n;
+			}
+
+			// if c then a else b
+			AstNode *mkIf(AstNode *c, AstNode *a, AstNode *b) {
+				return mkNode(OP_IFEXPR, c, mkNode(OP_BRANCH, a, b));
+			}
+
+			// Rewrites the expression chain starting at p; returns the new head. `count` counts the calls.
+			AstNode *rewriteChain(AstNode *p, int &count);
+
+			AstNode *rewriteOne(AstNode *p, int &count) {
+				if (p->op == OP_IFEXPR) {
+					// The condition is evaluated directly; only the branches are equations.
+					if (p->subs[1] != NULL) {
+						p->subs[1]->subs[0] = rewriteChain(p->subs[1]->subs[0], count);
+						p->subs[1]->subs[1] = rewriteChain(p->subs[1]->subs[1], count);
+					}
+					return p;
+				}
+				p->subs[0] = rewriteChain(p->subs[0], count);
+				p->subs[1] = rewriteChain(p->subs[1], count);
+				if (p->op != OP_CALL || p->subs[0] == NULL || p->subs[0]->op != OP_ID) {
+					return p;
+				}
+				string fn = idName(p->subs[0]);
+				const AstNode *a = p->subs[1];
+				const AstNode *b = a != NULL ? a->next : NULL;
+				AstNode *repl = NULL;
+				if ((fn == "abs" || fn == "sign") && a != NULL && b == NULL) {
+					if (fn == "abs") {
+						repl = mkIf(mkNode(OP_GREAT_EQ, cloneNode(a), mkConst(0.0)), cloneNode(a), mkNode(OP_MINUS, cloneNode(a)));
+					} else {
+						repl = mkIf(mkNode(OP_GREAT, cloneNode(a), mkConst(0.0)), mkConst(1.0),
+									mkIf(mkNode(OP_LESS, cloneNode(a), mkConst(0.0)), mkConst(-1.0), mkConst(0.0)));
+					}
+				} else if ((fn == "min" || fn == "max") && a != NULL && b != NULL && b->next == NULL) {
+					repl = mkIf(mkNode(fn == "max" ? OP_GREAT_EQ : OP_LESS_EQ, cloneNode(a), cloneNode(b)), cloneNode(a), cloneNode(b));
+				}
+				if (repl == NULL) {
+					return p;
+				}
+				count++;
+				repl->next = p->next;
+				repl->line = p->line;
+				p->next = NULL;
+				freeTree(p);
+				return repl;
+			}
+
+			AstNode *rewriteChain(AstNode *p, int &count) {
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				while (p != NULL) {
+					AstNode *nxt = p->next;
+					p->next = NULL;
+					AstNode *r = rewriteOne(p, count);
+					AstNode *last = r;
+					while (last->next != NULL) {
+						last = last->next;
+					}
+					*tail = r;
+					tail = &last->next;
+					p = nxt;
+				}
+				return head;
+			}
+
+			// Statements: equations are rewritten, if-equation branches are searched, when-equations skipped.
+			AstNode *rewriteStatements(AstNode *p, int &count) {
+				for (AstNode *s = p; s != NULL; s = s->next) {
+					if (s->nodeKind == NK_WhenEquation) {
+						continue;
+					}
+					if (s->nodeKind == NK_IfEquation) {
+						if (s->subs[1] != NULL) {
+							s->subs[1]->subs[0] = rewriteStatements(s->subs[1]->subs[0], count);
+							s->subs[1]->subs[1] = rewriteStatements(s->subs[1]->subs[1], count);
+						}
+					} else if (s->op == OP_EQN) {
+						AstNode *nxt = s->next;
+						s->next = NULL;
+						s->subs[0] = rewriteChain(s->subs[0], count);
+						s->subs[1] = rewriteChain(s->subs[1], count);
+						s->next = nxt;
+					}
+				}
+				return p;
+			}
+		} // namespace
+
+		int rewritePiecewiseFunctions(SasModel &model) {
+			int count = 0;
+			for (const shared_ptr<AstTree> &tree : model.modelTrees) {
+				tree->pHead = rewriteStatements(tree->pHead, count);
+			}
+			return count;
+		}
+
 		bool isHybridModel(const SasModel &model) {
 			for (const shared_ptr<IdPearl> &id : model.idTable) {
 				if (id->idTy == ID_DISC) {

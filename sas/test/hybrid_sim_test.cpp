@@ -46,6 +46,7 @@ static bool simulate(Run &run, const string &src, double endTime) {
 	parser.currentModel = model;
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);
+	rewritePiecewiseFunctions(*model);
 	std::ostringstream os;
 	int nErr = checkModel(*model, hybridFeatures(), "test.mo", os);
 	if (nErr != 0) {
@@ -356,6 +357,29 @@ static void testEventIteration() {
 
 // Without damping loss the ball bounces infinitely often in finite time (Zeno behavior). The simulator
 // must stop with an error instead of falling through the floor.
+// A variable that has to stay at a switching point chatters: v' = -sign(v) reaches 0 and the events pile up.
+static void testSignChatterIsReported() {
+	SasModelParser parser;
+	parser.parseString(
+		"model M\n"
+		"  Real v(start = 0.5);\n"
+		"equation\n"
+		"  der(v) = -sign(v);\n"
+		"end M;\n");
+	shared_ptr<SasModel> model = GlobalPool::getInstance().createNewTopModel();
+	parser.currentModel = model;
+	parseSingleSasModel(&parser);
+	CHECK_EQ(parser.errCount, 0);
+	rewritePiecewiseFunctions(*model);
+	HybridSimulator sim(model);
+	SasComputationOptions options;
+	options.endTime = 2.0;
+	SasSolutionSet *sol = sim.run(options);
+	CHECK(sol == NULL);
+	CHECK(!sim.error().empty());
+	delete sol;
+}
+
 static void testZenoIsReported() {
 	SasModelParser parser;
 	parser.parseString(
@@ -643,6 +667,105 @@ static void testChangeOfDiscreteReal() {
 	CHECK_NEAR(finalValue(run, "m"), 1.0, 0.0);
 }
 
+// abs() in a continuous equation: y = 1 - t, x' = |y|, so x(2) = 1; the mode switches at t = 1.
+static void testAbsInContinuousEquation() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Real x(start = 0);\n"
+				  "  Real y(start = 1);\n"
+				  "equation\n"
+				  "  der(x) = abs(y);\n"
+				  "  der(y) = -1;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	CHECK_EQ(run.sim->events().size(), (size_t)0); // state events change the mode, they are not when-events
+	CHECK_NEAR(finalValue(run, "y"), -1.0, 1e-6);
+	CHECK_NEAR(finalValue(run, "x"), 1.0, 1e-6);
+	CHECK(run.sim->segmentCount() >= 2); // the mode switched at t = 1
+}
+
+// min and max: y' = min(t, 1) + max(-t, -2); y(3) = (0.5 + 2) - (2 + 2).
+static void testMinMax() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Real x(start = 0);\n"
+				  "  Real y(start = 0);\n"
+				  "equation\n"
+				  "  der(x) = 1;\n"
+				  "  der(y) = min(x, 1) + max(-x, -2);\n"
+				  "end M;\n",
+				  3.0)) {
+		return;
+	}
+	// min(t,1): integral 0..3 = 0.5 + 2 = 2.5; max(-t,-2): -(integral of min(t,2)) = -(2 + 2) = -4.
+	CHECK_NEAR(finalValue(run, "x"), 3.0, 1e-6);
+	CHECK_NEAR(finalValue(run, "y"), 2.5 - 4.0, 1e-5);
+}
+
+// sign() is piecewise constant: x' = sign(y), y = 1 - t, so x rises until t = 1 and falls back to 0 at t = 2.
+static void testSign() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Real x(start = 0);\n"
+				  "  Real y(start = 1);\n"
+				  "equation\n"
+				  "  der(x) = sign(y);\n"
+				  "  der(y) = -1;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "x"), 0.0, 1e-6);
+}
+
+// Nested calls and an expression argument: x' = abs(abs(y) - 0.5), y = 1 - t; the inner margin changes
+// sign at t = 0.5 and t = 1.5.
+static void testNestedPiecewise() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Real x(start = 0);\n"
+				  "  Real y(start = 1);\n"
+				  "equation\n"
+				  "  der(x) = abs(abs(y) - 0.5);\n"
+				  "  der(y) = -1;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	// The integral of | |1-t| - 0.5 | over [0, 2] is 0.25 on [0, 1] plus 0.25 on [1, 2].
+	CHECK_NEAR(finalValue(run, "x"), 0.5, 1e-6);
+}
+
+// Pieces inside an if-equation branch and a when-body keep working.
+static void testPiecewiseWithOtherConstructs() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  discrete Real a(start = 1);\n"
+				  "  Real x(start = 1);\n"
+				  "equation\n"
+				  "  if a > 0 then\n"
+				  "    der(x) = -abs(x);\n"
+				  "  else\n"
+				  "    der(x) = abs(x);\n"
+				  "  end if;\n"
+				  "  when time >= 1 then\n"
+				  "    a = -abs(a);\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "a"), -1.0, 0.0);
+	CHECK_NEAR(finalValue(run, "x"), 1.0, 1e-4); // exp(-1) * exp(1)
+}
+
 // Equations listed in a different order per mode.
 static void testReorderedEquations() {
 	Run run;
@@ -671,6 +794,12 @@ static void testReorderedEquations() {
 }
 
 int main() {
+	testSignChatterIsReported();
+	testAbsInContinuousEquation();
+	testMinMax();
+	testSign();
+	testNestedPiecewise();
+	testPiecewiseWithOtherConstructs();
 	testPulseBetweenSamples();
 	testDipBetweenSamples();
 	testPulseInIfEquation();

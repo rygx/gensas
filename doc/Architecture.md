@@ -34,8 +34,16 @@ how to test the solver quickly. Power flow (`-p`) is a separate path (`pf/`, `io
 `checkModel` takes a `SolverFeatures` set. With every flag false it describes the plain solver
 (continuous `Real`, parameters, `der`, algebraic equations). The application enables the hybrid
 flags and `timeEventsOnly` + `stateEvents`, which additionally forbid constructs the simulator
-cannot handle: relational operators and `abs`/`min`/`max` in continuous equations, `edge`/`change`
+cannot handle: relational operators in continuous equations, `edge`/`change`
 outside when-conditions (and of anything but one discrete variable), `when` inside `if`, assignments to discrete variables outside `when`.
+
+### Piecewise functions
+
+`rewritePiecewiseFunctions` (run by the application before `isHybridModel`/`checkModel`) rewrites
+`abs`, `min`, `max` and `sign` in continuous equations into if-expressions
+(`abs(e)` becomes `if e >= 0 then e else -e`). The conditions are ordinary dynamic guards, so the
+switching points are located like any other state event and every mode is smooth for the Pade solver.
+Conditions and when-bodies are not rewritten; they are evaluated directly.
 
 ### Hybrid simulation
 

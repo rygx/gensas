@@ -50,6 +50,9 @@ namespace che {
 			std::shared_ptr<IdPearl> currentId = NULL;
 			std::shared_ptr<SasModel> currentModel = NULL;
 			std::shared_ptr<GlobalPool> globalPool = NULL;
+			// When set, identifiers are scanned without being added to the model's id table
+			// (used for attribute names such as start/fixed that are not model symbols).
+			bool noInject = false;
 
 			SasModelParser();
 

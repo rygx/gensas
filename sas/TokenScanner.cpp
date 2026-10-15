@@ -45,6 +45,7 @@ namespace che {
 
 		static struct keyword keywordsB[] =
 			{
+				{"Boolean", 7, TK_K_BOOLEAN},
 				{"block", 5, TK_K_BLOCK},
 				{"break", 5, TK_K_BREAK},
 				{NULL, 0, TK_ID}};
@@ -98,6 +99,7 @@ namespace che {
 		static struct keyword keywordsI[] =
 			{
 				{"if", 2, TK_K_IF},
+				{"Integer", 7, TK_K_INTEGER},
 				{"import", 6, TK_K_IMPORT},
 				{"impure", 6, TK_K_IMPURE},
 				{"in", 2, TK_K_IN},
@@ -222,6 +224,21 @@ namespace che {
 				{"exp", 3, TK_F_EXP},
 				{"sqrt", 4, TK_F_SQRT},
 				{"inv", 3, TK_F_INV},
+				// Modelica built-ins recognized by the parser; the solver does not support
+				// all of them yet (see ModelChecker).
+				{"abs", 3, TK_F_ABS},
+				{"min", 3, TK_F_MIN},
+				{"max", 3, TK_F_MAX},
+				{"sign", 4, TK_F_SIGN},
+				{"floor", 5, TK_F_FLOOR},
+				{"pre", 3, TK_F_PRE},
+				{"edge", 4, TK_F_EDGE},
+				{"change", 6, TK_F_CHANGE},
+				{"sample", 6, TK_F_SAMPLE},
+				{"noEvent", 7, TK_F_NOEVENT},
+				{"reinit", 6, TK_F_REINIT},
+				{"terminate", 9, TK_F_TERMINATE},
+				{"assert", 6, TK_F_ASSERT},
 				{NULL, 0, TK_ID}};
 
 		inline bool isDigit(char c) { return c >= '0' && c <= '9'; }
@@ -386,6 +403,12 @@ namespace che {
 			}
 			parser->currentId.reset();
 			int tok = findKeyWord((char *)start, (int)(parser->reader.cursur - start));
+			if (tok == TK_ID && parser->noInject) {
+				// Detached identifier: not entered into the model's id table.
+				parser->currentId = make_shared<IdPearl>((const unsigned char *)start, (int)(parser->reader.cursur - start));
+				parser->value.p = (char *)parser->currentId->str;
+				return TK_ID;
+			}
 			if (tok == TK_ID) {
 				tok = findDefaultFunctions((char *)start, (int)(parser->reader.cursur - start));
 				parser->currentId = lookupIdentifier(parser, (char *)start, (int)(parser->reader.cursur - start));

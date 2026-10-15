@@ -59,6 +59,7 @@ namespace che {
 			this->value = idp.value;
 			this->initVal = idp.initVal;
 			this->initDer = idp.initDer;
+			this->line = idp.line;
 		}
 
 		void IdPearl::setName(const unsigned char *s, int sz) {
@@ -155,7 +156,7 @@ namespace che {
 			}
 		}
 
-		// ID_NONE, ID_PARAM, ID_VAR, ID_IVAR, ID_TMPVAR, ID_MODEL, ID_FUNC
+		// ID_NONE, ID_PARAM, ID_VAR, ID_IVAR, ID_TMPVAR, ID_MODEL, ID_FUNC, ID_DISC
 		static const char *idTypeName[] = {
 			"None",
 			"Param",
@@ -164,6 +165,7 @@ namespace che {
 			"tmpVar",
 			"Model",
 			"Function",
+			"Discrete",
 		};
 
 		void SasModel::printIdTable() {

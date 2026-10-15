@@ -17,6 +17,17 @@ cc_test(
     ],
 )
 
+# Hybrid Modelica subset: parser structure and model checker.
+cc_test(
+    name = "hybrid_parser_test",
+    srcs = ["hybrid_parser_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_model_checker_lib",
+        "//sas:sas_model_parser_lib",
+    ],
+)
+
 # Parse -> DAE -> SAS solve of resources/mofile/test_solve_ode.mo against expm().
 cc_test(
     name = "ode_regression_test",

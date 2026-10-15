@@ -58,6 +58,7 @@ namespace che {
 		static AstNode *parseAssignmentExpr(SasModelParser *parser);
 		AstNode *parseExpr(SasModelParser *parser);
 		static AstNode *parseConditionalExpr(SasModelParser *parser);
+		static AstNode *parseIfExpr(SasModelParser *parser);
 		static AstNode *parseBinaryExpr(SasModelParser *parser, AstNode *curExpr, int prec);
 
 		static AstNode *badDefaultToken() {
@@ -96,6 +97,16 @@ namespace che {
 				expr->ty = TY_REAL;
 				expr->op = OP_CONST;
 				expr->value = parser->value;
+				getNextToken(parser);
+				return expr;
+			case TK_K_TRUE:
+			case TK_K_FALSE:
+				expr = new AstNode();
+				expr->ty = TY_BOOL;
+				expr->op = OP_CONST;
+				expr->nodeKind = NK_Expression;
+				expr->value.i[0] = (parser->currentToken == TK_K_TRUE) ? 1 : 0;
+				expr->value.i[1] = 0;
 				getNextToken(parser);
 				return expr;
 			case TK_STRING:
@@ -215,7 +226,35 @@ namespace che {
 			return expr;
 		}
 
+		// if-expression:  if c1 then a { elseif c2 then b } else z
+		// AST: OP_IFEXPR{ subs[0] = condition, subs[1] = OP_BRANCH{ subs[0] = then-value,
+		// subs[1] = else-value, or a nested OP_IFEXPR for an elseif } }.
+		// Called with the current token being `if` or `elseif`.
+		static AstNode *parseIfExpr(SasModelParser *parser) {
+			getNextToken(parser); // consume `if` / `elseif`
+			AstNode *node = new AstNode();
+			node->op = OP_IFEXPR;
+			node->nodeKind = NK_Expression;
+			node->subs[0] = parseConditionalExpr(parser);
+			expect(parser, TK_K_THEN);
+			AstNode *branch = new AstNode();
+			branch->op = OP_BRANCH;
+			branch->nodeKind = NK_Expression;
+			branch->subs[0] = parseConditionalExpr(parser);
+			if (parser->currentToken == TK_K_ELSEIF) {
+				branch->subs[1] = parseIfExpr(parser);
+			} else {
+				expect(parser, TK_K_ELSE);
+				branch->subs[1] = parseConditionalExpr(parser);
+			}
+			node->subs[1] = branch;
+			return node;
+		}
+
 		static AstNode *parseConditionalExpr(SasModelParser *parser) {
+			if (parser->currentToken == TK_K_IF) {
+				return parseIfExpr(parser);
+			}
 			return parseUnaryExpr(parser, tokenPrec[OP_OR]);
 		}
 
@@ -231,6 +270,10 @@ namespace che {
 				return assnExpr;
 			}
 			return expr;
+		}
+
+		AstNode *parseValueExpr(SasModelParser *parser) {
+			return parseConditionalExpr(parser);
 		}
 
 		AstNode *parseExpr(SasModelParser *parser) {

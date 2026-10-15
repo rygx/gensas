@@ -35,6 +35,7 @@
 #include "sas/SasLexico.h"
 #include "sas/SasExpr.h"
 #include "sas/SasComputation.h"
+#include "sas/ModelChecker.h"
 #include <memory>
 // #include <memory>
 // #include "debug_new.h"
@@ -258,6 +259,13 @@ int main(int argc, char **argv) {
 		parseSingleSasModel(&parser);
 		if (parser.errCount > 0) {
 			cerr << "Error: Parsing model has errors." << endl;
+			return -1;
+		}
+
+		// The default SolverFeatures describe what the solver can run today.
+		SolverFeatures solverFeatures;
+		if (checkModel(*parser.currentModel, solverFeatures, fileMode ? input : string("<string>"), cerr) > 0) {
+			cerr << "Error: The model uses constructs that are not supported yet." << endl;
 			return -1;
 		}
 

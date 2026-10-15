@@ -39,7 +39,7 @@ namespace che {
 			buffer = NULL;
 			cursur = NULL;
 			lineHead = NULL;
-			line = 0;
+			line = 1; // lines are numbered from 1
 			size = 0;
 			filename = NULL;
 		}
@@ -75,7 +75,7 @@ namespace che {
 		void BufferedFileReader::resetReader() {
 			cursur = NULL;
 			lineHead = NULL;
-			line = 0;
+			line = 1; // lines are numbered from 1
 			size = 0;
 			if (buffer != NULL) {
 				delete[] buffer;

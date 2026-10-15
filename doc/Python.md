@@ -16,6 +16,7 @@ result.time                 # sample times
 result.variables["h"]       # continuous variables by name
 result.discrete             # discrete variables (hybrid models)
 result.events               # [{"time": ..., "assignments": {...}, "reinits": {"v": ...}}, ...]
+result.termination          # None, or {"time": ..., "message": ...} if terminate() ended the run early
 ```
 
 * A job is the dictionary form of a [job file](JobFormat.md), a JSON string, or the path of a job file (then relative paths resolve against that file; for a dictionary or string use `base_dir=`).

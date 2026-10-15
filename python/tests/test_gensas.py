@@ -52,6 +52,23 @@ class GenSASTest(unittest.TestCase):
         self.assertEqual(len(ball.events), 3)
         self.assertIn("v", ball.events[0]["reinits"])
 
+    def test_terminate_and_assert(self):
+        stop = ("model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n"
+                "  when x < 0.3 then\n    terminate(\"done\");\n  end when;\nend M;\n")
+        r = gensas.run(job(stop, 5.0))
+        self.assertAlmostEqual(r.termination["time"], math.log(1.0 / 0.3), places=5)
+        self.assertEqual(r.termination["message"], "done")
+        self.assertAlmostEqual(r.time[-1], r.termination["time"], places=9)
+        self.assertIsNone(gensas.run(job(DECAY, 1.0)).termination)
+        failing = "model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  assert(x > 0.5, \"too low\");\nend M;\n"
+        with self.assertRaises(gensas.GenSASError) as ctx:
+            gensas.run(job(failing, 2.0))
+        self.assertIn("too low", str(ctx.exception))
+        warning = failing.replace("\"too low\"", "\"too low\", AssertionLevel.warning")
+        with gensas.Simulation(job(warning, 2.0)) as sim:
+            sim.run()
+            self.assertTrue(any("too low" in w for w in sim.warnings))
+
     def test_errors(self):
         with self.assertRaises(gensas.GenSASError) as ctx:
             gensas.Simulation({"gensas": {"format": "job", "version": 1}, "kind": "modelica", "model": {"source": "x"}, "colour": 1})

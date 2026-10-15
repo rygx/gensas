@@ -13,12 +13,25 @@ static std::string jobFor(const std::string &source, double endTime) {
 	for (char c : source) {
 		if (c == '\n') {
 			escaped += "\\n";
+		} else if (c == '"' || c == '\\') {
+			escaped += '\\';
+			escaped += c;
 		} else {
 			escaped += c;
 		}
 	}
 	return "{\"gensas\":{\"format\":\"job\",\"version\":1},\"kind\":\"modelica\",\"model\":{\"source\":\"" + escaped + "\"},\"solver\":{\"endTime\":" + std::to_string(endTime) + "}}";
 }
+
+static const char *kTerminate =
+	"model M\n"
+	"  Real x(start = 1);\n"
+	"equation\n"
+	"  der(x) = -x;\n"
+	"  when x < 0.3 then\n"
+	"    terminate(\"x fell below 0.3\");\n"
+	"  end when;\n"
+	"end M;\n";
 
 static const char *kBall =
 	"model Ball\n"
@@ -68,7 +81,23 @@ static void testHybridResult() {
 	CHECK_NEAR(value, 3.0, 0.0);
 	CHECK(gensas_event_assignment(sim, 0, 1, &value) == nullptr);
 	CHECK_EQ(gensas_event_reinit_count(sim, 0), (size_t)0);
+	CHECK_EQ(gensas_terminated(sim), 0);
+	CHECK(gensas_termination_message(sim) == nullptr);
 	gensas_destroy(sim);
+
+	// terminate() ends the run early and successfully.
+	sim = gensas_create(jobFor(kTerminate, 5.0).c_str(), nullptr, err, sizeof err);
+	CHECK(sim != nullptr);
+	if (sim != nullptr) {
+		CHECK_EQ(gensas_run(sim, nullptr, nullptr), GENSAS_OK);
+		CHECK_EQ(gensas_terminated(sim), 1);
+		CHECK_NEAR(gensas_termination_time(sim), std::log(1.0 / 0.3), 1e-5);
+		const char *msg = gensas_termination_message(sim);
+		CHECK(msg != nullptr && std::string(msg) == "x fell below 0.3");
+		size_t last = gensas_sample_count(sim);
+		CHECK(last > 0 && std::fabs(gensas_time(sim)[last - 1] - gensas_termination_time(sim)) < 1e-9);
+		gensas_destroy(sim);
+	}
 
 	sim = gensas_create(jobFor(kBall, 1.2).c_str(), nullptr, err, sizeof err);
 	CHECK(sim != nullptr);

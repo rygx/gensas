@@ -225,6 +225,60 @@ static void testWhenInitial() {
 	CHECK(bad.error().find("initial()") != std::string::npos);
 }
 
+// terminate() ends the run successfully at the event; assert() is checked along the solution.
+static void testTerminateAndAssert() {
+	const char *stop =
+		"model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n"
+		"  when x < 0.3 then\n    terminate(\"done\");\n  end when;\nend M;\n";
+	Simulation a(job(stop, 5.0));
+	CHECK(a.run());
+	CHECK(a.result().terminated);
+	CHECK(a.result().terminateMessage == "done");
+	CHECK_NEAR(a.result().endTime, std::log(1.0 / 0.3), 1e-6);
+	CHECK_NEAR(a.result().time.back(), a.result().endTime, 1e-9);
+	CHECK_NEAR(lastValue(a.result(), "x"), 0.3, 1e-5);
+
+	// A continuous assertion that becomes false stops the run with an error naming the time.
+	const char *bad =
+		"model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  assert(x > 0.2, \"x too small\");\nend M;\n";
+	Simulation b(job(bad, 3.0));
+	CHECK(!b.run());
+	CHECK(b.error().find("assertion violated") != std::string::npos);
+	CHECK(b.error().find("x too small") != std::string::npos);
+	CHECK(b.error().find("t=1.609") != std::string::npos); // ln 5
+
+	// At warning level the run continues and the violation is a warning (once).
+	const char *warn =
+		"model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  assert(x > 0.2, \"x low\", AssertionLevel.warning);\nend M;\n";
+	Simulation w(job(warn, 3.0));
+	CHECK(w.run());
+	CHECK(!w.result().terminated);
+	int found = 0;
+	for (const std::string &m : w.warnings()) {
+		found += m.find("x low") != std::string::npos ? 1 : 0;
+	}
+	CHECK_EQ(found, 1);
+
+	// A true assertion is silent; one that is false at the start fails immediately; one in a when-body is checked at the event.
+	Simulation ok(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  assert(x > -1, \"never\");\nend M;\n", 1.0));
+	CHECK(ok.run());
+	Simulation start(job("model M\n  Real x(start = 0.1);\nequation\n  der(x) = -x;\n  assert(x > 0.5, \"at start\");\nend M;\n", 1.0));
+	CHECK(!start.run());
+	CHECK(start.error().find("at start") != std::string::npos);
+	Simulation inWhen(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  when time >= 1 then\n    assert(x > 0.5, \"in when\");\n  end when;\nend M;\n", 3.0));
+	CHECK(!inWhen.run());
+	CHECK(inWhen.error().find("in when") != std::string::npos);
+
+	// Misuse is reported when the model is checked.
+	Simulation top(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  terminate(\"now\");\nend M;\n", 1.0));
+	CHECK(!top.run());
+	CHECK(top.error().find("terminate() can only be used in a when-equation") != std::string::npos);
+	Simulation noMessage(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  assert(x > 0);\nend M;\n", 1.0));
+	CHECK(!noMessage.run());
+	Simulation inIf(job("model M\n  parameter Boolean b = true;\n  Real x(start = 1);\nequation\n  der(x) = -x;\n  if b then\n    assert(x > 0, \"m\");\n  end if;\nend M;\n", 1.0));
+	CHECK(!inIf.run());
+}
+
 // noEvent(e) in a continuous equation is accepted; the switch is still located as an event.
 static void testNoEvent() {
 	const char *src =
@@ -418,6 +472,7 @@ static void testArrays() {
 
 int main() {
 	testAtan2();
+	testTerminateAndAssert();
 	testWhenInitial();
 	testArrays();
 	testSourceLayout();

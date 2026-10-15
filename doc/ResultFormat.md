@@ -17,8 +17,9 @@ One object:
 | `<variable>` | one array per continuous variable, same length as `time`; `null` marks a value the solver did not provide (JSON has no NaN) |
 | `discrete` | hybrid models only: object with one array per discrete variable, sampled like `time` |
 | `events` | hybrid models with events only: array of `{"time", "assignments": {name: value}, "reinits": {name: value}}` |
+| `terminated` | only if a `terminate()` ended the run early: `{"time", "message"}`; the last sample is at that time |
 
-A model variable must not be called `gensas`, `time`, `discrete` or `events`.
+A model variable must not be called `gensas`, `time`, `discrete`, `events` or `terminated`.
 
 ## CSV (`-c`)
 

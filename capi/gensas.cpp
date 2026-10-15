@@ -184,6 +184,21 @@ const double *gensas_discrete_values(const gensas_simulation *sim, size_t index)
 	return r != nullptr && index < r->discrete.size() && !r->discrete[index].empty() ? r->discrete[index].data() : nullptr;
 }
 
+int gensas_terminated(const gensas_simulation *sim) {
+	const SasResult *r = resultOf(sim);
+	return r != nullptr && r->terminated ? 1 : 0;
+}
+
+double gensas_termination_time(const gensas_simulation *sim) {
+	const SasResult *r = resultOf(sim);
+	return r != nullptr && r->terminated ? r->endTime : 0.0;
+}
+
+const char *gensas_termination_message(const gensas_simulation *sim) {
+	const SasResult *r = resultOf(sim);
+	return r != nullptr && r->terminated ? r->terminateMessage.c_str() : nullptr;
+}
+
 size_t gensas_event_count(const gensas_simulation *sim) {
 	const SasResult *r = resultOf(sim);
 	return r != nullptr ? r->events.size() : 0;

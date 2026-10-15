@@ -106,6 +106,9 @@ def _load_locked():
         "gensas_event_assignment": (ctypes.c_char_p, [sim, ctypes.c_size_t, ctypes.c_size_t, c_dp]),
         "gensas_event_reinit_count": (ctypes.c_size_t, [sim, ctypes.c_size_t]),
         "gensas_event_reinit": (ctypes.c_char_p, [sim, ctypes.c_size_t, ctypes.c_size_t, c_dp]),
+        "gensas_terminated": (ctypes.c_int, [sim]),
+        "gensas_termination_time": (ctypes.c_double, [sim]),
+        "gensas_termination_message": (ctypes.c_char_p, [sim]),
         "gensas_write_result": (ctypes.c_int, [sim, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t]),
     }
     for name, (restype, argtypes) in sig.items():
@@ -135,11 +138,12 @@ class Result:
     """Samples of one run. `time` and every array in `variables` / `discrete` have the same length;
     a hybrid model has two samples at each event time (before and after the event)."""
 
-    def __init__(self, time, variables, discrete, events):
+    def __init__(self, time, variables, discrete, events, termination=None):
         self.time = time
         self.variables = variables
         self.discrete = discrete
         self.events = events  # list of {"time", "assignments": {name: value}, "reinits": {name: value}}
+        self.termination = termination  # {"time", "message"} if terminate() ended the run early, else None
 
     def __repr__(self):
         return "Result(%d samples, variables=%s, %d events)" % (len(self.time), list(self.variables), len(self.events))
@@ -211,7 +215,10 @@ class Simulation:
                 name = lib.gensas_event_reinit(h, e, k, ctypes.byref(value))
                 reinits[_text(name)] = value.value
             events.append({"time": lib.gensas_event_time(h, e), "assignments": assignments, "reinits": reinits})
-        return Result(time, variables, discrete, events)
+        termination = None
+        if lib.gensas_terminated(h):
+            termination = {"time": lib.gensas_termination_time(h), "message": _text(lib.gensas_termination_message(h))}
+        return Result(time, variables, discrete, events, termination)
 
     def write(self, format, path):
         """Writes the result of the last successful run as "json", "csv" or "mat"."""

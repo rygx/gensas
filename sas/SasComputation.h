@@ -92,6 +92,13 @@ namespace che {
 			// Set when options.progress asked to stop; the segments computed so far are kept.
 			bool cancelled = false;
 
+			// Hybrid simulations: terminate() ended the run at terminateTime, and the warnings of failed
+			// assert() calls with AssertionLevel.warning.
+			bool terminated = false;
+			double terminateTime = 0.0;
+			std::string terminateMessage;
+			std::vector<std::string> warnings;
+
 			// Computation models referenced by the solutions (SasSolution::linkCompModel is a raw pointer).
 			std::vector<std::shared_ptr<SasComputationModel>> keepAlive;
 

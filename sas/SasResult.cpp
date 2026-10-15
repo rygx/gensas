@@ -133,6 +133,8 @@ namespace che {
 				}
 			}
 			res.events = set.events;
+			res.terminated = set.terminated;
+			res.terminateMessage = set.terminateMessage;
 			return res;
 		}
 
@@ -149,6 +151,12 @@ namespace che {
 					meta["format"] = "result";
 					meta["version"] = kResultFormatVersion;
 					res["gensas"] = meta;
+					if (result.terminated) {
+						Json::Value term(Json::objectValue);
+						term["time"] = Json::Value(result.endTime);
+						term["message"] = Json::Value(result.terminateMessage);
+						res["terminated"] = term;
+					}
 
 					Json::Value tVals(Json::arrayValue);
 					for (double t : result.time) {

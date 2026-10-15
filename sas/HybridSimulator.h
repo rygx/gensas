@@ -69,6 +69,14 @@ namespace che {
 			// Values of the discrete and continuous variables at the end time, by name.
 			const std::map<std::string, double> &finalValues() const { return finalVals; }
 
+			// Warnings of the last run: assert() with AssertionLevel.warning that failed.
+			const std::vector<std::string> &warnings() const { return warningList; }
+
+			// True if terminate() ended the last run; the solutions then stop at terminationTime().
+			bool terminated() const { return wasTerminated; }
+			double terminationTime() const { return terminateTime; }
+			const std::string &terminationMessage() const { return terminateMessage; }
+
 			// Number of solver segments (between events) that were run.
 			int segmentCount() const { return nSegments; }
 
@@ -82,6 +90,10 @@ namespace che {
 			std::map<std::string, double> finalVals;
 			int nSegments = 0;
 			bool wasCancelled = false;
+			std::vector<std::string> warningList;
+			bool wasTerminated = false;
+			double terminateTime = 0.0;
+			std::string terminateMessage;
 			int guardSamples = 48;
 
 			bool fail(const std::string &msg);

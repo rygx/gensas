@@ -68,6 +68,8 @@ namespace che {
 			std::vector<std::string> discreteNames;	   // hybrid models only
 			std::vector<std::vector<double>> discrete; // discrete[i][j]: discreteNames[i] at time[j]
 			std::vector<SasEventRecord> events;		   // hybrid models only
+			bool terminated = false;				   // terminate() ended the run early, at endTime
+			std::string terminateMessage;			   // the message of that terminate()
 
 			bool empty() const {
 				return time.empty();

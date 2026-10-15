@@ -118,9 +118,13 @@ namespace che {
 		// branch, an if-expression or an if-equation. collectGuards() numbers them (the id is stored in
 		// AstNode::index of the when/if node, so it survives copying the AST) and says which ones depend
 		// on continuous variables or `time` and therefore need event detection ("dynamic").
+		//
+		// A top-level assert(cond, ...) is a guard of kind G_ASSERT. Its truth value is the *violation*
+		// (not cond), so it behaves like a when-condition: it fires when it becomes true.
 		enum GuardKind { G_IFEXPR,
 						 G_IFEQ,
-						 G_WHEN };
+						 G_WHEN,
+						 G_ASSERT };
 
 		struct Guard {
 			int id = -1;
@@ -128,7 +132,26 @@ namespace che {
 			const AstNode *cond = NULL;
 			int line = 0;
 			bool dynamic = false;
+			std::string message;  // G_ASSERT: the message
+			bool warning = false; // G_ASSERT: AssertionLevel.warning, the run continues
 		};
+
+		// The parts of assert(condition, "message" [, AssertionLevel.error | AssertionLevel.warning]).
+		struct AssertCall {
+			const AstNode *cond = NULL;
+			std::string message;
+			bool warning = false;
+		};
+
+		// Reads an assert() call; returns false with `err` set if it is malformed.
+		bool parseAssertCall(const AstNode *call, AssertCall &out, std::string &err);
+
+		// Reads the message of terminate("message"); returns false with `err` set if it is malformed.
+		bool parseTerminateCall(const AstNode *call, std::string &message, std::string &err);
+
+		// True if the statement is a call of assert() or terminate().
+		bool isAssertCall(const AstNode *statement);
+		bool isTerminateCall(const AstNode *statement);
 
 		// Numbers the guards of `model` and classifies them. `env` must hold the parameters and discrete
 		// variables only (continuous variables are the names it does not know). The recognized time-event
@@ -156,6 +179,9 @@ namespace che {
 			int line = 0;
 			std::vector<std::pair<std::string, double>> assignments; // discrete variables set by the event
 			std::vector<std::pair<std::string, double>> reinits;	 // continuous variables reinitialized by the event
+			bool terminate = false;									 // terminate() ran: the simulation ends at this time
+			std::string message;									 // the message of terminate()
+			std::vector<std::string> warnings;						 // assert() with AssertionLevel.warning that failed
 		};
 
 		// Fires the clauses that trigger at time T: runs the body of the first triggering branch of each

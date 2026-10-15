@@ -47,6 +47,10 @@ namespace che {
 			wasCancelled = false;
 			firedEvents.clear();
 			finalVals.clear();
+			warningList.clear();
+			wasTerminated = false;
+			terminateTime = 0.0;
+			terminateMessage.clear();
 			nSegments = 0;
 			if (model == nullptr) {
 				fail("no model");
@@ -78,6 +82,25 @@ namespace che {
 			double t = options.startTime;
 			env.time = t;
 			if (!evalGuards(guards, env, cur, err)) {
+				return NULL;
+			}
+			// An assertion that is already violated at the start time.
+			auto reportAssertions = [&](double T, const map<int, bool> &now, const map<int, bool> &before) -> bool {
+				for (const Guard &g : guards) {
+					if (g.kind != G_ASSERT || !now.at(g.id) || (before.count(g.id) > 0 && before.at(g.id))) {
+						continue;
+					}
+					ostringstream os;
+					os << "assertion violated at t=" << T << ": " << g.message;
+					if (!g.warning) {
+						fail(os.str());
+						return false;
+					}
+					warningList.push_back(os.str());
+				}
+				return true;
+			};
+			if (!reportAssertions(t, cur, map<int, bool>())) {
 				return NULL;
 			}
 
@@ -135,6 +158,9 @@ namespace che {
 							fired.insert(g.id);
 						}
 					}
+					if (!reportAssertions(T, now, cur)) {
+						return false;
+					}
 					cur = now;
 					bool timeNow = (iter == 0) && (timeEvents || initial);
 					if (fired.empty() && !timeNow) {
@@ -145,6 +171,15 @@ namespace che {
 						return false;
 					}
 					record(ev);
+					for (const string &w : ev.warnings) {
+						warningList.push_back(w);
+					}
+					if (ev.terminate) {
+						wasTerminated = true;
+						terminateTime = T;
+						terminateMessage = ev.message;
+						return true;
+					}
 				}
 				ostringstream os;
 				os << "event iteration does not converge at t=" << T;
@@ -164,10 +199,14 @@ namespace che {
 				total->discrete.values.push_back(vals);
 			};
 
-			if (!handleEvents(t, false, true)) { // sample() events at the start time
+			if (!handleEvents(t, false, true)) { // sample() and initial() events at the start time
 				return NULL;
 			}
 			snapshot(t);
+			if (wasTerminated) {
+				fail("terminate() ran at the start time (" + terminateMessage + "); there is nothing to simulate");
+				return NULL;
+			}
 
 			const size_t maxEvents = 1000000;
 			int stuck = 0; // consecutive iterations that hardly advance the time
@@ -329,7 +368,7 @@ namespace che {
 					// going true -> false, which only re-arm.
 					auto flipped = [&](const map<int, bool> &now) {
 						for (const Guard &g : guards) {
-							if (g.dynamic && now.at(g.id) != scanCur.at(g.id) && !(g.kind == G_WHEN && !now.at(g.id))) {
+							if (g.dynamic && now.at(g.id) != scanCur.at(g.id) && !((g.kind == G_WHEN || g.kind == G_ASSERT) && !now.at(g.id))) {
 								return true;
 							}
 						}
@@ -368,7 +407,7 @@ namespace che {
 							}
 							auto rearm = [&](map<int, bool> &now) {
 								for (const Guard &g : guards) {
-									if (g.dynamic && g.kind == G_WHEN && !now[g.id]) {
+									if (g.dynamic && (g.kind == G_WHEN || g.kind == G_ASSERT) && !now[g.id]) {
 										scanCur[g.id] = false;
 									}
 								}
@@ -515,6 +554,9 @@ namespace che {
 				if (firedEvents.size() > nBefore) {
 					snapshot(t);
 				}
+				if (wasTerminated) {
+					break;
+				}
 				if (firedEvents.size() > maxEvents) {
 					fail("too many events");
 					return NULL;
@@ -528,6 +570,10 @@ namespace che {
 				rec.reinits = ev.reinits;
 				total->events.push_back(rec);
 			}
+			total->terminated = wasTerminated;
+			total->terminateTime = terminateTime;
+			total->terminateMessage = terminateMessage;
+			total->warnings = warningList;
 			finalVals = env.values;
 			for (const pair<const string, double> &s : state) {
 				finalVals[s.first] = s.second;

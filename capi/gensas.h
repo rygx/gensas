@@ -94,7 +94,8 @@ GENSAS_API int gensas_run(gensas_simulation *sim, gensas_progress_fn progress, v
 /* Message of the last failed gensas_run; empty if none. Valid until the next call on this handle. */
 GENSAS_API const char *gensas_error(const gensas_simulation *sim);
 
-/* Warnings produced when the job was created (options moved into the supported range, ...). */
+/* Warnings produced when the job was created (options moved into the supported range, ...) and by
+ * the last run (assert() calls with AssertionLevel.warning that failed). */
 GENSAS_API size_t gensas_warning_count(const gensas_simulation *sim);
 GENSAS_API const char *gensas_warning(const gensas_simulation *sim, size_t index);
 
@@ -124,6 +125,15 @@ GENSAS_API size_t gensas_event_assignment_count(const gensas_simulation *sim, si
 GENSAS_API const char *gensas_event_assignment(const gensas_simulation *sim, size_t event, size_t index, double *value);
 GENSAS_API size_t gensas_event_reinit_count(const gensas_simulation *sim, size_t event);
 GENSAS_API const char *gensas_event_reinit(const gensas_simulation *sim, size_t event, size_t index, double *value);
+
+/*
+ * Hybrid models: 1 if a terminate() in a when-equation ended the run early (the result then ends at
+ * gensas_termination_time and the run still counts as successful), else 0. The message is the text
+ * given to terminate(), NULL if the run was not terminated.
+ */
+GENSAS_API int gensas_terminated(const gensas_simulation *sim);
+GENSAS_API double gensas_termination_time(const gensas_simulation *sim);
+GENSAS_API const char *gensas_termination_message(const gensas_simulation *sim);
 
 /* Writes the result as "json", "csv" or "mat". Returns 0 on success; otherwise non-zero with a message in err. */
 GENSAS_API int gensas_write_result(const gensas_simulation *sim, const char *format, const char *path, char *err, size_t err_len);

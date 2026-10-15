@@ -67,6 +67,15 @@ expanded, and an `NK_ForEquation` node is unrolled into its statements (one `Ast
 elaboration resolves subscripts in parameter values, start values and bindings. The iterator and element
 counts are limited (1e5 elements, 1e6 unrolled iterations).
 
+### assert and terminate
+
+A top-level `assert(cond, msg [, level])` is a guard of kind `G_ASSERT` whose truth value is the violation
+(`not cond`); the simulator treats it like a when-condition, so crossings are found by the same sampling and
+bisection, and a violation either fails the run (`error`) or is added to `HybridSimulator::warnings()`. The
+call is dropped by `specializeModel`. `assert` and `terminate` inside a `when` body run in `fireEvents`;
+`terminate` sets `HybridEvent::terminate`, the simulator stops after that event, and the solution set (and the
+result) records the time and message. Both are rejected inside if-equations by the checker.
+
 ### Hybrid simulation
 
 `HybridSimulator::run` repeats:

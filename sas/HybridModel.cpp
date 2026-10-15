@@ -291,10 +291,51 @@ namespace che {
 			return env;
 		}
 
+		bool isAssertCall(const AstNode *s) {
+			return isCall(s, "assert");
+		}
+
+		bool isTerminateCall(const AstNode *s) {
+			return isCall(s, "terminate");
+		}
+
+		bool parseAssertCall(const AstNode *call, AssertCall &out, string &err) {
+			const AstNode *cond = call != NULL ? call->subs[1] : NULL;
+			const AstNode *msg = cond != NULL ? cond->next : NULL;
+			const AstNode *level = msg != NULL ? msg->next : NULL;
+			if (cond == NULL || msg == NULL || msg->op != OP_STR || (level != NULL && level->next != NULL)) {
+				err = "assert() needs a condition and a message string, assert(condition, \"message\")";
+				return false;
+			}
+			out.cond = cond;
+			out.message = idName(msg);
+			out.warning = false;
+			if (level != NULL) {
+				const string name = level->op == OP_MEMBER && level->subs[0] != NULL ? idName(level->subs[0]) + "." + idName(level) : string();
+				if (name == "AssertionLevel.warning") {
+					out.warning = true;
+				} else if (name != "AssertionLevel.error") {
+					err = "the level of assert() must be AssertionLevel.error or AssertionLevel.warning";
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool parseTerminateCall(const AstNode *call, string &message, string &err) {
+			const AstNode *msg = call != NULL ? call->subs[1] : NULL;
+			if (msg == NULL || msg->op != OP_STR || msg->next != NULL) {
+				err = "terminate() needs one message string, terminate(\"message\")";
+				return false;
+			}
+			message = idName(msg);
+			return true;
+		}
+
 		namespace {
 			bool hasHybridNode(const AstNode *p) {
 				for (; p != NULL; p = p->next) {
-					if (p->nodeKind == NK_IfEquation || p->nodeKind == NK_WhenEquation || p->op == OP_IFEXPR || isTimeId(p)) {
+					if (p->nodeKind == NK_IfEquation || p->nodeKind == NK_WhenEquation || p->op == OP_IFEXPR || isTimeId(p) || isAssertCall(p) || isTerminateCall(p)) {
 						return true;
 					}
 					if (hasHybridNode(p->subs[0]) || hasHybridNode(p->subs[1])) {
@@ -658,6 +699,21 @@ namespace che {
 							out.push_back(g);
 							w = w->subs[1] != NULL ? w->subs[1]->subs[1] : NULL;
 						}
+					} else if (isAssertCall(p)) {
+						AssertCall ac;
+						string e;
+						if (parseAssertCall(p, ac, e)) {
+							Guard g;
+							g.id = (int)out.size();
+							g.kind = G_ASSERT;
+							g.cond = ac.cond;
+							g.line = p->line;
+							g.dynamic = true;
+							g.message = ac.message;
+							g.warning = ac.warning;
+							p->index = g.id;
+							out.push_back(g);
+						}
 					} else {
 						numberExprGuards(p, env, out);
 					}
@@ -684,7 +740,7 @@ namespace che {
 					err = lineMsg(g.line, e);
 					return false;
 				}
-				truth[g.id] = (v != 0.0);
+				truth[g.id] = (g.kind == G_ASSERT) ? (v == 0.0) : (v != 0.0);
 			}
 			return true;
 		}
@@ -874,8 +930,32 @@ namespace che {
 								return false;
 							}
 							ev.reinits.push_back(make_pair(n, v));
+						} else if (isAssertCall(s)) {
+							AssertCall ac;
+							string e;
+							double v;
+							if (!parseAssertCall(s, ac, e) || !env.eval(ac.cond, v, e)) {
+								err = lineMsg(link.line, e);
+								return false;
+							}
+							if (v == 0.0) {
+								ostringstream os;
+								os << "assertion violated at t=" << T << ": " << ac.message;
+								if (!ac.warning) {
+									err = lineMsg(link.line, os.str());
+									return false;
+								}
+								ev.warnings.push_back(os.str());
+							}
+						} else if (isTerminateCall(s)) {
+							string e;
+							if (!parseTerminateCall(s, ev.message, e)) {
+								err = lineMsg(link.line, e);
+								return false;
+							}
+							ev.terminate = true;
 						} else {
-							err = lineMsg(link.line, "unsupported statement in when-equation; expect `d = expr;` or `reinit(x, expr);`");
+							err = lineMsg(link.line, "unsupported statement in when-equation; expect `d = expr;`, `reinit(x, expr);`, `assert(...)` or `terminate(...)`");
 							return false;
 						}
 					}
@@ -967,8 +1047,8 @@ namespace che {
 				}
 				AstNode *nxt = st->next;
 				st->next = NULL;
-				if (st->nodeKind == NK_WhenEquation) {
-					freeTree(st);
+				if (st->nodeKind == NK_WhenEquation || isAssertCall(st) || isTerminateCall(st)) {
+					freeTree(st); // handled by the simulator, not part of the continuous model
 				} else if (st->nodeKind == NK_IfEquation) {
 					double c;
 					string e;

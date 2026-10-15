@@ -240,6 +240,26 @@ namespace che {
 					strictExpr(p->subs[1], line, ctx);
 				}
 
+				// assert(cond, "message" [, level]) and terminate("message") statements.
+				void strictAssertOrTerminate(const AstNode *s, int line, bool allowTerminate) {
+					string e;
+					if (isAssertCall(s)) {
+						AssertCall ac;
+						if (!parseAssertCall(s, ac, e)) {
+							report(line, e);
+						} else {
+							strictExpr(ac.cond, line, CTX_EVENT);
+						}
+					} else if (!allowTerminate) {
+						report(line, "terminate() can only be used in a when-equation");
+					} else {
+						string message;
+						if (!parseTerminateCall(s, message, e)) {
+							report(line, e);
+						}
+					}
+				}
+
 				void strictWhen(const AstNode *w, int line) {
 					for (; w != NULL && w->nodeKind == NK_WhenEquation; w = w->subs[1] != NULL ? w->subs[1]->subs[1] : NULL) {
 						if (w->line > 0) {
@@ -268,12 +288,14 @@ namespace che {
 									report(line, "only discrete variables can be assigned in a when-equation; use reinit() for '" + string((const char *)s->subs[0]->value.p) + "'");
 								}
 								strictExpr(s->subs[1], line, CTX_EVENT);
+							} else if (isAssertCall(s) || isTerminateCall(s)) {
+								strictAssertOrTerminate(s, line, true);
 							} else if (s->op == OP_CALL && s->subs[0] != NULL && s->subs[0]->value.p != NULL && string((const char *)s->subs[0]->value.p) == "reinit") {
 								if (s->subs[1] != NULL && s->subs[1]->next != NULL) {
 									strictExpr(s->subs[1]->next, line, CTX_EVENT);
 								}
 							} else {
-								report(line, "unsupported statement in when-equation; expect `d = expr;` or `reinit(x, expr);`");
+								report(line, "unsupported statement in when-equation; expect `d = expr;`, `reinit(x, expr);`, `assert(...)` or `terminate(...)`");
 							}
 						}
 					}
@@ -308,6 +330,12 @@ namespace che {
 							}
 							strictExpr(lhs, line, CTX_CONT);
 							strictExpr(p->subs[1], line, CTX_CONT);
+						} else if (isAssertCall(p) || isTerminateCall(p)) {
+							if (!top) {
+								report(line, "assert() and terminate() are not supported inside if-equations");
+							} else {
+								strictAssertOrTerminate(p, line, false);
+							}
 						}
 					}
 				}
@@ -325,7 +353,14 @@ namespace che {
 						if (callee != NULL && callee->op == OP_ID && callee->value.p != NULL) {
 							checkFunction((const char *)callee->value.p, line);
 						}
-						walkExpr(p->subs[1], line); // arguments (chain)
+						if (callee != NULL && callee->op == OP_ID && callee->value.p != NULL && string((const char *)callee->value.p) == "assert") {
+							// the level argument AssertionLevel.warning is not an identifier of the model
+							for (AstNode *a = p->subs[1]; a != NULL && a->op != OP_MEMBER; a = a->next) {
+								walkExpr(a, line, false);
+							}
+						} else {
+							walkExpr(p->subs[1], line); // arguments (chain)
+						}
 					} else if (p->op == OP_ID && p->ty != TY_FUNCTION && p->value.p != NULL) {
 						const char *n = (const char *)p->value.p;
 						shared_ptr<IdPearl> id = model.lookupIdFromModel(n, (int)strlen(n));

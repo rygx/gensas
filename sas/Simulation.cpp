@@ -362,6 +362,7 @@ namespace che {
 				solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;
 				solverFeatures.whenEquations = solverFeatures.piecewiseFunctions = solverFeatures.eventFunctions = true;
 				solverFeatures.simulationTime = true;
+				solverFeatures.terminateAndAssert = true;
 				solverFeatures.timeEventsOnly = true;
 				solverFeatures.stateEvents = true;
 			}
@@ -383,8 +384,10 @@ namespace che {
 				if (solutions == nullptr) {
 					wasCancelled = hybridSim.cancelled();
 					err = hybridSim.error();
+					warns.insert(warns.end(), hybridSim.warnings().begin(), hybridSim.warnings().end());
 					return false;
 				}
+				warns.insert(warns.end(), hybridSim.warnings().begin(), hybridSim.warnings().end());
 			} else {
 				compModel.generateCompModel(parser.pool);
 				compModel.preprocessModels();

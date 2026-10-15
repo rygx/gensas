@@ -98,7 +98,7 @@ namespace che {
 				return wasCancelled;
 			}
 
-			// Messages about adjusted options and similar; valid right after construction.
+			// Messages about adjusted options (known right after construction) and about the last run.
 			const std::vector<std::string> &warnings() const {
 				return warns;
 			}
@@ -126,6 +126,7 @@ namespace che {
 
 			ModelicaJob jobData;
 			std::vector<std::string> warns;
+			size_t nJobWarnings = 0;
 			std::string err;
 			bool wasCancelled = false;
 			double elapsed = 0.0;

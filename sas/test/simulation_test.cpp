@@ -55,6 +55,17 @@ static void testPlainRun() {
 	CHECK(sim.result().events.empty());
 }
 
+// Running twice gives the same result and does not pile up warnings.
+static void testRunTwice() {
+	Simulation sim(sourceJob(kDecay, 1.0));
+	CHECK(sim.run());
+	size_t warnings = sim.warnings().size();
+	size_t n = sim.result().time.size();
+	CHECK(sim.run());
+	CHECK_EQ(sim.warnings().size(), warnings);
+	CHECK_EQ(sim.result().time.size(), n);
+}
+
 static void testHybridRun() {
 	Simulation sim(sourceJob(kGainSwitch, 2.0));
 	CHECK(sim.run());
@@ -227,6 +238,7 @@ static void testWriteResult() {
 
 int main() {
 	testPlainRun();
+	testRunTwice();
 	testHybridRun();
 	testBadModels();
 	testSolverFailureIsReported();

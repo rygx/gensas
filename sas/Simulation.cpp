@@ -304,6 +304,7 @@ namespace che {
 
 		Simulation::Simulation(const ModelicaJob &job) : jobData(job) {
 			applyJobLimits(jobData, warns);
+			nJobWarnings = warns.size();
 		}
 
 		bool Simulation::run(const ProgressFn &progress) {
@@ -321,6 +322,7 @@ namespace che {
 
 		bool Simulation::runImpl(const ProgressFn &progress) {
 			err.clear();
+			warns.resize(nJobWarnings); // warnings of an earlier run
 			wasCancelled = false;
 			res = SasResult();
 			const auto started = chrono::steady_clock::now();

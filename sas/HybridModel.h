@@ -116,6 +116,14 @@ namespace che {
 		// Truth values of the dynamic guards under the values in `env` (including `env.time`).
 		bool evalGuards(const std::vector<Guard> &guards, const HybridEnv &env, std::map<int, bool> &truth, std::string &err);
 
+		// Relational operators (<, <=, >, >=) in the conditions of the dynamic guards. The simulator
+		// watches their margins (left minus right side) to find crossings that a guard evaluated at
+		// two sample times cannot see.
+		std::vector<const AstNode *> collectRelations(const std::vector<Guard> &guards);
+
+		// Margin (left side minus right side) of a relation from collectRelations().
+		bool relationMargin(const AstNode *relation, const HybridEnv &env, double &margin, std::string &err);
+
 		// Smallest event time strictly after `t` over all clauses; returns false if there is none.
 		// Returns false with a non-empty `err` on evaluation errors.
 		bool nextEventTime(const std::vector<WhenClause> &clauses, HybridEnv &env, double t, double &te, std::string &err);

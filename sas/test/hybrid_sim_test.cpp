@@ -10,6 +10,7 @@
 #include "json/json.h"
 
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -494,6 +495,83 @@ static void testStateAlgebraicSwap() {
 	}
 }
 
+// A pulse that starts and ends between two guard samples (the default spacing is 1/48 s on a 1 s
+// segment). The parabola x(t) = h - 400 (t - c)^2 is above zero for |t - c| < sqrt(h / 400) only.
+static string pulseModel(const char *sign, const char *guard, const char *body) {
+	const double c = 49.0 / 96.0; // halfway between the samples 24/48 and 25/48
+	const double h = 0.005;
+	char buf[1024];
+	std::snprintf(buf, sizeof(buf),
+				  "model M\n"
+				  "  Real x(start = %.15g);\n"
+				  "  Real v(start = %.15g);\n"
+				  "  Real y(start = 0);\n"
+				  "  discrete Integer n(start = 0);\n"
+				  "equation\n"
+				  "  der(x) = v;\n"
+				  "  der(v) = %s800;\n"
+				  "%s"
+				  "%s"
+				  "end M;\n",
+				  *sign == '-' ? h - 400.0 * c * c : -h + 400.0 * c * c,
+				  *sign == '-' ? 800.0 * c : -800.0 * c, sign, guard, body);
+	return buf;
+}
+
+static void testPulseBetweenSamples() {
+	Run run;
+	string src = pulseModel("-",
+							"  der(y) = 0;\n"
+							"  when x > 0 then\n"
+							"    n = pre(n) + 1;\n"
+							"  end when;\n",
+							"");
+	if (!simulate(run, src, 1.0)) {
+		return;
+	}
+	CHECK_EQ(run.sim->events().size(), (size_t)1);
+	if (run.sim->events().size() == 1) {
+		CHECK_NEAR(run.sim->events()[0].time, 49.0 / 96.0 - std::sqrt(0.005 / 400.0), 1e-9);
+	}
+	CHECK_NEAR(finalValue(run, "n"), 1.0, 0.0);
+}
+
+// The margin dips below zero and comes back between two samples: a when-condition re-arms and
+// fires on the way up.
+static void testDipBetweenSamples() {
+	Run run;
+	string src = pulseModel("",
+							"  der(y) = 0;\n"
+							"  when x > 0 then\n"
+							"    n = pre(n) + 1;\n"
+							"  end when;\n",
+							"");
+	if (!simulate(run, src, 1.0)) {
+		return;
+	}
+	CHECK_EQ(run.sim->events().size(), (size_t)1);
+	if (run.sim->events().size() == 1) {
+		CHECK_NEAR(run.sim->events()[0].time, 49.0 / 96.0 + std::sqrt(0.005 / 400.0), 1e-9);
+	}
+	CHECK_NEAR(finalValue(run, "n"), 1.0, 0.0);
+}
+
+// An if-equation whose guard is true only during the pulse: y integrates the pulse length.
+static void testPulseInIfEquation() {
+	Run run;
+	string src = pulseModel("-",
+							"  if x > 0 then\n"
+							"    der(y) = 1;\n"
+							"  else\n"
+							"    der(y) = 0;\n"
+							"  end if;\n",
+							"");
+	if (!simulate(run, src, 1.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "y"), 2.0 * std::sqrt(0.005 / 400.0), 1e-6);
+}
+
 // Equations listed in a different order per mode.
 static void testReorderedEquations() {
 	Run run;
@@ -522,6 +600,9 @@ static void testReorderedEquations() {
 }
 
 int main() {
+	testPulseBetweenSamples();
+	testDipBetweenSamples();
+	testPulseInIfEquation();
 	testStateAlgebraicSwap();
 	testReorderedEquations();
 	testJsonResult();

@@ -448,6 +448,38 @@ namespace che {
 		}
 
 		namespace {
+			void gatherRelations(const AstNode *p, std::vector<const AstNode *> &out) {
+				if (p == NULL) {
+					return;
+				}
+				if (p->op == OP_GREAT || p->op == OP_LESS || p->op == OP_GREAT_EQ || p->op == OP_LESS_EQ) {
+					out.push_back(p);
+				}
+				gatherRelations(p->subs[0], out);
+				gatherRelations(p->subs[1], out);
+			}
+		} // namespace
+
+		vector<const AstNode *> collectRelations(const vector<Guard> &guards) {
+			vector<const AstNode *> rels;
+			for (const Guard &g : guards) {
+				if (g.dynamic) {
+					gatherRelations(g.cond, rels);
+				}
+			}
+			return rels;
+		}
+
+		bool relationMargin(const AstNode *relation, const HybridEnv &env, double &margin, string &err) {
+			double a, b;
+			if (!env.eval(relation->subs[0], a, err) || !env.eval(relation->subs[1], b, err)) {
+				return false;
+			}
+			margin = a - b;
+			return true;
+		}
+
+		namespace {
 
 			// Next time strictly after t at which the link's condition becomes true.
 			bool linkNextTime(const WhenLink &link, HybridEnv &env, double t, double &te, bool &found, string &err) {

@@ -178,253 +178,255 @@ static void testAtan2() {
 	Simulation c(job(num, 1.0));
 	CHECK(c.run());
 	CHECK_NEAR(lastValue(c.result(), "x"), std::exp(-0.75 * pi * c.result().time.back()), 1e-4);
-	// when initial() runs once at the start time.
-	static void testWhenInitial() {
-		const char *src =
-			"model M\n"
-			"  discrete Real a(start = 0);\n"
-			"  Real x(start = 1);\n"
-			"equation\n"
-			"  der(x) = -a*x - x;\n"
-			"  when initial() then\n"
-			"    reinit(x, 2);\n"
-			"    a = 3;\n"
-			"  elsewhen time >= 1 then\n"
-			"    a = 0;\n"
-			"  end when;\n"
-			"end M;\n";
-		Simulation sim(job(src, 2.0));
-		CHECK(sim.run());
-		CHECK_EQ(sim.result().events.size(), (size_t)2);
-		if (sim.result().events.size() == 2) {
-			const SasEventRecord &first = sim.result().events[0];
-			CHECK_NEAR(first.time, 0.0, 1e-12);
-			CHECK_EQ(first.reinits.size(), (size_t)1);
-			CHECK_EQ(first.assignments.size(), (size_t)1);
-			CHECK_NEAR(sim.result().events[1].time, 1.0, 1e-9);
+}
+
+// when initial() runs once at the start time.
+static void testWhenInitial() {
+	const char *src =
+		"model M\n"
+		"  discrete Real a(start = 0);\n"
+		"  Real x(start = 1);\n"
+		"equation\n"
+		"  der(x) = -a*x - x;\n"
+		"  when initial() then\n"
+		"    reinit(x, 2);\n"
+		"    a = 3;\n"
+		"  elsewhen time >= 1 then\n"
+		"    a = 0;\n"
+		"  end when;\n"
+		"end M;\n";
+	Simulation sim(job(src, 2.0));
+	CHECK(sim.run());
+	CHECK_EQ(sim.result().events.size(), (size_t)2);
+	if (sim.result().events.size() == 2) {
+		const SasEventRecord &first = sim.result().events[0];
+		CHECK_NEAR(first.time, 0.0, 1e-12);
+		CHECK_EQ(first.reinits.size(), (size_t)1);
+		CHECK_EQ(first.assignments.size(), (size_t)1);
+		CHECK_NEAR(sim.result().events[1].time, 1.0, 1e-9);
+	}
+	// x starts at 2, decays with rate 4 until t = 1, then with rate 1.
+	double t = sim.result().time.back();
+	CHECK_NEAR(lastValue(sim.result(), "x"), 2.0 * std::exp(-4.0) * std::exp(-(t - 1.0)), 1e-4);
+
+	// `or` in conditions (it was missing from the keyword table).
+	const char *either =
+		"model M\n  Real x(start = 1);\n  discrete Real a(start = 0);\nequation\n  der(x) = -x;\n  when x < 0.5 or x > 3 then\n    a = 1;\n  end when;\nend M;\n";
+	Simulation o(job(either, 2.0));
+	CHECK(o.run());
+	CHECK_EQ(o.result().events.size(), (size_t)1);
+	if (!o.result().events.empty()) {
+		CHECK_NEAR(o.result().events[0].time, std::log(2.0), 1e-6);
+	}
+
+	// initial() is only a when-condition by itself.
+	Simulation bad(job("model M\n  Real x(start = 1);\n  discrete Real a(start = 0);\nequation\n  der(x) = -x;\n  when initial() or x < 0.5 then\n    a = 1;\n  end when;\nend M;\n", 1.0));
+	CHECK(!bad.run());
+	CHECK(bad.error().find("initial()") != std::string::npos);
+}
+
+// noEvent(e) in a continuous equation is accepted; the switch is still located as an event.
+static void testNoEvent() {
+	const char *src =
+		"model M\n"
+		"  Real x(start = 1);\n"
+		"equation\n"
+		"  der(x) = noEvent(if x > 0.5 then -x else -2*x);\n"
+		"end M;\n";
+	Simulation sim(job(src, 2.0));
+	CHECK(sim.run());
+	double t = sim.result().time.back();
+	CHECK_NEAR(lastValue(sim.result(), "x"), 0.5 * std::exp(-2.0 * (t - std::log(2.0))), 1e-4);
+}
+
+// Real y = expr; is an equation, wherever y and the variables in expr are declared.
+static void testBindingEquations() {
+	const char *src =
+		"model M\n"
+		"  Real y = 2*x;\n"
+		"  Real x(start = 1);\n"
+		"  Real s(start = 0) = sin(x);\n"
+		"equation\n"
+		"  der(x) = -y;\n"
+		"end M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	CHECK(sim.error().empty());
+	double t = sim.result().time.back();
+	CHECK_NEAR(lastValue(sim.result(), "x"), std::exp(-2.0 * t), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "y"), 2.0 * std::exp(-2.0 * t), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "s"), std::sin(std::exp(-2.0 * t)), 1e-4);
+
+	// Combined with events.
+	const char *hybrid =
+		"model M\n"
+		"  Real x(start = 1);\n"
+		"  Real y = 3*x;\n"
+		"  discrete Real k(start = 1);\n"
+		"equation\n"
+		"  der(x) = -k*x;\n"
+		"  when time >= 1 then\n"
+		"    k = 2;\n"
+		"  end when;\n"
+		"end M;\n";
+	Simulation h(job(hybrid, 2.0));
+	CHECK(h.run());
+	t = h.result().time.back();
+	double x = std::exp(-1.0) * std::exp(-2.0 * (t - 1.0));
+	CHECK_NEAR(lastValue(h.result(), "x"), x, 1e-4);
+	CHECK_NEAR(lastValue(h.result(), "y"), 3.0 * x, 1e-4);
+
+	// Discrete variables are assigned in when-equations.
+	Simulation bad(job("model M\n  discrete Real d = 1;\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!bad.run());
+	CHECK(bad.error().find("discrete variable 'd'") != std::string::npos);
+}
+
+// A model written the way Modelica sources usually are.
+static void testSourceLayout() {
+	const char *src =
+		"model M \"a model\"\n"
+		"  /* block\n     comment */\n"
+		"  parameter Real k = 2 \"gain\"; // trailing\n"
+		"  Real x(start = 1) \"state\", z(start = 2);\n"
+		"  output Real y;\n"
+		"  input Real u = 0.5;\n"
+		"  annotation(Icon(coordinateSystem(extent = {{-100, -100}, {100, 100}})));\n"
+		"equation\n"
+		"  der(x) = -k*x + u; /* inline */\n"
+		"  der(z) = -z;\n"
+		"  y = x + z;\n"
+		"  annotation(experiment(StopTime = 1, Tolerance = 1e-6));\n"
+		"end M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	double t = sim.result().time.back();
+	double x = 0.25 + 0.75 * std::exp(-2.0 * t);
+	CHECK_NEAR(lastValue(sim.result(), "x"), x, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "y"), x + 2.0 * std::exp(-t), 1e-4);
+}
+
+// Implicit algebraic equations are solved with Newton's method from the start values; a missing
+// start value that makes the Jacobian singular is reported instead of giving a wrong result.
+static void testImplicitAlgebraicEquations() {
+	const char *src =
+		"model M\n  Real x(start = 4);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  y*y = x;\nend M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	CHECK_NEAR(lastValue(sim.result(), "y"), std::sqrt(4.0 * std::exp(-sim.result().time.back())), 1e-4);
+
+	const char *cubic =
+		"model M\n  Real x(start = 4);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  x = y*y*y;\nend M;\n";
+	Simulation c(job(cubic, 1.0));
+	CHECK(c.run());
+	CHECK_NEAR(lastValue(c.result(), "y"), std::cbrt(4.0 * std::exp(-c.result().time.back())), 1e-4);
+
+	const char *noStart =
+		"model M\n  Real x(start = 4);\n  Real y;\nequation\n  der(x) = -x;\n  y*y = x;\nend M;\n";
+	Simulation bad(job(noStart, 1.0));
+	CHECK(!bad.run());
+	CHECK(bad.error().find("cannot be solved consistently") != std::string::npos);
+}
+
+// Arrays are sets of scalar variables; for-equations are unrolled.
+static void testArrays() {
+	// A cascade of first-order lags: x1 = exp(-t), x2 = t exp(-t), x3 = t^2/2 exp(-t), x4 = t^3/6 exp(-t).
+	const char *cascade =
+		"model M\n"
+		"  parameter Integer n = 4;\n"
+		"  Real x[n](start = {1, 0, 0, 0});\n"
+		"equation\n"
+		"  der(x[1]) = -x[1];\n"
+		"  for i in 2:n loop\n"
+		"    der(x[i]) = x[i-1] - x[i];\n"
+		"  end for;\n"
+		"end M;\n";
+	Simulation a(job(cascade, 2.0));
+	CHECK(a.run());
+	double t = a.result().time.back();
+	CHECK_NEAR(lastValue(a.result(), "x[1]"), std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(a.result(), "x[2]"), t * std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(a.result(), "x[3]"), t * t / 2.0 * std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(a.result(), "x[4]"), t * t * t / 6.0 * std::exp(-t), 1e-4);
+
+	// Two dimensions, nested iterators, a parameter array, sum(), size() and `each`.
+	const char *matrix =
+		"model M\n"
+		"  parameter Real k[2] = {1, 2};\n"
+		"  Real A[2,3](each start = 1);\n"
+		"  Real s = sum(A) + size(A, 2);\n"
+		"equation\n"
+		"  for i in 1:2, j in 1:size(A, 2) loop\n"
+		"    der(A[i,j]) = -k[i]*j*A[i,j];\n"
+		"  end for;\n"
+		"end M;\n";
+	Simulation m(job(matrix, 1.0));
+	CHECK(m.run());
+	t = m.result().time.back();
+	double total = 0.0;
+	for (int i = 1; i <= 2; i++) {
+		for (int j = 1; j <= 3; j++) {
+			double expected = std::exp(-i * j * t); // k[i] = i
+			char name[16];
+			std::snprintf(name, sizeof name, "A[%d,%d]", i, j);
+			CHECK_NEAR(lastValue(m.result(), name), expected, 1e-4);
+			total += expected;
 		}
-		// x starts at 2, decays with rate 4 until t = 1, then with rate 1.
-		double t = sim.result().time.back();
-		CHECK_NEAR(lastValue(sim.result(), "x"), 2.0 * std::exp(-4.0) * std::exp(-(t - 1.0)), 1e-4);
-
-		// `or` in conditions (it was missing from the keyword table).
-		const char *either =
-			"model M\n  Real x(start = 1);\n  discrete Real a(start = 0);\nequation\n  der(x) = -x;\n  when x < 0.5 or x > 3 then\n    a = 1;\n  end when;\nend M;\n";
-		Simulation o(job(either, 2.0));
-		CHECK(o.run());
-		CHECK_EQ(o.result().events.size(), (size_t)1);
-		if (!o.result().events.empty()) {
-			CHECK_NEAR(o.result().events[0].time, std::log(2.0), 1e-6);
-		}
-
-		// initial() is only a when-condition by itself.
-		Simulation bad(job("model M\n  Real x(start = 1);\n  discrete Real a(start = 0);\nequation\n  der(x) = -x;\n  when initial() or x < 0.5 then\n    a = 1;\n  end when;\nend M;\n", 1.0));
-		CHECK(!bad.run());
-		CHECK(bad.error().find("initial()") != std::string::npos);
 	}
+	CHECK_NEAR(lastValue(m.result(), "s"), total + 3.0, 1e-3);
 
-	// noEvent(e) in a continuous equation is accepted; the switch is still located as an event.
-	static void testNoEvent() {
-		const char *src =
-			"model M\n"
-			"  Real x(start = 1);\n"
-			"equation\n"
-			"  der(x) = noEvent(if x > 0.5 then -x else -2*x);\n"
-			"end M;\n";
-		Simulation sim(job(src, 2.0));
-		CHECK(sim.run());
-		double t = sim.result().time.back();
-		CHECK_NEAR(lastValue(sim.result(), "x"), 0.5 * std::exp(-2.0 * (t - std::log(2.0))), 1e-4);
+	// Reverse and stepped ranges; the dimensions in front of the name apply to every declarator.
+	const char *ranges =
+		"model M\n"
+		"  Real[2] x(each start = 1), y(each start = 2);\n"
+		"equation\n"
+		"  for i in 1:2 loop der(x[i]) = -x[i]; end for;\n"
+		"  for i in 2:-1:1 loop der(y[i]) = -2*y[i]; end for;\n"
+		"end M;\n";
+	Simulation r(job(ranges, 1.0));
+	CHECK(r.run());
+	t = r.result().time.back();
+	CHECK_NEAR(lastValue(r.result(), "x[2]"), std::exp(-t), 1e-4);
+	CHECK_NEAR(lastValue(r.result(), "y[1]"), 2.0 * std::exp(-2.0 * t), 1e-4);
+
+	// Initial equations in a loop; when-equations in a loop.
+	const char *events =
+		"model M\n"
+		"  discrete Real a[2](each start = 0);\n"
+		"  Real x[2];\n"
+		"equation\n"
+		"  for i in 1:2 loop\n"
+		"    der(x[i]) = -a[i] - x[i];\n"
+		"    when time >= i then\n"
+		"      a[i] = 2*i;\n"
+		"    end when;\n"
+		"  end for;\n"
+		"initial equation\n"
+		"  for i in 1:2 loop x[i] = i; end for;\n"
+		"end M;\n";
+	Simulation e(job(events, 3.0));
+	CHECK(e.run());
+	CHECK_EQ(e.result().events.size(), (size_t)2);
+	if (e.result().events.size() == 2) {
+		CHECK_NEAR(e.result().events[0].time, 1.0, 1e-9);
+		CHECK_NEAR(e.result().events[1].time, 2.0, 1e-9);
 	}
+	t = e.result().time.back();
+	// x1: -x - a with a = 2 after t = 1: x1(t) = -2 + (x1(1) + 2) exp(-(t-1)), x1(1) = exp(-1)
+	CHECK_NEAR(lastValue(e.result(), "x[1]"), -2.0 + (std::exp(-1.0) + 2.0) * std::exp(-(t - 1.0)), 1e-3);
+}
 
-	// Real y = expr; is an equation, wherever y and the variables in expr are declared.
-	static void testBindingEquations() {
-		const char *src =
-			"model M\n"
-			"  Real y = 2*x;\n"
-			"  Real x(start = 1);\n"
-			"  Real s(start = 0) = sin(x);\n"
-			"equation\n"
-			"  der(x) = -y;\n"
-			"end M;\n";
-		Simulation sim(job(src, 1.0));
-		CHECK(sim.run());
-		CHECK(sim.error().empty());
-		double t = sim.result().time.back();
-		CHECK_NEAR(lastValue(sim.result(), "x"), std::exp(-2.0 * t), 1e-4);
-		CHECK_NEAR(lastValue(sim.result(), "y"), 2.0 * std::exp(-2.0 * t), 1e-4);
-		CHECK_NEAR(lastValue(sim.result(), "s"), std::sin(std::exp(-2.0 * t)), 1e-4);
-
-		// Combined with events.
-		const char *hybrid =
-			"model M\n"
-			"  Real x(start = 1);\n"
-			"  Real y = 3*x;\n"
-			"  discrete Real k(start = 1);\n"
-			"equation\n"
-			"  der(x) = -k*x;\n"
-			"  when time >= 1 then\n"
-			"    k = 2;\n"
-			"  end when;\n"
-			"end M;\n";
-		Simulation h(job(hybrid, 2.0));
-		CHECK(h.run());
-		t = h.result().time.back();
-		double x = std::exp(-1.0) * std::exp(-2.0 * (t - 1.0));
-		CHECK_NEAR(lastValue(h.result(), "x"), x, 1e-4);
-		CHECK_NEAR(lastValue(h.result(), "y"), 3.0 * x, 1e-4);
-
-		// Discrete variables are assigned in when-equations.
-		Simulation bad(job("model M\n  discrete Real d = 1;\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
-		CHECK(!bad.run());
-		CHECK(bad.error().find("discrete variable 'd'") != std::string::npos);
-	}
-
-	// A model written the way Modelica sources usually are.
-	static void testSourceLayout() {
-		const char *src =
-			"model M \"a model\"\n"
-			"  /* block\n     comment */\n"
-			"  parameter Real k = 2 \"gain\"; // trailing\n"
-			"  Real x(start = 1) \"state\", z(start = 2);\n"
-			"  output Real y;\n"
-			"  input Real u = 0.5;\n"
-			"  annotation(Icon(coordinateSystem(extent = {{-100, -100}, {100, 100}})));\n"
-			"equation\n"
-			"  der(x) = -k*x + u; /* inline */\n"
-			"  der(z) = -z;\n"
-			"  y = x + z;\n"
-			"  annotation(experiment(StopTime = 1, Tolerance = 1e-6));\n"
-			"end M;\n";
-		Simulation sim(job(src, 1.0));
-		CHECK(sim.run());
-		double t = sim.result().time.back();
-		double x = 0.25 + 0.75 * std::exp(-2.0 * t);
-		CHECK_NEAR(lastValue(sim.result(), "x"), x, 1e-4);
-		CHECK_NEAR(lastValue(sim.result(), "y"), x + 2.0 * std::exp(-t), 1e-4);
-	}
-
-	// Implicit algebraic equations are solved with Newton's method from the start values; a missing
-	// start value that makes the Jacobian singular is reported instead of giving a wrong result.
-	static void testImplicitAlgebraicEquations() {
-		const char *src =
-			"model M\n  Real x(start = 4);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  y*y = x;\nend M;\n";
-		Simulation sim(job(src, 1.0));
-		CHECK(sim.run());
-		CHECK_NEAR(lastValue(sim.result(), "y"), std::sqrt(4.0 * std::exp(-sim.result().time.back())), 1e-4);
-
-		const char *cubic =
-			"model M\n  Real x(start = 4);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  x = y*y*y;\nend M;\n";
-		Simulation c(job(cubic, 1.0));
-		CHECK(c.run());
-		CHECK_NEAR(lastValue(c.result(), "y"), std::cbrt(4.0 * std::exp(-c.result().time.back())), 1e-4);
-
-		const char *noStart =
-			"model M\n  Real x(start = 4);\n  Real y;\nequation\n  der(x) = -x;\n  y*y = x;\nend M;\n";
-		Simulation bad(job(noStart, 1.0));
-		CHECK(!bad.run());
-		CHECK(bad.error().find("cannot be solved consistently") != std::string::npos);
-	}
-
-	// Arrays are sets of scalar variables; for-equations are unrolled.
-	static void testArrays() {
-		// A cascade of first-order lags: x1 = exp(-t), x2 = t exp(-t), x3 = t^2/2 exp(-t), x4 = t^3/6 exp(-t).
-		const char *cascade =
-			"model M\n"
-			"  parameter Integer n = 4;\n"
-			"  Real x[n](start = {1, 0, 0, 0});\n"
-			"equation\n"
-			"  der(x[1]) = -x[1];\n"
-			"  for i in 2:n loop\n"
-			"    der(x[i]) = x[i-1] - x[i];\n"
-			"  end for;\n"
-			"end M;\n";
-		Simulation a(job(cascade, 2.0));
-		CHECK(a.run());
-		double t = a.result().time.back();
-		CHECK_NEAR(lastValue(a.result(), "x[1]"), std::exp(-t), 1e-4);
-		CHECK_NEAR(lastValue(a.result(), "x[2]"), t * std::exp(-t), 1e-4);
-		CHECK_NEAR(lastValue(a.result(), "x[3]"), t * t / 2.0 * std::exp(-t), 1e-4);
-		CHECK_NEAR(lastValue(a.result(), "x[4]"), t * t * t / 6.0 * std::exp(-t), 1e-4);
-
-		// Two dimensions, nested iterators, a parameter array, sum(), size() and `each`.
-		const char *matrix =
-			"model M\n"
-			"  parameter Real k[2] = {1, 2};\n"
-			"  Real A[2,3](each start = 1);\n"
-			"  Real s = sum(A) + size(A, 2);\n"
-			"equation\n"
-			"  for i in 1:2, j in 1:size(A, 2) loop\n"
-			"    der(A[i,j]) = -k[i]*j*A[i,j];\n"
-			"  end for;\n"
-			"end M;\n";
-		Simulation m(job(matrix, 1.0));
-		CHECK(m.run());
-		t = m.result().time.back();
-		double total = 0.0;
-		for (int i = 1; i <= 2; i++) {
-			for (int j = 1; j <= 3; j++) {
-				double expected = std::exp(-i * j * t); // k[i] = i
-				char name[16];
-				std::snprintf(name, sizeof name, "A[%d,%d]", i, j);
-				CHECK_NEAR(lastValue(m.result(), name), expected, 1e-4);
-				total += expected;
-			}
-		}
-		CHECK_NEAR(lastValue(m.result(), "s"), total + 3.0, 1e-3);
-
-		// Reverse and stepped ranges; the dimensions in front of the name apply to every declarator.
-		const char *ranges =
-			"model M\n"
-			"  Real[2] x(each start = 1), y(each start = 2);\n"
-			"equation\n"
-			"  for i in 1:2 loop der(x[i]) = -x[i]; end for;\n"
-			"  for i in 2:-1:1 loop der(y[i]) = -2*y[i]; end for;\n"
-			"end M;\n";
-		Simulation r(job(ranges, 1.0));
-		CHECK(r.run());
-		t = r.result().time.back();
-		CHECK_NEAR(lastValue(r.result(), "x[2]"), std::exp(-t), 1e-4);
-		CHECK_NEAR(lastValue(r.result(), "y[1]"), 2.0 * std::exp(-2.0 * t), 1e-4);
-
-		// Initial equations in a loop; when-equations in a loop.
-		const char *events =
-			"model M\n"
-			"  discrete Real a[2](each start = 0);\n"
-			"  Real x[2];\n"
-			"equation\n"
-			"  for i in 1:2 loop\n"
-			"    der(x[i]) = -a[i] - x[i];\n"
-			"    when time >= i then\n"
-			"      a[i] = 2*i;\n"
-			"    end when;\n"
-			"  end for;\n"
-			"initial equation\n"
-			"  for i in 1:2 loop x[i] = i; end for;\n"
-			"end M;\n";
-		Simulation e(job(events, 3.0));
-		CHECK(e.run());
-		CHECK_EQ(e.result().events.size(), (size_t)2);
-		if (e.result().events.size() == 2) {
-			CHECK_NEAR(e.result().events[0].time, 1.0, 1e-9);
-			CHECK_NEAR(e.result().events[1].time, 2.0, 1e-9);
-		}
-		t = e.result().time.back();
-		// x1: -x - a with a = 2 after t = 1: x1(t) = -2 + (x1(1) + 2) exp(-(t-1)), x1(1) = exp(-1)
-		CHECK_NEAR(lastValue(e.result(), "x[1]"), -2.0 + (std::exp(-1.0) + 2.0) * std::exp(-(t - 1.0)), 1e-3);
-	}
-
-	int main() {
-		testAtan2();
-		testWhenInitial();
-		testArrays();
-		testSourceLayout();
-		testImplicitAlgebraicEquations();
-		testBindingEquations();
-		testBareFunctionCall();
-		testNoEvent();
-		testElementaryFunctions();
-		testFunctionsInOdes();
-		testFunctionsInParametersAndEvents();
-		return sastest::finish("modelica_language_test");
-	}
+int main() {
+	testAtan2();
+	testWhenInitial();
+	testArrays();
+	testSourceLayout();
+	testImplicitAlgebraicEquations();
+	testBindingEquations();
+	testBareFunctionCall();
+	testNoEvent();
+	testElementaryFunctions();
+	testFunctionsInOdes();
+	testFunctionsInParametersAndEvents();
+	return sastest::finish("modelica_language_test");
+}

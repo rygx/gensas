@@ -108,6 +108,20 @@ namespace che {
 				for (const pair<const string, double> &s : state) {
 					env.values[s.first] = s.second;
 				}
+				// edge() and change() compare with the values before this event instant.
+				env.eventPre.clear();
+				for (const string &n : env.discrete) {
+					env.eventPre[n] = env.values[n];
+				}
+				struct AtEvent {
+					HybridEnv &e;
+					explicit AtEvent(HybridEnv &env) : e(env) {
+						e.atEvent = true;
+					}
+					~AtEvent() {
+						e.atEvent = false;
+					}
+				} atEvent(env);
 				set<int> fired;
 				for (int iter = 0; iter < 50; iter++) {
 					map<int, bool> now;

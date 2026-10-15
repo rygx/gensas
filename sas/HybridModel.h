@@ -45,6 +45,10 @@ namespace che {
 			std::map<std::string, Type> types;	  // declared types of the discrete variables
 			std::set<std::string> discrete;		  // names of the discrete variables
 			double time = 0.0;
+			// Discrete values at the start of the event instant being handled; edge() and change()
+			// compare against them and are false outside event handling (`atEvent` is false).
+			std::map<std::string, double> eventPre;
+			bool atEvent = false;
 
 			// Evaluates an expression. Booleans are 1.0 / 0.0. Returns false and sets `err` on failure.
 			bool eval(const AstNode *p, double &out, std::string &err) const;

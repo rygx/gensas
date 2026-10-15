@@ -198,6 +198,23 @@ namespace che {
 			}
 			case OP_CALL: {
 				string fn = idName(p->subs[0]);
+				if ((fn == "edge" || fn == "change") && p->subs[1] != NULL && p->subs[1]->op == OP_ID && p->subs[1]->next == NULL) {
+					string n = idName(p->subs[1]);
+					map<string, double>::const_iterator now = values.find(n);
+					map<string, double>::const_iterator before = eventPre.find(n);
+					if (now == values.end()) {
+						err = "no value for '" + n + "'";
+						return false;
+					}
+					if (!atEvent || before == eventPre.end()) {
+						out = 0.0;
+					} else if (fn == "edge") {
+						out = (now->second != 0.0 && before->second == 0.0) ? 1.0 : 0.0;
+					} else {
+						out = (now->second != before->second) ? 1.0 : 0.0;
+					}
+					return true;
+				}
 				vector<double> args;
 				for (const AstNode *a = p->subs[1]; a != NULL; a = a->next) {
 					double v;

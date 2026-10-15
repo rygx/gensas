@@ -16,7 +16,7 @@ bazel-bin/app/app -p \
 
 Explanations:
 * The first argument `-p` (mandatory, and must be the first argument) means GenSAS runs under PowerSAS mode. For the rest of the arguments, the order does not matter.
-* `-f/--file <input-file-name>` (mandatory) specifies the input data. Currently the input file needs to be .mat file containing PSAT data structure. See `resources/psat_mat/d_014_syn_ind_zip_export.mat` for example.
+* `-f/--file <input-file-name>` (mandatory) specifies the input data: a GenSAS case file (see [Case format](CaseFormat.md)), made from a PSAT .mat file with `python3 scripts/psat_to_case.py`. PSAT .mat files (for example `resources/psat_mat/d_014_syn_ind_zip_export.mat`) are still accepted for now, but this is going away.
 * `-o/--output <output-file-name>` (mandatory) specifies the output curve data. Currently the output is a .mat file containing the power flow solution as a vector. The name is taken relative to the current directory, so do not pass an absolute path.
 * `-l/--level <sas-order>` (optional) specifies the order of SAS. If not specified, the order of SAS is 15.
 * `-s/--segment <segment-length>` (optional) specfies the length of a segment of SAS computation. If not specified, the the segment length is 1.0.

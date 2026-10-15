@@ -28,6 +28,13 @@ jobs:
           restore-keys: |
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
+      - name: Set up Python (case file conversion)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python packages
+        run: pip install numpy scipy h5py
+        shell: bash
       - name: Run integration test
         run: bash scripts/run_integration_test.sh
 
@@ -53,6 +60,13 @@ jobs:
           restore-keys: |
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
+      - name: Set up Python (case file conversion)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python packages
+        run: pip install numpy scipy h5py
+        shell: bash
       - name: Run integration test
         run: bash scripts/run_integration_test.sh
 
@@ -100,5 +114,12 @@ jobs:
           restore-keys: |
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-${{ hashFiles('WORKSPACE', 'BUILD.bazel', '.bazelrc', 'tools/**') }}-
             bazel-${{ runner.os }}-${{ env.CACHE_VERSION }}-
+      - name: Set up Python (case file conversion)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python packages
+        run: pip install numpy scipy h5py
+        shell: bash
       - name: Run integration test
         run: bash scripts/run_integration_test.sh

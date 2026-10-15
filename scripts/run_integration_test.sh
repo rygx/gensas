@@ -3,6 +3,8 @@
 #   1. The solver converges to alpha=1
 #   2. "Computation time:" is printed (clean exit after computation)
 #   3. Output .mat file is created and non-empty
+# and run the Modelica bouncing-ball example (-g mode) and verify:
+#   4. It exits cleanly, reports its 3 state events and writes a JSON result with events
 #
 # Usage: bash scripts/run_integration_test.sh
 #   Must be run from the repository root.
@@ -98,6 +100,47 @@ else
   echo "FAIL: output .mat file was not created at ${OUTPUT_MAT}"
   PASS=0
 fi
+
+# ── Modelica (hybrid) command line ──────────────────────────────────────────
+# Bouncing ball: three state events (reinit of the velocity) before t = 1.2.
+HYBRID_JSON="gensas_integration_test_hybrid.json"
+rm -f "${REPO_DIR}/${HYBRID_JSON}"
+set +e
+MO_OUTPUT=$("${APP_BIN}" \
+  -g -m file \
+  -i "${INPUT_DIR}/resources/mofile/test_bouncing_ball.mo" \
+  -t 1.2 \
+  -j "${HYBRID_JSON}" \
+  2>&1)
+MO_EXIT=$?
+set -e
+
+echo "=== GenSAS Modelica hybrid integration test ==="
+echo "${MO_OUTPUT}" | grep -E "^Event at|Json output|rror" || true
+echo ""
+
+if [ "${MO_EXIT}" -ne 0 ]; then
+  echo "FAIL: Modelica run exited with code ${MO_EXIT}"
+  PASS=0
+else
+  echo "PASS: Modelica run exited cleanly"
+fi
+
+MO_EVENTS=$(echo "${MO_OUTPUT}" | grep -c "^Event at" || true)
+if [ "${MO_EVENTS}" -eq 3 ]; then
+  echo "PASS: 3 bounce events reported"
+else
+  echo "FAIL: expected 3 bounce events, found ${MO_EVENTS}"
+  PASS=0
+fi
+
+if [ -s "${REPO_DIR}/${HYBRID_JSON}" ] && grep -q '"events"' "${REPO_DIR}/${HYBRID_JSON}"; then
+  echo "PASS: JSON result with events written"
+else
+  echo "FAIL: JSON result with events was not written to ${HYBRID_JSON}"
+  PASS=0
+fi
+rm -f "${REPO_DIR}/${HYBRID_JSON}"
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo ""

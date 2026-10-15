@@ -40,7 +40,7 @@ struct Run {
 static bool simulate(Run &run, const string &src, double endTime) {
 	SasModelParser parser;
 	parser.parseString(src.c_str());
-	shared_ptr<SasModel> model = GlobalPool::getInstance().createNewTopModel();
+	shared_ptr<SasModel> model = parser.pool.createNewTopModel();
 	parser.currentModel = model;
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);

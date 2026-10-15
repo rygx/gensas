@@ -42,7 +42,7 @@ struct Run {
 static bool simulate(Run &run, const string &src, double endTime, PiecewiseMode mode = PW_EVENTS, double eps = 1e-6) {
 	SasModelParser parser;
 	parser.parseString(src.c_str());
-	shared_ptr<SasModel> model = GlobalPool::getInstance().createNewTopModel();
+	shared_ptr<SasModel> model = parser.pool.createNewTopModel();
 	parser.currentModel = model;
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);
@@ -366,7 +366,7 @@ static void testSignChatterIsReported() {
 		"equation\n"
 		"  der(v) = -sign(v);\n"
 		"end M;\n");
-	shared_ptr<SasModel> model = GlobalPool::getInstance().createNewTopModel();
+	shared_ptr<SasModel> model = parser.pool.createNewTopModel();
 	parser.currentModel = model;
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);
@@ -393,7 +393,7 @@ static void testZenoIsReported() {
 		"    reinit(v, -0.5*pre(v));\n"
 		"  end when;\n"
 		"end Ball;\n");
-	shared_ptr<SasModel> model = GlobalPool::getInstance().createNewTopModel();
+	shared_ptr<SasModel> model = parser.pool.createNewTopModel();
 	parser.currentModel = model;
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);

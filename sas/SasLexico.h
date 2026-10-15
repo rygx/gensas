@@ -49,7 +49,10 @@ namespace che {
 			unsigned char *peekPoint;
 			std::shared_ptr<IdPearl> currentId = NULL;
 			std::shared_ptr<SasModel> currentModel = NULL;
-			std::shared_ptr<GlobalPool> globalPool = NULL;
+			// Models created while parsing with this parser (one pool per parser, no global state).
+			ModelPool pool;
+			// String literals scanned while no model is attached to the parser.
+			std::list<std::shared_ptr<StrPearl>> strayStrings;
 			// When set, identifiers are scanned without being added to the model's id table
 			// (used for attribute names such as start/fixed that are not model symbols).
 			bool noInject = false;

@@ -299,10 +299,6 @@ namespace che {
 				currentModel.reset();
 				currentModel = nullptr;
 			}
-			if (globalPool != nullptr) {
-				globalPool.reset();
-				globalPool = nullptr;
-			}
 			if (currentId != nullptr) {
 				currentId.reset();
 				currentId = nullptr;

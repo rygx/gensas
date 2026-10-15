@@ -588,8 +588,11 @@ namespace che {
 			} else {
 				parser->reader.cursur++;
 			}
-			GlobalPool::getInstance().strTable.push_back(make_shared<StrPearl>((uchar *)tmp, len));
-			parser->value.p = GlobalPool::getInstance().strTable.back()->str;
+			// The string lives as long as the model that owns the AST pointing at it.
+			std::list<std::shared_ptr<StrPearl>> &strings =
+				parser->currentModel != nullptr ? parser->currentModel->strTable : parser->strayStrings;
+			strings.push_back(make_shared<StrPearl>((uchar *)tmp, len));
+			parser->value.p = strings.back()->str;
 
 			return TK_STRING;
 		}

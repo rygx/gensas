@@ -3,6 +3,7 @@
 #   1. The solver converges to alpha=1
 #   2. "Computation time:" is printed (clean exit after computation)
 #   3. Output .mat file is created and non-empty
+#   and that the converged state matches reference values (also for the small d_014_ind_zip1 case)
 # and run the Modelica bouncing-ball example (-g mode) and verify:
 #   4. It exits cleanly, reports its 3 state events and writes a JSON result with events
 #
@@ -85,6 +86,52 @@ if echo "${APP_OUTPUT}" | grep -q "Computation time:"; then
 else
   echo "FAIL: 'Computation time:' not found — likely crashed before clean exit"
   PASS=0
+fi
+
+# Compares the "Final state" fingerprint printed by the app with reference values.
+# The converged state is unique, so it agrees across platforms and BLAS builds to far better than
+# the 1e-6 relative tolerance used here (the step sequence does not).
+check_fingerprint() {
+  local label="$1" output="$2" want_n="$3" want_norm="$4" want_sum="$5"
+  local line
+  line=$(echo "${output}" | grep "^Final state:" | tail -n 1)
+  if [ -z "${line}" ]; then
+    echo "FAIL: ${label}: no 'Final state' line"
+    PASS=0
+    return
+  fi
+  local n norm sum
+  n=$(echo "${line}" | sed -E 's/.*n=([0-9]+),.*/\1/')
+  norm=$(echo "${line}" | sed -E 's/.*norm=([-0-9.eE+]+),.*/\1/')
+  sum=$(echo "${line}" | sed -E 's/.*sum=([-0-9.eE+]+).*/\1/')
+  if [ "${n}" = "${want_n}" ] && awk -v a="${norm}" -v b="${want_norm}" -v c="${sum}" -v d="${want_sum}" \
+    'function rel(x, y) { return (x - y) / (y < 0 ? -y : y) } BEGIN { r1 = rel(a, b); r2 = rel(c, d); if (r1 < 0) r1 = -r1; if (r2 < 0) r2 = -r2; exit !(r1 < 1e-6 && r2 < 1e-6) }'; then
+    echo "PASS: ${label}: final state matches reference (n=${n}, norm=${norm}, sum=${sum})"
+  else
+    echo "FAIL: ${label}: final state differs; got n=${n} norm=${norm} sum=${sum}, want n=${want_n} norm=${want_norm} sum=${want_sum}"
+    PASS=0
+  fi
+}
+
+# ── Check 3b: converged state matches the reference ──────────────────────────
+check_fingerprint "d_70k_070" "${APP_OUTPUT}" 490000 282.7520234 69169.68943
+
+# ── Small power-flow case ────────────────────────────────────────────────────
+set +e
+SMALL_OUTPUT=$("${APP_BIN}" \
+  -p \
+  -f "${INPUT_DIR}/resources/psat_mat/d_014_ind_zip1.mat" \
+  -s 0.5 -l 28 -d 1e-5 \
+  -o "gensas_integration_test_small.mat" \
+  2>&1)
+SMALL_EXIT=$?
+set -e
+rm -f "${REPO_DIR}/gensas_integration_test_small.mat"
+if [ "${SMALL_EXIT}" -ne 0 ]; then
+  echo "FAIL: small power-flow case exited with code ${SMALL_EXIT}"
+  PASS=0
+else
+  check_fingerprint "d_014_ind_zip1" "${SMALL_OUTPUT}" 153 4.061145417 11.64662517
 fi
 
 # ── Check 4: output .mat file exists and is non-empty ───────────────────────

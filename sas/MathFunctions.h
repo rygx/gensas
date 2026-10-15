@@ -1,40 +1,17 @@
 // Elementary single-argument functions of the Modelica subset.
 //
-// Native functions are solved by their own series recurrences (see SasComputation.cpp).
-// Derived functions are rewritten into native ones before solving (see HybridModel.cpp).
-// Both kinds are evaluated numerically here when they appear in parameters, start values,
-// conditions and event expressions.
+// Native functions (sin, cos, exp, sqrt, inv, log, atan, asin, acos) are solved by their own series
+// recurrences (see SasComputation.cpp). Derived functions (tan, sinh, cosh, tanh, log10) are rewritten
+// into native ones before solving (see HybridModel.cpp). Both kinds are evaluated numerically here when
+// they appear in parameters, start values, conditions and event expressions.
 #ifndef SAS_MATH_FUNCTIONS_H
 #define SAS_MATH_FUNCTIONS_H
 
 #include <cmath>
-#include <cstring>
 #include <string>
 
 namespace che {
 	namespace core {
-
-		// sin, cos, exp, sqrt, inv and the inverse functions log, atan, asin and acos.
-		inline bool isNativeMathFunction(const std::string &n) {
-			static const char *const names[] = {"sin", "cos", "exp", "sqrt", "inv", "log", "atan", "asin", "acos", NULL};
-			for (int i = 0; names[i] != NULL; i++) {
-				if (n == names[i]) {
-					return true;
-				}
-			}
-			return false;
-		}
-
-		// tan, sinh, cosh, tanh and log10, expressed with the native functions.
-		inline bool isDerivedMathFunction(const std::string &n) {
-			static const char *const names[] = {"tan", "sinh", "cosh", "tanh", "log10", NULL};
-			for (int i = 0; names[i] != NULL; i++) {
-				if (n == names[i]) {
-					return true;
-				}
-			}
-			return false;
-		}
 
 		// Evaluates a native or derived function of one argument; false if the name is not one of them.
 		inline bool evalMathFunction(const std::string &n, double a, double &out) {

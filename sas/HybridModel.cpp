@@ -389,7 +389,7 @@ namespace che {
 					return mkNode(OP_MUL, mkConst(0.5), mkNode(fn == "sinh" ? OP_SUB : OP_ADD, up, down));
 				}
 				if (fn == "log10") {
-					return mkNode(OP_MUL, mkConst(0.43429448190325176), mkCall("log", cloneNode(a), ctx));
+					return mkNode(OP_MUL, mkConst(0.4342944819032518), mkCall("log", cloneNode(a), ctx));
 				}
 				return NULL;
 			}

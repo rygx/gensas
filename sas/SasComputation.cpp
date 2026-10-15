@@ -666,6 +666,10 @@ namespace che {
 				IdLocator locator(searchDomain);
 				for (treeIt = (*modelIt)->modelTrees.begin(); treeIt != (*modelIt)->modelTrees.end(); treeIt++) {
 					if ((*treeIt)->pHead != NULL && (*treeIt)->pHead->subs[0] != NULL && (*treeIt)->pHead->subs[1] != NULL && (*treeIt)->pHead->op == OP_EQN) {
+						// "der(x) = T" says nothing about the value of T at the start; only algebraic equations do.
+						if ((*treeIt)->eqnType == EQN_DIFF) {
+							continue;
+						}
 						if ((*treeIt)->pHead->subs[1]->op == OP_ID) { // must be an ID
 							char *b = (char *)(*treeIt)->pHead->subs[1]->value.p;
 							shared_ptr<IdPearl> id = IdLocator::findId(searchDomain, b, strlen(b));

@@ -94,6 +94,16 @@ cc_test(
     ],
 )
 
+# Modelica language features end to end, compared with closed-form solutions.
+cc_test(
+    name = "modelica_language_test",
+    srcs = ["modelica_language_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_simulation_lib",
+    ],
+)
+
 # Solver with an algebraic equation (guards the Pade coefficient cache during AE calibration).
 cc_test(
     name = "dae_regression_test",

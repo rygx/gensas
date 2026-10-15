@@ -20,6 +20,7 @@ import ctypes
 import json
 import os
 import sys
+import threading
 
 try:
     import numpy as _np
@@ -63,9 +64,15 @@ def library_path():
 
 
 _lib = None
+_load_lock = threading.Lock()
 
 
 def _load():
+    with _load_lock:
+        return _load_locked()
+
+
+def _load_locked():
     global _lib
     if _lib is not None:
         return _lib

@@ -677,7 +677,7 @@ namespace che {
 			if (p->op == OP_ID && p->ty != TY_FUNCTION) {
 				char *b = (char *)p->value.p;
 				shared_ptr<IdPearl> id = IdLocator::findId(searchDomain, b, strlen(b));
-				return id != nullptr && id->initVal;
+				return id != nullptr && id->initVal && allIdsInitialized(p->next, searchDomain);
 			}
 			if (p->op == OP_CALL) {
 				return allIdsInitialized(p->subs[1], searchDomain) && allIdsInitialized(p->next, searchDomain);

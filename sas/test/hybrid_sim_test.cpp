@@ -440,7 +440,82 @@ static void testJsonResult() {
 	CHECK_NEAR(root["events"][0]["assignments"]["a"].asDouble(), 3.0, 0.0);
 }
 
+// An if-equation that swaps which variable is the state: mode A has der(x) = -x and y = 2x, mode B has
+// der(y) = -y and x = 0.5 y. The variable set is the same, the order and the roles differ. x = exp(-t)
+// before t = 1; after it y = 2 exp(-1) exp(-(t-1)) = 2 exp(-t), so x is exp(-t) in both modes.
+static void testStateAlgebraicSwap() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Boolean a(start = true);\n"
+				  "  Real x(start = 1);\n"
+				  "  Real y(start = 2);\n"
+				  "equation\n"
+				  "  if a then\n"
+				  "    der(x) = -x;\n"
+				  "    y = 2*x;\n"
+				  "  else\n"
+				  "    der(y) = -y;\n"
+				  "    x = 0.5*y;\n"
+				  "  end if;\n"
+				  "  when time >= 1 then\n"
+				  "    a = false;\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "x"), std::exp(-2.0), 1e-3);
+	CHECK_NEAR(finalValue(run, "y"), 2.0 * std::exp(-2.0), 1e-3);
+	// Results are matched by name across the two computation models.
+	const char *fileName = "hybrid_sim_swap.json";
+	run.sol->writeJSONFile(fileName, 0.5);
+	std::ifstream in(fileName);
+	Json::Value root;
+	Json::CharReaderBuilder builder;
+	std::string errs;
+	CHECK(Json::parseFromStream(builder, in, &root, &errs));
+	if (!root.isMember("x") || !root.isMember("y") || !root.isMember("time")) {
+		CHECK(false);
+		return;
+	}
+	for (Json::ArrayIndex i = 0; i < root["time"].size(); i++) {
+		double ti = root["time"][i].asDouble();
+		CHECK_NEAR(root["x"][i].asDouble(), std::exp(-ti), 2e-3);
+		CHECK_NEAR(root["y"][i].asDouble(), 2.0 * std::exp(-ti), 4e-3);
+	}
+}
+
+// Equations listed in a different order per mode.
+static void testReorderedEquations() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Boolean m(start = true);\n"
+				  "  Real x(start = 1);\n"
+				  "  Real y(start = 2);\n"
+				  "equation\n"
+				  "  if m then\n"
+				  "    der(x) = -x;\n"
+				  "    der(y) = -y;\n"
+				  "  else\n"
+				  "    der(y) = -y;\n"
+				  "    der(x) = -2*x;\n"
+				  "  end if;\n"
+				  "  when time >= 1 then\n"
+				  "    m = false;\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "x"), std::exp(-3.0), 1e-4);
+	CHECK_NEAR(finalValue(run, "y"), 2.0 * std::exp(-2.0), 1e-4);
+}
+
 int main() {
+	testStateAlgebraicSwap();
+	testReorderedEquations();
 	testJsonResult();
 	testZenoIsReported();
 	testBouncingBall();

@@ -30,6 +30,7 @@
 #include "sas/SasConfig.h"
 #include "sas/SasInput.h"
 #include "sas/SasLexico.h"
+#include "sas/SasResult.h"
 #include <functional>
 #include <list>
 #include <vector>
@@ -73,22 +74,6 @@ namespace che {
 			virtual ~SasSolution();
 		};
 
-		// An event of a hybrid simulation: the discrete variables it assigned and the continuous
-		// variables it reinitialized.
-		struct SasEventRecord {
-			double time = 0.0;
-			std::vector<std::pair<std::string, double>> assignments;
-			std::vector<std::pair<std::string, double>> reinits;
-		};
-
-		// Values of the discrete variables after the events at each time in `times`; the first entry is
-		// the state at the start time. values[k][i] belongs to names[i].
-		struct SasDiscreteTrace {
-			std::vector<std::string> names;
-			std::vector<double> times;
-			std::vector<std::vector<double>> values;
-		};
-
 		class SasSolutionSet {
 		public:
 			SasSolutionSet();
@@ -105,10 +90,6 @@ namespace che {
 			std::list<std::shared_ptr<SasSolution>> findSasSolution(double time);
 
 			std::shared_ptr<SasSolution> findSasSolution(std::shared_ptr<SasComputationModel> &, double time);
-
-			void writeMatFile(const char *fileName, double interval);
-
-			void writeJSONFile(const char *fileName, double interval);
 
 			virtual ~SasSolutionSet();
 		};

@@ -4,6 +4,7 @@
 #include "sas/ModelChecker.h"
 #include "sas/SasExpr.h"
 #include "sas/SasLexico.h"
+#include "sas/SasResult.h"
 #include "sas/test/test_util.h"
 
 #include "json/json.h"
@@ -380,6 +381,13 @@ static void testZenoIsReported() {
 	delete sol;
 }
 
+// Writes the solution sampled every `interval` as JSON.
+static void writeJson(che::core::SasSolutionSet &set, const char *fileName, double interval) {
+	che::core::SasResult result = che::core::buildResult(set, interval);
+	std::string err;
+	CHECK(che::core::makeResultWriter("json")->write(result, fileName, err));
+}
+
 // The JSON result carries the discrete variables (sampled per solution segment, so the two samples at an
 // event time show the values before and after) and the list of events.
 static void testJsonResult() {
@@ -398,7 +406,7 @@ static void testJsonResult() {
 		return;
 	}
 	const char *fileName = "hybrid_sim_result.json";
-	run.sol->writeJSONFile(fileName, 0.25);
+	writeJson(*run.sol, fileName, 0.25);
 	std::ifstream in(fileName);
 	Json::Value root;
 	Json::CharReaderBuilder builder;
@@ -469,7 +477,7 @@ static void testStateAlgebraicSwap() {
 	CHECK_NEAR(finalValue(run, "y"), 2.0 * std::exp(-2.0), 1e-3);
 	// Results are matched by name across the two computation models.
 	const char *fileName = "hybrid_sim_swap.json";
-	run.sol->writeJSONFile(fileName, 0.5);
+	writeJson(*run.sol, fileName, 0.5);
 	std::ifstream in(fileName);
 	Json::Value root;
 	Json::CharReaderBuilder builder;

@@ -36,6 +36,8 @@
 #include "sas/SasExpr.h"
 #include "sas/SasComputation.h"
 #include "sas/HybridSimulator.h"
+#include "sas/SasResult.h"
+#include "sas/SasResultMat.h"
 #include "sas/ModelChecker.h"
 #include <memory>
 // #include <memory>
@@ -88,7 +90,6 @@ int main(int argc, char **argv) {
 
 		bool verbose = false;
 		bool fileMode = false;
-		bool writeJson = false;
 		SasComputationOptions options;
 		options.alphaTol = 1e-3;
 		options.errorTol = 1e-5;
@@ -108,6 +109,7 @@ int main(int argc, char **argv) {
 		string input = "";
 		string output = "";
 		string jsonOutput = "";
+		string csvOutput = "";
 		//	parsing command line arguments
 		for (int iArg = 2; iArg < argc; iArg++) {
 			string arg = argv[iArg];
@@ -141,10 +143,15 @@ int main(int argc, char **argv) {
 			} else if (arg == "--json" || arg == "-j") {
 				if (++iArg < argc) {
 					jsonOutput = argv[iArg];
-					writeJson = true;
 				} else {
 					cerr << "JSON output should be specified after --json or -j. Using empty string as default." << endl;
 					jsonOutput = "";
+				}
+			} else if (arg == "--csv" || arg == "-c") {
+				if (++iArg < argc) {
+					csvOutput = argv[iArg];
+				} else {
+					cerr << "CSV output file should be specified after --csv or -c. No CSV file is written." << endl;
 				}
 			} else if (arg == "--time" || arg == "-t") {
 				if (++iArg < argc) {
@@ -354,14 +361,31 @@ int main(int argc, char **argv) {
 
 		cout << "Computation time: " << endTime - stTime << " s." << endl;
 
-		if (writeJson) {
-			sasSolLink->writeJSONFile(jsonOutput.c_str(), outStep);
-			cout << "Json output written to file " << jsonOutput << "." << endl;
+		int status = 0;
+		if (!jsonOutput.empty() || !csvOutput.empty() || !output.empty()) {
+			SasResult result = buildResult(*sasSolLink, outStep);
+			const struct {
+				const char *format;
+				const string &path;
+			} targets[] = {{"json", jsonOutput}, {"csv", csvOutput}, {"mat", output}};
+			for (const auto &target : targets) {
+				if (target.path.empty()) {
+					continue;
+				}
+				unique_ptr<ResultWriter> writer = string(target.format) == "mat" ? makeMatResultWriter() : makeResultWriter(target.format);
+				string err;
+				if (writer->write(result, target.path, err)) {
+					cout << target.format << " output written to file " << target.path << "." << endl;
+				} else {
+					cerr << "Error: " << err << "." << endl;
+					status = -1;
+				}
+			}
 		}
 
 		delete sasSolLink;
 
-		return 0;
+		return status;
 
 	} else if (compMode == "-p") {
 

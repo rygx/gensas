@@ -22,7 +22,8 @@
 #   LINK_LIBS          libraries to link (-ljsoncpp -lsuperlu -llapack -lblas -lpthread -lm)
 #   JOBS               parallel compile jobs (number of CPUs)
 #
-# MAT file writing is replaced by a stub (scripts/local_solver/matio_stub): the tests do not need it.
+# matio is replaced by a stub (scripts/local_solver/matio_stub) for the library sources that include it;
+# the solver and result tests do not need the real library. The MAT writer test is skipped.
 
 set -euo pipefail
 
@@ -42,7 +43,7 @@ CXXFLAGS="-std=c++14 -O1 -w -DARMA_DONT_USE_WRAPPER -I. -Iscripts/local_solver/m
 
 # Library sources the solver tests depend on (no power flow, no PSAT/MAT input).
 SOURCES="sas/SasModel sas/SasConfig sas/SasInput sas/SasLexico sas/TokenScanner sas/ExprParser \
-sas/ModelParser sas/ModelChecker sas/HybridModel sas/HybridSimulator sas/SasComputation \
+sas/ModelParser sas/ModelChecker sas/HybridModel sas/HybridSimulator sas/SasComputation sas/SasResult \
 util/AbstractCheCalculator util/CheCompUtil util/CheState io/CheDataFormat io/CheIoUtil"
 
 mkdir -p "${BUILD_DIR}/obj" "${BUILD_DIR}/bin"
@@ -65,7 +66,8 @@ ${CXX} ${CXXFLAGS} -c scripts/local_solver/matio_stub/matio_stub.cpp -o "${BUILD
 if [ "$#" -gt 0 ]; then
   TESTS="$*"
 else
-  TESTS="$(cd sas/test && ls *_test.cpp | sed 's/\.cpp$//')"
+  # *_mat_test.cpp read MAT files back with matio and need the real library (Bazel builds them).
+  TESTS="$(cd sas/test && ls *_test.cpp | grep -v '_mat_test' | sed 's/\.cpp$//')"
 fi
 
 FAILED=0

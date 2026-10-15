@@ -105,7 +105,6 @@ namespace che {
 				{"in", 2, TK_K_IN},
 				{"inner", 5, TK_K_INNER},
 				{"input", 5, TK_K_INPUT},
-				{"loop", 4, TK_K_LOOP},
 				{"initial", 7, TK_K_INIT},
 				{"ivar", 4, TK_K_IVAR},
 				{NULL, 0, TK_ID}};
@@ -120,6 +119,7 @@ namespace che {
 
 		static struct keyword keywordsL[] =
 			{
+				{"loop", 4, TK_K_LOOP},
 				{NULL, 0, TK_ID}};
 
 		static struct keyword keywordsM[] =

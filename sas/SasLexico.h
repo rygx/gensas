@@ -29,7 +29,10 @@
 #include "sas/SasInput.h"
 #include "sas/SasModel.h"
 #include <iostream>
+#include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
 using namespace che::io;
 
@@ -57,6 +60,8 @@ namespace che {
 			// When set, identifiers are scanned without being added to the model's id table
 			// (used for attribute names such as start/fixed that are not model symbols).
 			bool noInject = false;
+			// Declared arrays: name -> dimension sizes. Each element is an ordinary variable named like "x[2,3]".
+			std::map<std::string, std::vector<int>> arrayDims;
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
 

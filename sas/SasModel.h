@@ -83,6 +83,8 @@ namespace che {
 			NK_IfEquation,	 // subs[0]=condition; subs[1]=OP_BRANCH{ subs[0]=then-statements, subs[1]=else-statements }.
 							 // Statement lists are linked through `next`; `elseif` is desugared to a nested if in the else list.
 			NK_WhenEquation, // subs[0]=condition; subs[1]=OP_BRANCH{ subs[0]=body-statements, subs[1]=next `elsewhen` NK_WhenEquation or NULL }
+			NK_ForEquation,	 // value.p=iterator name; subs[0]=range (lo, hi) or (lo, step, hi) linked through `next`; subs[1]=body statements.
+							 // Only exists while parsing: for-equations are unrolled before the parser returns.
 		} NodeKind;
 
 		typedef enum {

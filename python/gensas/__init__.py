@@ -113,7 +113,7 @@ def _load():
 
 
 def _array(pointer, n):
-    values = [pointer[i] for i in range(n)] if pointer else []
+    values = pointer[:n] if pointer else []
     return _np.array(values, dtype=float) if _np is not None else values
 
 
@@ -141,6 +141,8 @@ class Simulation:
 
     def __init__(self, job, base_dir=None):
         lib = _load()
+        if base_dir is not None:
+            base_dir = os.fspath(base_dir)
         if isinstance(job, dict):
             text = json.dumps(job)
         elif isinstance(job, (str, os.PathLike)) and not str(job).lstrip().startswith("{"):
@@ -204,7 +206,7 @@ class Simulation:
     def write(self, format, path):
         """Writes the result of the last successful run as "json", "csv" or "mat"."""
         err = ctypes.create_string_buffer(_ERR_LEN)
-        if self._lib.gensas_write_result(self._handle, format.encode(), os.fspath(path).encode("utf-8"), err, _ERR_LEN) != 0:
+        if self._lib.gensas_write_result(self._handle, format.encode("utf-8"), os.fspath(path).encode("utf-8"), err, _ERR_LEN) != 0:
             raise GenSASError(err.value.decode("utf-8", "replace"))
 
     def close(self):

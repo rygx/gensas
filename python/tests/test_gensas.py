@@ -81,7 +81,9 @@ class GenSASTest(unittest.TestCase):
                 f.write(DECAY)
             with open(os.path.join(d, "job.json"), "w") as f:
                 f.write('{"gensas":{"format":"job","version":1},"kind":"modelica","model":{"file":"m.mo"},"solver":{"endTime":1}}')
-            with gensas.Simulation(os.path.join(d, "job.json")) as sim:
+            import pathlib
+
+            with gensas.Simulation(pathlib.Path(d) / "job.json", base_dir=pathlib.Path(d)) as sim:
                 r = sim.run()
                 self.assertAlmostEqual(r.variables["x"][-1], math.exp(-1.0), places=4)
                 for fmt in ("json", "csv", "mat"):

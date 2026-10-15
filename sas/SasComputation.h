@@ -60,6 +60,9 @@ namespace che {
 			// Called with each solution segment right after it was computed. If it returns true, solve()
 			// stops after this segment (used to cut the simulation at a detected event).
 			std::function<bool(const std::shared_ptr<SasSolution> &)> onSolution;
+			// Called after each solution segment with the absolute time reached and the end time. If it
+			// returns true, the run is cancelled (the solution set is marked `cancelled`).
+			std::function<bool(double time, double endTime)> progress;
 		};
 
 		class SasSolution {
@@ -83,6 +86,9 @@ namespace che {
 			SasDiscreteTrace discrete;
 
 			std::list<std::shared_ptr<SasSolution>> solutionLink;
+
+			// Set when options.progress asked to stop; the segments computed so far are kept.
+			bool cancelled = false;
 
 			// Computation models referenced by the solutions (SasSolution::linkCompModel is a raw pointer).
 			std::vector<std::shared_ptr<SasComputationModel>> keepAlive;

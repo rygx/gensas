@@ -44,6 +44,7 @@ namespace che {
 
 		SasSolutionSet *HybridSimulator::run(const SasComputationOptions &options) {
 			err.clear();
+			wasCancelled = false;
 			firedEvents.clear();
 			finalVals.clear();
 			nSegments = 0;
@@ -337,6 +338,10 @@ namespace che {
 					SasComputationOptions opts = options;
 					opts.startTime = t;
 					opts.endTime = segEnd;
+					if (options.progress) {
+						// Report against the end of the whole run, not of this inter-event segment.
+						opts.progress = [&](double tm, double) { return options.progress(tm, options.endTime); };
+					}
 					if (hasDynamic) {
 						opts.onSolution = [&](const shared_ptr<SasSolution> &sol) -> bool {
 							double a0 = sol->absStart;
@@ -442,6 +447,11 @@ namespace che {
 					}
 					unique_ptr<SasSolutionSet> sols(comp->solve(opts));
 					if (scanFailed) {
+						return NULL;
+					}
+					if (sols->cancelled) {
+						wasCancelled = true;
+						fail("cancelled");
 						return NULL;
 					}
 					if (dynT >= 0.0) {

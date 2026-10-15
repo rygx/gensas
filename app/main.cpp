@@ -39,6 +39,12 @@
 #include "sas/SasResult.h"
 #include "sas/SasResultMat.h"
 #include "sas/ModelChecker.h"
+#include "sas/Simulation.h"
+#include <cmath>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
 #include <memory>
 // #include <memory>
 // #include "debug_new.h"
@@ -81,345 +87,261 @@ std::string GetCurrentWorkingDir(void) {
 	return current_working_dir;
 }
 
-int main(int argc, char **argv) {
+static void printUsage() {
+	cout << "Usage:\n"
+			"  gensas run JOB.json [--set key=value ...] [--validate]   run a Modelica job file\n"
+			"  gensas -g -m file|string -i MODEL [options]               Modelica simulation from flags\n"
+			"  gensas -p -f CASE [options]                               AC power flow\n"
+			"See doc/Usage.md and doc/JobFormat.md."
+		 << endl;
+}
 
+// Parses a number argument; false (with a message) if it is missing or not a number.
+static bool numberArg(int argc, char **argv, int &i, const char *flag, double &out) {
+	if (++i >= argc) {
+		cerr << "Error: " << flag << " needs a value." << endl;
+		return false;
+	}
+	try {
+		size_t used = 0;
+		out = stod(argv[i], &used);
+		if (used != string(argv[i]).size() || !std::isfinite(out)) {
+			throw std::invalid_argument("trailing characters");
+		}
+	} catch (const std::exception &) {
+		cerr << "Error: " << flag << " expects a number, got \"" << argv[i] << "\"." << endl;
+		return false;
+	}
+	return true;
+}
+
+static bool stringArg(int argc, char **argv, int &i, const char *flag, string &out) {
+	if (++i >= argc) {
+		cerr << "Error: " << flag << " needs a value." << endl;
+		return false;
+	}
+	out = argv[i];
+	return true;
+}
+
+// The flags of `gensas -g`; they build the same job as a job file.
+static bool parseGeneralArgs(int argc, char **argv, ModelicaJob &job, bool &verbose) {
+	bool fileMode = false;
+	string input;
+	for (int i = 2; i < argc; i++) {
+		string arg = argv[i];
+		double v = 0.0;
+		string s;
+		if (arg == "--mode" || arg == "-m") {
+			if (!stringArg(argc, argv, i, "--mode", s)) {
+				return false;
+			}
+			if (s != "file" && s != "string") {
+				cerr << "Error: --mode expects file or string." << endl;
+				return false;
+			}
+			fileMode = s == "file";
+		} else if (arg == "--input" || arg == "-i") {
+			if (!stringArg(argc, argv, i, "--input", input)) {
+				return false;
+			}
+		} else if (arg == "--output" || arg == "-o") {
+			if (!stringArg(argc, argv, i, "--output", job.matOutput)) {
+				return false;
+			}
+		} else if (arg == "--json" || arg == "-j") {
+			if (!stringArg(argc, argv, i, "--json", job.jsonOutput)) {
+				return false;
+			}
+		} else if (arg == "--csv" || arg == "-c") {
+			if (!stringArg(argc, argv, i, "--csv", job.csvOutput)) {
+				return false;
+			}
+		} else if (arg == "--piecewise") {
+			if (!stringArg(argc, argv, i, "--piecewise", s) || (s != "events" && s != "smooth")) {
+				cerr << "Error: --piecewise expects events or smooth." << endl;
+				return false;
+			}
+			job.piecewise = s == "smooth" ? PW_SMOOTH : PW_EVENTS;
+		} else if (arg == "--smooth-eps") {
+			if (!numberArg(argc, argv, i, "--smooth-eps", v)) {
+				return false;
+			}
+			if (!(v > 0.0)) {
+				cerr << "Error: --smooth-eps expects a positive number." << endl;
+				return false;
+			}
+			job.smoothEps = v;
+		} else if (arg == "--time" || arg == "-t") {
+			if (!numberArg(argc, argv, i, "--time", job.options.endTime)) {
+				return false;
+			}
+		} else if (arg == "--level" || arg == "-l") {
+			if (!numberArg(argc, argv, i, "--level", v)) {
+				return false;
+			}
+			if (v != std::floor(v) || v < 1 || v > 1000) {
+				cerr << "Error: --level expects an integer between 1 and 1000." << endl;
+				return false;
+			}
+			job.options.nLvl = (int)v;
+		} else if (arg == "--atol" || arg == "-a") {
+			if (!numberArg(argc, argv, i, "--atol", job.options.alphaTol)) {
+				return false;
+			}
+		} else if (arg == "--segment" || arg == "-s") {
+			if (!numberArg(argc, argv, i, "--segment", job.options.segment)) {
+				return false;
+			}
+		} else if (arg == "--etol" || arg == "-e") {
+			if (!numberArg(argc, argv, i, "--etol", job.options.errorTol)) {
+				return false;
+			}
+		} else if (arg == "--step" || arg == "-k") {
+			if (!numberArg(argc, argv, i, "--step", job.outputStep)) {
+				return false;
+			}
+		} else if (arg == "--verbose" || arg == "-v") {
+			verbose = true;
+		} else {
+			cerr << "Error: unknown option " << arg << "." << endl;
+			return false;
+		}
+	}
+	if (input.empty()) {
+		cerr << "Error: --input is required." << endl;
+		return false;
+	}
+	if (fileMode) {
+		job.modelFile = input;
+	} else {
+		// The string is usually passed in quotes; strip them.
+		job.modelSource = input.size() >= 2 && (input.front() == '"' || input.front() == '\'') && input.back() == input.front() ? input.substr(1, input.size() - 2) : input;
+		if (!job.modelSource.empty()) {
+			cout << job.modelSource << endl;
+		}
+	}
+	return true;
+}
+
+// Runs a job, prints events and warnings, and writes the requested outputs. Returns the exit code.
+static int runModelica(const ModelicaJob &job, bool validateOnly) {
+	Simulation sim(job);
+	for (const string &w : sim.warnings()) {
+		cout << "Warning: " << w << endl;
+	}
+	if (validateOnly) {
+		const ModelicaJob &j = sim.job();
+		cout << "Job is valid: " << (j.modelFile.empty() ? string("<inline model>") : j.modelFile) << ", endTime=" << j.options.endTime << ", segment=" << j.options.segment << ", level=" << j.options.nLvl << ", alphaTol=" << j.options.alphaTol << ", errorTol=" << j.options.errorTol << ", output step=" << j.outputStep << endl;
+		return 0;
+	}
+	if (!sim.run()) {
+		cerr << "Error: " << sim.error() << endl;
+		return 1;
+	}
+	for (const SasEventRecord &ev : sim.result().events) {
+		cout << "Event at t=" << ev.time << ":";
+		for (const auto &a : ev.assignments) {
+			cout << " " << a.first << "=" << a.second;
+		}
+		for (const auto &r : ev.reinits) {
+			cout << " reinit(" << r.first << ")=" << r.second;
+		}
+		cout << endl;
+	}
+	cout << "Computation time: " << sim.elapsedSeconds() << " s." << endl;
+	int status = 0;
+	const struct {
+		const char *format;
+		const string &path;
+	} targets[] = {{"json", sim.job().jsonOutput}, {"csv", sim.job().csvOutput}, {"mat", sim.job().matOutput}};
+	for (const auto &target : targets) {
+		if (target.path.empty()) {
+			continue;
+		}
+		string err;
+		if (sim.writeResult(target.format, target.path, err)) {
+			cout << target.format << " output written to file " << target.path << "." << endl;
+		} else {
+			cerr << "Error: " << err << "." << endl;
+			status = 1;
+		}
+	}
+	return status;
+}
+
+// gensas run JOB.json [--set key=value ...] [--validate]
+static int runJobFile(int argc, char **argv) {
+	string path;
+	vector<string> sets;
+	bool validateOnly = false;
+	for (int i = 2; i < argc; i++) {
+		string arg = argv[i];
+		if (arg == "--set") {
+			string s;
+			if (!stringArg(argc, argv, i, "--set", s)) {
+				return 1;
+			}
+			sets.push_back(s);
+		} else if (arg == "--validate") {
+			validateOnly = true;
+		} else if (path.empty() && !arg.empty() && arg[0] != '-') {
+			path = arg;
+		} else {
+			cerr << "Error: unexpected argument " << arg << "." << endl;
+			return 1;
+		}
+	}
+	if (path.empty()) {
+		cerr << "Error: gensas run needs a job file." << endl;
+		return 1;
+	}
+	ifstream in(path, ios::binary);
+	if (!in) {
+		cerr << "Error: cannot read the job file " << path << "." << endl;
+		return 1;
+	}
+	stringstream buffer;
+	buffer << in.rdbuf();
+	string text = buffer.str();
+	string err;
+	if (!applyJobOverrides(text, sets, err)) {
+		cerr << "Error: " << err << endl;
+		return 1;
+	}
+	size_t slash = path.find_last_of("/\\");
+	string baseDir = slash == string::npos ? string() : path.substr(0, slash);
+	ModelicaJob job;
+	if (!parseModelicaJob(text, baseDir, job, err)) {
+		cerr << "Error: " << path << ": " << err << endl;
+		return 1;
+	}
+	return runModelica(job, validateOnly);
+}
+
+static int realMain(int argc, char **argv) {
+
+	if (argc < 2) {
+		printUsage();
+		return 1;
+	}
 	string compMode = argv[1];
+	if (compMode == "--help" || compMode == "-h") {
+		printUsage();
+		return 0;
+	}
 	cout << "compMode=" << compMode << endl;
 
-	if (compMode == "-g") {
-
+	if (compMode == "run") {
+		return runJobFile(argc, argv);
+	} else if (compMode == "-g") {
+		ModelicaJob job;
 		bool verbose = false;
-		bool fileMode = false;
-		SasComputationOptions options;
-		options.alphaTol = 1e-3;
-		options.errorTol = 1e-5;
-		options.segment = 1.0;
-		double outStep = 0.01;
-
-		const double MAX_TIME = 1000.0;
-		const double MIN_TIME = 0.0;
-		const double MAX_SEGMENT = 10.0;
-		const double MIN_SEGMENT = 1e-4;
-		const double MAX_ALPHA_IN_SEG = 1;
-		const double MIN_ALPHA_IN_SEG = 1e-9;
-		const double MAX_ERRTOL = 1e-2;
-		const double MIN_ERRTOL = 1e-10;
-		const double MAX_OUTSTEP = 1;
-		const double MIN_OUTSTEP = 1e-3;
-		string input = "";
-		string output = "";
-		string jsonOutput = "";
-		string csvOutput = "";
-		PiecewiseMode piecewiseMode = PW_EVENTS;
-		double smoothEps = 1e-6;
-		//	parsing command line arguments
-		for (int iArg = 2; iArg < argc; iArg++) {
-			string arg = argv[iArg];
-			if (arg == "--mode" || arg == "-m") {
-				if (++iArg < argc) {
-					string subArg = argv[iArg];
-					if (subArg == "file") {
-						fileMode = true;
-					} else if (subArg == "string") {
-						fileMode = false;
-					} else {
-						cerr << "Mode name [file|string] should be specified after --mode or -m. Using string as default." << endl;
-					}
-				} else {
-					cerr << "Mode name [file|string] should be specified after --mode or -m. Using string as default." << endl;
-				}
-			} else if (arg == "--input" || arg == "-i") {
-				if (++iArg < argc) {
-					input = argv[iArg];
-				} else {
-					cerr << "Input should be specified after --input or -i. Using empty string as default." << endl;
-					input = "";
-				}
-			} else if (arg == "--output" || arg == "-o") {
-				if (++iArg < argc) {
-					output = argv[iArg];
-				} else {
-					cerr << "Output should be specified after --output or -o. Using empty string as default." << endl;
-					output = "";
-				}
-			} else if (arg == "--json" || arg == "-j") {
-				if (++iArg < argc) {
-					jsonOutput = argv[iArg];
-				} else {
-					cerr << "JSON output should be specified after --json or -j. Using empty string as default." << endl;
-					jsonOutput = "";
-				}
-			} else if (arg == "--csv" || arg == "-c") {
-				if (++iArg < argc) {
-					csvOutput = argv[iArg];
-				} else {
-					cerr << "CSV output file should be specified after --csv or -c. No CSV file is written." << endl;
-				}
-			} else if (arg == "--piecewise") {
-				if (++iArg < argc && (string(argv[iArg]) == "events" || string(argv[iArg]) == "smooth")) {
-					piecewiseMode = string(argv[iArg]) == "smooth" ? PW_SMOOTH : PW_EVENTS;
-				} else {
-					cerr << "Error: --piecewise expects events or smooth." << endl;
-					return -1;
-				}
-			} else if (arg == "--smooth-eps") {
-				double value = -1.0;
-				try {
-					if (++iArg < argc) {
-						value = stod(argv[iArg]);
-					}
-				} catch (const std::exception &) {
-					value = -1.0;
-				}
-				if (!(value > 0.0)) {
-					cerr << "Error: --smooth-eps expects a positive number." << endl;
-					return -1;
-				}
-				smoothEps = value;
-			} else if (arg == "--time" || arg == "-t") {
-				if (++iArg < argc) {
-					options.endTime = stod(argv[iArg]);
-				} else {
-					cerr << "Simulation length (s) should be specified after --time or -t. Using default value " << options.endTime << "." << endl;
-				}
-			} else if (arg == "--level" || arg == "-l") {
-				if (++iArg < argc) {
-					options.nLvl = stoi(argv[iArg]);
-				} else {
-					cerr << "SAS order --level or -l. Using default value " << options.nLvl << "." << endl;
-				}
-			} else if (arg == "--atol" || arg == "-a") {
-				if (++iArg < argc) {
-					options.alphaTol = stod(argv[iArg]);
-				} else {
-					cerr << "Alpha tolerance should be specified after --atol or -a. Using default value " << options.alphaTol << "." << endl;
-				}
-			} else if (arg == "--segment" || arg == "-s") {
-				if (++iArg < argc) {
-					options.segment = stod(argv[iArg]);
-				} else {
-					cerr << "Segment length should be specified after --segment or -s. Using default value " << options.segment << "." << endl;
-				}
-			} else if (arg == "--etol" || arg == "-e") {
-				if (++iArg < argc) {
-					options.errorTol = stod(argv[iArg]);
-				} else {
-					cerr << "Error tolerance should be specified after --etol or -e. Using default value " << options.errorTol << "." << endl;
-				}
-			} else if (arg == "--step" || arg == "-k") {
-				if (++iArg < argc) {
-					outStep = stod(argv[iArg]);
-				} else {
-					cerr << "Output step should be specified after --step or -k. Using default value " << outStep << "." << endl;
-				}
-			} else if (arg == "--verbose" || arg == "-v") {
-				verbose = true;
-			}
+		if (!parseGeneralArgs(argc, argv, job, verbose)) {
+			return 1;
 		}
-
-		if (options.endTime > MAX_TIME) {
-			cout << "Simulation run length are limited up to " << MAX_TIME << " s." << endl;
-			options.endTime = MAX_TIME;
-		}
-
-		if (options.endTime < MIN_TIME) {
-			cout << "Simulation run length must be at least " << MIN_TIME << " s." << endl;
-			options.endTime = MIN_TIME;
-		}
-
-		if (options.segment > MAX_SEGMENT) {
-			cout << "Simulation segment length are limited up to " << MAX_SEGMENT << " s." << endl;
-			options.segment = MAX_SEGMENT;
-		}
-
-		if (options.segment < MIN_SEGMENT) {
-			cout << "Simulation segment length must be at least " << MIN_SEGMENT << " s." << endl;
-			options.segment = MIN_SEGMENT;
-		}
-
-		if (options.alphaTol > MAX_ALPHA_IN_SEG * options.segment) {
-			cout << "Alpha tolerance are limited up to " << MAX_ALPHA_IN_SEG * options.segment << " s." << endl;
-			options.alphaTol = MAX_ALPHA_IN_SEG * options.segment;
-		}
-
-		if (options.alphaTol < MIN_ALPHA_IN_SEG * options.segment) {
-			cout << "Alpha tolerance must be at least " << MIN_ALPHA_IN_SEG * options.segment << " s." << endl;
-			options.alphaTol = MIN_ALPHA_IN_SEG * options.segment;
-		}
-
-		if (options.errorTol > MAX_ERRTOL) {
-			cout << "Simulation errorTol are limited up to " << MAX_ERRTOL << " s." << endl;
-			options.errorTol = MAX_ERRTOL;
-		}
-
-		if (options.errorTol < MIN_ERRTOL) {
-			cout << "Simulation errorTol must be at least " << MIN_ERRTOL << " s." << endl;
-			options.errorTol = MIN_ERRTOL;
-		}
-
-		if (outStep > MAX_OUTSTEP) {
-			cout << "Simulation output step is limited up to " << MAX_OUTSTEP << " s." << endl;
-			outStep = MAX_OUTSTEP;
-		}
-
-		if (outStep < MIN_OUTSTEP) {
-			cout << "Simulation output step must be at least " << MIN_OUTSTEP << " s." << endl;
-			outStep = MIN_OUTSTEP;
-		}
-
-		// end parsing command line arguments, begin main program
-		pctimer_t stTime = pctimer();
-
-		SasModelParser parser;
-		if (fileMode) {
-			parser.parseFromFile(input.c_str());
-		} else {
-			if (input.length() >= 2) {
-				cout << input.substr(1, input.length() - 2).c_str() << endl;
-				parser.parseString(input.substr(1, input.length() - 2).c_str());
-			} else {
-				cout << input.c_str() << endl;
-				parser.parseString(input.c_str());
-			}
-		}
-		if (parser.reader.buffer == NULL || parser.reader.size <= 1) {
-			cerr << "Error: reader fails." << endl;
-			return -1;
-		}
-
-		parser.currentModel = parser.pool.createNewTopModel();
-		parseSingleSasModel(&parser);
-		if (parser.errCount > 0) {
-			cerr << "Error: Parsing model has errors." << endl;
-			return -1;
-		}
-
-		// The default SolverFeatures describe what the solver can run today. Models with discrete
-		// variables, if/when statements or `time` go to the time-event simulator.
-		SolverFeatures solverFeatures;
-		// abs/min/max/sign in continuous equations become if-expressions (their switching points are state
-		// events) or, with --piecewise smooth, smooth approximations.
-		rewritePiecewiseFunctions(*parser.currentModel, piecewiseMode, smoothEps);
-		const bool hybrid = isHybridModel(*parser.currentModel);
-		if (hybrid) {
-			solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;
-			solverFeatures.whenEquations = solverFeatures.piecewiseFunctions = solverFeatures.eventFunctions = true;
-			solverFeatures.simulationTime = true;
-			solverFeatures.timeEventsOnly = true;
-			solverFeatures.stateEvents = true;
-		}
-		if (checkModel(*parser.currentModel, solverFeatures, fileMode ? input : string("<string>"), cerr) > 0) {
-			cerr << "Error: The model uses constructs that are not supported yet." << endl;
-			return -1;
-		}
-
-		SasSolutionSet *sasSolLink = NULL;
-		SasComputationModel compModel; // must outlive sasSolLink
-		HybridSimulator hybridSim(parser.currentModel);
-		if (hybrid) {
-			sasSolLink = hybridSim.run(options);
-			if (sasSolLink == NULL) {
-				cerr << "Error: " << hybridSim.error() << endl;
-				return -1;
-			}
-			for (const HybridEvent &ev : hybridSim.events()) {
-				cout << "Event at t=" << ev.time << ":";
-				for (const auto &a : ev.assignments) {
-					cout << " " << a.first << "=" << a.second;
-				}
-				for (const auto &r : ev.reinits) {
-					cout << " reinit(" << r.first << ")=" << r.second;
-				}
-				cout << endl;
-			}
-		} else {
-			compModel.generateCompModel(parser.pool);
-			compModel.preprocessModels();
-			// check if all the ids are initialized, need to be repacked in the future.
-			list<shared_ptr<SasModel>>::iterator modelIt;
-			int nonInitCnt = 0;
-			for (modelIt = compModel.topModels.begin(); modelIt != compModel.topModels.end(); modelIt++) {
-				list<shared_ptr<IdPearl>>::iterator idIt;
-				for (idIt = (*modelIt)->idTable.begin(); idIt != (*modelIt)->idTable.end(); idIt++) {
-					IdType idt = (*idIt)->idTy;
-					if (idt == ID_VAR || idt == ID_TMPVAR || idt == ID_IVAR) {
-						if (!(*idIt)->initVal) {
-							nonInitCnt++;
-						}
-					}
-				}
-			}
-			if (nonInitCnt > 0) {
-				cerr << "Error: There are " << nonInitCnt << " uninitialized variables." << endl;
-			}
-			compModel.generateDAEs();
-
-			if (verbose) {
-				cout << "Original model:" << endl;
-				parser.currentModel->printAllModelTrees();
-				cout << "Copied model:" << endl;
-
-				list<shared_ptr<SasModel>>::iterator modelIt;
-				for (modelIt = compModel.topModels.begin(); modelIt != compModel.topModels.end(); modelIt++) {
-					(*modelIt)->printAllModelTrees();
-					(*modelIt)->printIdTable();
-				}
-			}
-
-			// Check if DAEs are valid.
-			bool isValidDAE = true;
-			if (compModel.nX != compModel.nDE) {
-				cerr << "Error: Number of state variable (" << compModel.nX << ") not equal number of diff. eqs. (" << compModel.nDE << ")." << endl;
-				isValidDAE = false;
-			}
-			if (compModel.nY != compModel.nAE) {
-				cerr << "Error: Number of algebraic variable (" << compModel.nY << ") not equal number of algeb. eqs. (" << compModel.nAE << ")." << endl;
-				isValidDAE = false;
-			}
-			if (!isValidDAE) {
-				cerr << "Error: DAE is not well defined." << endl;
-				return -1;
-			}
-			sasSolLink = compModel.solve(options);
-		}
-
-		pctimer_t endTime = pctimer();
-
-		cout << "Computation time: " << endTime - stTime << " s." << endl;
-
-		int status = 0;
-		if (!jsonOutput.empty() || !csvOutput.empty() || !output.empty()) {
-			SasResult result = buildResult(*sasSolLink, outStep);
-			if (result.empty()) {
-				cerr << "Error: the simulation produced no results to write." << endl;
-				delete sasSolLink;
-				return -1;
-			}
-			const struct {
-				const char *format;
-				const string &path;
-			} targets[] = {{"json", jsonOutput}, {"csv", csvOutput}, {"mat", output}};
-			for (const auto &target : targets) {
-				if (target.path.empty()) {
-					continue;
-				}
-				unique_ptr<ResultWriter> writer = string(target.format) == "mat" ? makeMatResultWriter() : makeResultWriter(target.format);
-				string err;
-				if (writer == nullptr) {
-					cerr << "Error: unknown output format " << target.format << "." << endl;
-					status = -1;
-				} else if (writer->write(result, target.path, err)) {
-					cout << target.format << " output written to file " << target.path << "." << endl;
-				} else {
-					cerr << "Error: " << err << "." << endl;
-					status = -1;
-				}
-			}
-		}
-
-		delete sasSolLink;
-
-		return status;
+		job.verbose = verbose;
+		return runModelica(job, false);
 
 	} else if (compMode == "-p") {
 
@@ -566,7 +488,19 @@ int main(int argc, char **argv) {
 
 	} else {
 
-		cerr << "The first arg should either be -g (general SAS) or -p (power flow)." << endl;
-		return 0;
+		cerr << "The first arg should be run (job file), -g (general SAS) or -p (power flow)." << endl;
+		printUsage();
+		return 1;
 	}
+}
+
+int main(int argc, char **argv) {
+	try {
+		return realMain(argc, argv);
+	} catch (const std::exception &e) {
+		cerr << "Error: " << e.what() << endl;
+	} catch (...) {
+		cerr << "Error: unknown failure." << endl;
+	}
+	return 1;
 }

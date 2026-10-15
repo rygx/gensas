@@ -195,3 +195,26 @@ cc_library(
         ":sas_hybrid_model_lib",
     ]
 )
+
+# One Modelica simulation as a library call: job (file or struct), run with progress and
+# cancellation, sampled result. The command line and the C API sit on top of this.
+cc_library(
+    name = "sas_simulation_lib",
+    hdrs = [
+        "Simulation.h",
+    ],
+    srcs = [
+        "Simulation.cpp",
+    ],
+    deps = [
+        ":sas_computation_lib",
+        ":sas_expr_parser_lib",
+        ":sas_hybrid_model_lib",
+        ":sas_hybrid_sim_lib",
+        ":sas_model_checker_lib",
+        ":sas_model_parser_lib",
+        ":sas_result_lib",
+        ":sas_result_mat_lib",
+        "//:libjsoncpp",
+    ],
+)

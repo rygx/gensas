@@ -12,6 +12,7 @@ cc_binary(
         "//io:mat_psat_rw_lib",
         "//sas:sas_expr_parser_lib",
         "//sas:sas_model_parser_lib",
+        "//sas:sas_simulation_lib",
         "//sas:sas_hybrid_sim_lib",
         "//sas:sas_result_lib",
         "//sas:sas_result_mat_lib",

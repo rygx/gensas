@@ -233,6 +233,41 @@ else
 fi
 rm -f "${REPO_DIR}/${HYBRID_JSON}" "${REPO_DIR}/${HYBRID_CSV}" "${REPO_DIR}/${HYBRID_EVENTS_CSV}" "${REPO_DIR}/${HYBRID_MAT}"
 
+# ── Modelica job file (gensas run) ──────────────────────────────────────────
+# Paths in the job file are relative to the job file's directory (the repository root here).
+JOB_FILE="gensas_integration_job.json"
+JOB_JSON="gensas_integration_job_out.json"
+cat > "${REPO_DIR}/${JOB_FILE}" <<'JOB'
+{
+  "gensas": {"format": "job", "version": 1},
+  "kind": "modelica",
+  "model": {"file": "resources/mofile/test_bouncing_ball.mo"},
+  "solver": {"endTime": 1.2},
+  "output": {"json": "gensas_integration_job_out.json"}
+}
+JOB
+rm -f "${REPO_DIR}/${JOB_JSON}"
+set +e
+JOB_OUTPUT=$("${APP_BIN}" run "${INPUT_DIR}/${JOB_FILE}" 2>&1)
+JOB_EXIT=$?
+BAD_OUTPUT=$("${APP_BIN}" run "${INPUT_DIR}/${JOB_FILE}" --set solver.endTim=3 2>&1)
+BAD_EXIT=$?
+set -e
+echo "${JOB_OUTPUT}" | grep -E "^Event at|output written|rror" || true
+if [ "${JOB_EXIT}" -eq 0 ] && [ "$(echo "${JOB_OUTPUT}" | grep -c '^Event at' || true)" -eq 3 ] && [ -s "${REPO_DIR}/${JOB_JSON}" ]; then
+  echo "PASS: gensas run produced the bounce events and the JSON result"
+else
+  echo "FAIL: gensas run (exit ${JOB_EXIT})"
+  PASS=0
+fi
+if [ "${BAD_EXIT}" -ne 0 ] && echo "${BAD_OUTPUT}" | grep -q "unknown key solver.endTim"; then
+  echo "PASS: gensas run rejects an unknown key"
+else
+  echo "FAIL: gensas run accepted an unknown key (exit ${BAD_EXIT})"
+  PASS=0
+fi
+rm -f "${REPO_DIR}/${JOB_FILE}" "${REPO_DIR}/${JOB_JSON}"
+
 rm -rf "${REPO_DIR}/${CASE_DIR}"
 
 # ── Summary ─────────────────────────────────────────────────────────────────

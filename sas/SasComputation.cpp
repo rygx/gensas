@@ -1137,6 +1137,10 @@ namespace che {
 				alpha = sasSol->absEnd;
 				init = sasSol->solution->getSolValue(sasSol->absEnd - sasSol->absStart);
 				solLink->solutionLink.push_back(sasSol);
+				if (options.progress && options.progress(alpha, options.endTime)) {
+					solLink->cancelled = true;
+					break;
+				}
 				if (options.onSolution && options.onSolution(sasSol)) {
 					break;
 				}

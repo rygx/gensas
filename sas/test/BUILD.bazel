@@ -83,6 +83,16 @@ cc_test(
     ],
 )
 
+# Simulation facade: job parsing, runs, progress and cancellation.
+cc_test(
+    name = "simulation_test",
+    srcs = ["simulation_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_simulation_lib",
+    ],
+)
+
 # Solver with an algebraic equation (guards the Pade coefficient cache during AE calibration).
 cc_test(
     name = "dae_regression_test",

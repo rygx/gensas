@@ -14,7 +14,7 @@ GenSAS was created at Argonne National Laboratory, where Rui Yao was the princip
 Recent work in this repository includes Linux, macOS and Windows builds checked in CI, hybrid Modelica simulation with event handling, a self-contained input and output stack (no MATLAB, HDF5 or zlib libraries needed), and a solver that can run several independent simulations in one process. Planned next: a job-file driven command line, a C library interface with a Python wrapper, and broader Modelica coverage.
 
 ### Build and run
-GenSAS builds with Bazel on **Linux, macOS and Windows** (MSYS2 MinGW-w64). See [Installation](Installation.md) for prerequisites and per-OS instructions, and [Usage](Usage.md) for command-line options. [Case format](CaseFormat.md) describes the power-flow input. [Result format](ResultFormat.md) specifies the JSON, CSV and MAT result files. [Architecture](Architecture.md) describes the Modelica pipeline and how to run the solver tests quickly.
+GenSAS builds with Bazel on **Linux, macOS and Windows** (MSYS2 MinGW-w64). See [Installation](Installation.md) for prerequisites and per-OS instructions, and [Usage](Usage.md) for command-line options. [Case format](CaseFormat.md) describes the power-flow input. [Job format](JobFormat.md) describes the JSON job files for `gensas run`. [Result format](ResultFormat.md) specifies the JSON, CSV and MAT result files. [Architecture](Architecture.md) describes the Modelica pipeline and how to run the solver tests quickly.
 
 ### Companion Project
 PowerSAS.m -- SAS-based power grid analysis toolbox for Matlab/GNU Octave users. 

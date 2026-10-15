@@ -88,6 +88,10 @@ survives copying the AST into the computation model.
   rely on that.
 * Segments shorter than `alphaTol` are not solved.
 
+### Library entry point
+
+`sas/Simulation.h` wraps the whole pipeline for one Modelica run: `ModelicaJob` (model file or text, solver options, piecewise mode, output step and files; filled by `parseModelicaJob` from a job file, see [Job format](JobFormat.md)), `Simulation::run(progress)` (parse, check, solve, sample; the optional progress callback receives the time reached and the end time after each solution segment and returns true to cancel) and `Simulation::result()`. The command line (`app run`, `app -g`) is a thin layer over it, and the planned C API wraps the same class.
+
 ### Re-entrancy
 
 There is no process-wide mutable state in the Modelica path: each `SasModelParser` owns a `ModelPool`

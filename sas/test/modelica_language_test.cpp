@@ -157,6 +157,29 @@ static void testFunctionsInParametersAndEvents() {
 	}
 }
 
+// atan2 is rewritten into half-angle atan forms; the switches between them are state events.
+static void testAtan2() {
+	const double pi = 3.14159265358979323846;
+	// z = atan2(sin(u), cos(u)) is u wrapped into (-pi, pi]: a smooth stretch through x = 0 ...
+	const char *smooth =
+		"model M\n  Real u(start = -1);\n  Real z;\nequation\n  der(u) = 1;\n  z = atan2(sin(u), cos(u));\nend M;\n";
+	Simulation a(job(smooth, 3.5));
+	CHECK(a.run());
+	CHECK_NEAR(lastValue(a.result(), "z"), -1.0 + a.result().time.back(), 1e-4);
+	// ... and across the branch cut at pi, where the value jumps by 2 pi.
+	const char *wrap =
+		"model M\n  Real u(start = 2);\n  Real z;\nequation\n  der(u) = 1;\n  z = atan2(sin(u), cos(u));\nend M;\n";
+	Simulation b(job(wrap, 2.5));
+	CHECK(b.run());
+	CHECK_NEAR(lastValue(b.result(), "z"), 2.0 + b.result().time.back() - 2.0 * pi, 1e-4);
+	// A parameter and a condition use the numeric function.
+	const char *num =
+		"model M\n  parameter Real p = atan2(1, -1);\n  Real x(start = 1);\nequation\n  der(x) = -x*p;\nend M;\n";
+	Simulation c(job(num, 1.0));
+	CHECK(c.run());
+	CHECK_NEAR(lastValue(c.result(), "x"), std::exp(-0.75 * pi * c.result().time.back()), 1e-4);
+}
+
 // noEvent(e) in a continuous equation is accepted; the switch is still located as an event.
 static void testNoEvent() {
 	const char *src =
@@ -349,6 +372,7 @@ static void testArrays() {
 }
 
 int main() {
+	testAtan2();
 	testArrays();
 	testSourceLayout();
 	testImplicitAlgebraicEquations();

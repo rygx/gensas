@@ -252,6 +252,10 @@ namespace che {
 					}
 					return true;
 				}
+				if (fn == "atan2" && n == 2) {
+					out = atan2(args[0], args[1]);
+					return true;
+				}
 				if ((fn == "min" || fn == "max") && n == 2) {
 					out = (fn == "min") ? min(args[0], args[1]) : max(args[0], args[1]);
 					return true;
@@ -394,6 +398,25 @@ namespace che {
 				return NULL;
 			}
 
+			// atan2(y, x) with the half-angle formula atan2(y, x) = 2 atan(y / (sqrt(x^2 + y^2) + x)), which is smooth
+			// for x >= 0; on the left half plane it is pi - atan2(y, -x) (y >= 0) or -pi - atan2(y, -x) (y < 0).
+			// The switches at x = 0 (continuous) and y = 0 with x < 0 (the branch cut) are state events.
+			AstNode *rewriteAtan2(const AstNode *y, const AstNode *x, RewriteCtx &ctx) {
+				auto radius = [&]() {
+					AstNode *sum = mkNode(OP_ADD, mkNode(OP_MUL, cloneNode(x), cloneNode(x)), mkNode(OP_MUL, cloneNode(y), cloneNode(y)));
+					return mkCall("sqrt", sum, ctx);
+				};
+				auto half = [&](Op op) { // 2 atan(y / (r +- x))
+					AstNode *den = mkNode(op, radius(), cloneNode(x));
+					return mkNode(OP_MUL, mkConst(2.0), mkCall("atan", mkNode(OP_DIV, cloneNode(y), den), ctx));
+				};
+				const double pi = 3.14159265358979323846;
+				AstNode *upper = mkNode(OP_SUB, mkConst(pi), half(OP_SUB));
+				AstNode *lower = mkNode(OP_SUB, mkConst(-pi), half(OP_SUB));
+				AstNode *left = mkIf(mkNode(OP_GREAT_EQ, cloneNode(y), mkConst(0.0)), upper, lower);
+				return mkIf(mkNode(OP_GREAT_EQ, cloneNode(x), mkConst(0.0)), half(OP_ADD), left);
+			}
+
 			// Rewrites the expression chain starting at p; returns the new head.
 			AstNode *rewriteChain(AstNode *p, RewriteCtx &ctx);
 
@@ -415,6 +438,9 @@ namespace che {
 				const AstNode *a = p->subs[1];
 				const AstNode *b = a != NULL ? a->next : NULL;
 				AstNode *repl = (a != NULL && b == NULL) ? rewriteDerivedFunction(fn, a, ctx) : NULL;
+				if (repl == NULL && fn == "atan2" && a != NULL && b != NULL && b->next == NULL) {
+					repl = rewriteAtan2(a, b, ctx);
+				}
 				if (repl != NULL) {
 					// done
 				} else if (fn == "noEvent" && a != NULL && b == NULL) {

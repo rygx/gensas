@@ -53,6 +53,9 @@ namespace che {
 			// discrete variables (no state events), and discrete-only operators stay out of
 			// continuous equations. Use together with the flags above.
 			bool timeEventsOnly = false;
+			// With timeEventsOnly: also allow state events, that is when-conditions and if-conditions
+			// that depend on continuous variables or `time` (the simulator detects the crossings).
+			bool stateEvents = false;
 		};
 
 		// Checks a parsed model: undeclared identifiers, unknown functions, and use of

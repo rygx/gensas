@@ -80,6 +80,7 @@ namespace che {
 			const AstNode *cond = NULL;
 			const AstNode *body = NULL; // statement list
 			int line = 0;
+			int guardId = -1; // id of the branch's condition, see collectGuards()
 		};
 
 		// A `when ... elsewhen ... end when` statement.
@@ -89,6 +90,31 @@ namespace che {
 
 		// The top-level when-statements of a model.
 		std::vector<WhenClause> collectWhenClauses(const SasModel &model);
+
+		// A condition that can change its truth value during a simulation: the condition of a when
+		// branch, an if-expression or an if-equation. collectGuards() numbers them (the id is stored in
+		// AstNode::index of the when/if node, so it survives copying the AST) and says which ones depend
+		// on continuous variables or `time` and therefore need event detection ("dynamic").
+		enum GuardKind { G_IFEXPR,
+						 G_IFEQ,
+						 G_WHEN };
+
+		struct Guard {
+			int id = -1;
+			GuardKind kind = G_IFEXPR;
+			const AstNode *cond = NULL;
+			int line = 0;
+			bool dynamic = false;
+		};
+
+		// Numbers the guards of `model` and classifies them. `env` must hold the parameters and discrete
+		// variables only (continuous variables are the names it does not know). The recognized time-event
+		// conditions of when branches (`time >= e`, `sample(...)`) are not dynamic guards: they are
+		// scheduled exactly by nextEventTime().
+		std::vector<Guard> collectGuards(SasModel &model, const HybridEnv &env);
+
+		// Truth values of the dynamic guards under the values in `env` (including `env.time`).
+		bool evalGuards(const std::vector<Guard> &guards, const HybridEnv &env, std::map<int, bool> &truth, std::string &err);
 
 		// Smallest event time strictly after `t` over all clauses; returns false if there is none.
 		// Returns false with a non-empty `err` on evaluation errors.
@@ -104,14 +130,17 @@ namespace che {
 		// Fires the clauses that trigger at time T: runs the body of the first triggering branch of each
 		// clause, evaluating all right-hand sides with the values before the event, then applies the
 		// discrete assignments to `env.values`. Continuous reinits are returned in `ev` and are not
-		// applied to `env`. With `initialOnly`, only sample() conditions fire (used at the start time).
-		// Returns false with `err` set on errors; `ev` is empty when nothing fired.
-		bool fireEvents(const std::vector<WhenClause> &clauses, HybridEnv &env, double T, bool initialOnly, HybridEvent &ev, std::string &err);
+		// applied to `env`. A branch triggers if its time-event condition holds at T (only sample()
+		// conditions with `initialOnly`, none with `noTimeEvents`) or if its guard id is in `fired`
+		// (the guard became true). Returns false with `err` set on errors; `ev` is empty when nothing
+		// fired.
+		bool fireEvents(const std::vector<WhenClause> &clauses, HybridEnv &env, double T, bool initialOnly, HybridEvent &ev, std::string &err, const std::set<int> *fired = NULL, bool noTimeEvents = false);
 
 		// Specializes `model` (a private copy) for the discrete state in `env`: when-statements are
 		// removed, if-equations and if-expressions are resolved, and discrete variables are replaced by
-		// their current values. What remains is a plain continuous model.
-		bool specializeModel(SasModel &model, const HybridEnv &env, std::string &err);
+		// their current values. What remains is a plain continuous model. Conditions of dynamic guards
+		// (see collectGuards) take their truth value from `dynamicTruth` instead of being evaluated.
+		bool specializeModel(SasModel &model, const HybridEnv &env, std::string &err, const std::map<int, bool> *dynamicTruth = NULL);
 
 	} // namespace core
 } // namespace che

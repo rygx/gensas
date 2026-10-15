@@ -272,6 +272,7 @@ int main(int argc, char **argv) {
 			solverFeatures.whenEquations = solverFeatures.piecewiseFunctions = solverFeatures.eventFunctions = true;
 			solverFeatures.simulationTime = true;
 			solverFeatures.timeEventsOnly = true;
+			solverFeatures.stateEvents = true;
 		}
 		if (checkModel(*parser.currentModel, solverFeatures, fileMode ? input : string("<string>"), cerr) > 0) {
 			cerr << "Error: The model uses constructs that are not supported yet." << endl;

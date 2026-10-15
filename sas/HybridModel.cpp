@@ -340,6 +340,7 @@ namespace che {
 					WhenLink link;
 					link.cond = w->subs[0];
 					link.line = w->line;
+					link.guardId = w->index;
 					const AstNode *br = w->subs[1];
 					link.body = br != NULL ? br->subs[0] : NULL;
 					clause.links.push_back(link);
@@ -352,13 +353,108 @@ namespace che {
 
 		namespace {
 
+			// Does the expression depend on `time` or on a variable the environment does not know
+			// (that is, a continuous variable)?
+			bool refsDynamic(const AstNode *p, const HybridEnv &env) {
+				for (; p != NULL; p = p->next) {
+					if (p->op == OP_ID && p->ty != TY_FUNCTION) {
+						string n = idName(p);
+						if (n == "time" || env.values.find(n) == env.values.end()) {
+							return true;
+						}
+					}
+					if (refsDynamic(p->subs[0], env) || refsDynamic(p->subs[1], env)) {
+						return true;
+					}
+				}
+				return false;
+			}
+
+			void numberExprGuards(AstNode *p, const HybridEnv &env, vector<Guard> &out) {
+				for (; p != NULL; p = p->next) {
+					if (p->op == OP_IFEXPR) {
+						Guard g;
+						g.id = (int)out.size();
+						g.kind = G_IFEXPR;
+						g.cond = p->subs[0];
+						g.dynamic = refsDynamic(p->subs[0], env);
+						p->index = g.id;
+						out.push_back(g);
+					}
+					numberExprGuards(p->subs[0], env, out);
+					numberExprGuards(p->subs[1], env, out);
+				}
+			}
+
+			void numberStatementGuards(AstNode *p, const HybridEnv &env, vector<Guard> &out) {
+				for (; p != NULL; p = p->next) {
+					if (p->nodeKind == NK_IfEquation) {
+						Guard g;
+						g.id = (int)out.size();
+						g.kind = G_IFEQ;
+						g.cond = p->subs[0];
+						g.line = p->line;
+						g.dynamic = refsDynamic(p->subs[0], env);
+						p->index = g.id;
+						out.push_back(g);
+						numberExprGuards(p->subs[0], env, out);
+						if (p->subs[1] != NULL) {
+							numberStatementGuards(p->subs[1]->subs[0], env, out);
+							numberStatementGuards(p->subs[1]->subs[1], env, out);
+						}
+					} else if (p->nodeKind == NK_WhenEquation) {
+						AstNode *w = p;
+						while (w != NULL && w->nodeKind == NK_WhenEquation) {
+							Guard g;
+							TimeCond tc;
+							g.id = (int)out.size();
+							g.kind = G_WHEN;
+							g.cond = w->subs[0];
+							g.line = w->line;
+							g.dynamic = !classifyTimeCondition(w->subs[0], tc);
+							w->index = g.id;
+							out.push_back(g);
+							w = w->subs[1] != NULL ? w->subs[1]->subs[1] : NULL;
+						}
+					} else {
+						numberExprGuards(p, env, out);
+					}
+				}
+			}
+		} // namespace
+
+		vector<Guard> collectGuards(SasModel &model, const HybridEnv &env) {
+			vector<Guard> guards;
+			for (const shared_ptr<AstTree> &tree : model.modelTrees) {
+				numberStatementGuards(tree->pHead, env, guards);
+			}
+			return guards;
+		}
+
+		bool evalGuards(const vector<Guard> &guards, const HybridEnv &env, map<int, bool> &truth, string &err) {
+			for (const Guard &g : guards) {
+				if (!g.dynamic) {
+					continue;
+				}
+				double v;
+				string e;
+				if (!env.eval(g.cond, v, e)) {
+					err = lineMsg(g.line, e);
+					return false;
+				}
+				truth[g.id] = (v != 0.0);
+			}
+			return true;
+		}
+
+		namespace {
+
 			// Next time strictly after t at which the link's condition becomes true.
 			bool linkNextTime(const WhenLink &link, HybridEnv &env, double t, double &te, bool &found, string &err) {
 				found = false;
 				TimeCond tc;
 				if (!classifyTimeCondition(link.cond, tc)) {
-					err = lineMsg(link.line, "only `time >= e` and `sample(start, interval)` conditions are supported in when-equations");
-					return false;
+					return true; // a state-event condition: detected by the simulator, not scheduled
 				}
 				env.time = t;
 				double a;
@@ -391,15 +487,16 @@ namespace che {
 				return true;
 			}
 
-			// Does the link's condition become true at time T?
-			bool linkTriggers(const WhenLink &link, HybridEnv &env, double T, bool initialOnly, bool &fires, string &err) {
+			// Does the link fire at time T? Time-event conditions are tested against T; other conditions
+			// fire if their guard became true (is in `fired`).
+			bool linkTriggers(const WhenLink &link, HybridEnv &env, double T, bool initialOnly, bool noTimeEvents, const set<int> *fired, bool &fires, string &err) {
 				fires = false;
 				TimeCond tc;
 				if (!classifyTimeCondition(link.cond, tc)) {
-					err = lineMsg(link.line, "only `time >= e` and `sample(start, interval)` conditions are supported in when-equations");
-					return false;
+					fires = fired != NULL && link.guardId >= 0 && fired->count(link.guardId) > 0;
+					return true;
 				}
-				if (initialOnly && tc.kind != TC_SAMPLE) {
+				if (noTimeEvents || (initialOnly && tc.kind != TC_SAMPLE)) {
 					return true;
 				}
 				env.time = T;
@@ -447,7 +544,7 @@ namespace che {
 			return any;
 		}
 
-		bool fireEvents(const vector<WhenClause> &clauses, HybridEnv &env, double T, bool initialOnly, HybridEvent &ev, string &err) {
+		bool fireEvents(const vector<WhenClause> &clauses, HybridEnv &env, double T, bool initialOnly, HybridEvent &ev, string &err, const set<int> *fired, bool noTimeEvents) {
 			ev = HybridEvent();
 			ev.time = T;
 			env.time = T;
@@ -459,7 +556,7 @@ namespace che {
 			for (const WhenClause &clause : clauses) {
 				for (const WhenLink &link : clause.links) {
 					bool fires;
-					if (!linkTriggers(link, env, T, initialOnly, fires, err)) {
+					if (!linkTriggers(link, env, T, initialOnly, noTimeEvents, fired, fires, err)) {
 						return false;
 					}
 					if (!fires) {
@@ -513,9 +610,9 @@ namespace che {
 		namespace {
 
 			// Specializes the expression chain starting at p (following `next`); takes ownership.
-			AstNode *specExpr(AstNode *p, const HybridEnv &env, string &err);
+			AstNode *specExpr(AstNode *p, const HybridEnv &env, const map<int, bool> *dyn, string &err);
 
-			AstNode *specOne(AstNode *p, const HybridEnv &env, string &err) {
+			AstNode *specOne(AstNode *p, const HybridEnv &env, const map<int, bool> *dyn, string &err) {
 				if (p->op == OP_ID && p->ty != TY_FUNCTION) {
 					string n = idName(p);
 					if (env.discrete.count(n)) {
@@ -534,7 +631,15 @@ namespace che {
 					double c;
 					string e;
 					AstNode *br = p->subs[1];
-					if (br == NULL || !env.eval(p->subs[0], c, e)) {
+					bool known = false;
+					if (dyn != NULL && p->index >= 0) {
+						map<int, bool>::const_iterator it = dyn->find(p->index);
+						if (it != dyn->end()) {
+							c = it->second ? 1.0 : 0.0;
+							known = true;
+						}
+					}
+					if (br == NULL || (!known && !env.eval(p->subs[0], c, e))) {
 						if (err.empty()) {
 							err = br == NULL ? "malformed if-expression" : e;
 						}
@@ -549,33 +654,33 @@ namespace che {
 						br->subs[1] = NULL;
 					}
 					freeTree(p);
-					return specExpr(chosen, env, err);
+					return specExpr(chosen, env, dyn, err);
 				}
 				if (p->op == OP_CALL) {
-					p->subs[1] = specExpr(p->subs[1], env, err);
+					p->subs[1] = specExpr(p->subs[1], env, dyn, err);
 					return p;
 				}
-				p->subs[0] = specExpr(p->subs[0], env, err);
-				p->subs[1] = specExpr(p->subs[1], env, err);
+				p->subs[0] = specExpr(p->subs[0], env, dyn, err);
+				p->subs[1] = specExpr(p->subs[1], env, dyn, err);
 				return p;
 			}
 
-			AstNode *specExpr(AstNode *p, const HybridEnv &env, string &err) {
+			AstNode *specExpr(AstNode *p, const HybridEnv &env, const map<int, bool> *dyn, string &err) {
 				if (p == NULL) {
 					return NULL;
 				}
 				AstNode *nxt = p->next;
 				p->next = NULL;
-				AstNode *r = specOne(p, env, err);
+				AstNode *r = specOne(p, env, dyn, err);
 				if (r != NULL) {
-					r->next = specExpr(nxt, env, err);
+					r->next = specExpr(nxt, env, dyn, err);
 				} else {
 					freeTree(nxt);
 				}
 				return r;
 			}
 
-			void expandStatement(AstNode *st, const HybridEnv &env, list<shared_ptr<AstTree>> &out, string &err) {
+			void expandStatement(AstNode *st, const HybridEnv &env, const map<int, bool> *dyn, list<shared_ptr<AstTree>> &out, string &err) {
 				if (st == NULL) {
 					return;
 				}
@@ -588,7 +693,15 @@ namespace che {
 					string e;
 					AstNode *br = st->subs[1];
 					AstNode *chosen = NULL;
-					if (br == NULL || !env.eval(st->subs[0], c, e)) {
+					bool known = false;
+					if (dyn != NULL && st->index >= 0) {
+						map<int, bool>::const_iterator it = dyn->find(st->index);
+						if (it != dyn->end()) {
+							c = it->second ? 1.0 : 0.0;
+							known = true;
+						}
+					}
+					if (br == NULL || (!known && !env.eval(st->subs[0], c, e))) {
 						if (err.empty()) {
 							err = lineMsg(st->line, br == NULL ? "malformed if-equation" : e);
 						}
@@ -600,27 +713,27 @@ namespace che {
 						br->subs[1] = NULL;
 					}
 					freeTree(st);
-					expandStatement(chosen, env, out, err);
+					expandStatement(chosen, env, dyn, out, err);
 				} else {
-					st->subs[0] = specExpr(st->subs[0], env, err);
-					st->subs[1] = specExpr(st->subs[1], env, err);
+					st->subs[0] = specExpr(st->subs[0], env, dyn, err);
+					st->subs[1] = specExpr(st->subs[1], env, dyn, err);
 					shared_ptr<AstTree> tree = make_shared<AstTree>();
 					tree->pHead = st;
 					tree->line = st->line;
 					out.push_back(tree);
 				}
-				expandStatement(nxt, env, out, err);
+				expandStatement(nxt, env, dyn, out, err);
 			}
 		} // namespace
 
-		bool specializeModel(SasModel &model, const HybridEnv &env, string &err) {
+		bool specializeModel(SasModel &model, const HybridEnv &env, string &err, const map<int, bool> *dynamicTruth) {
 			err.clear();
 			list<shared_ptr<AstTree>> old;
 			old.swap(model.modelTrees);
 			for (const shared_ptr<AstTree> &tree : old) {
 				AstNode *head = tree->pHead;
 				tree->pHead = NULL;
-				expandStatement(head, env, model.modelTrees, err);
+				expandStatement(head, env, dynamicTruth, model.modelTrees, err);
 			}
 			return err.empty();
 		}

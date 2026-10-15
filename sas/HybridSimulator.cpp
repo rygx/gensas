@@ -196,9 +196,12 @@ namespace che {
 							nameIdx.push_back(make_pair(string((const char *)id->str), id->index));
 						}
 					}
+					// A mode may reorder the variables or turn a state into an algebraic variable (and
+					// back); the results are matched by name. The set of variables must stay the same.
+					sort(names.begin(), names.end());
 					if (!stateNames.empty() && names != stateNames) {
 						ostringstream os;
-						os << "the set or order of the continuous variables changes at t=" << t << "; models whose structure changes are not supported yet";
+						os << "the set of continuous variables changes at t=" << t << "; models that add or remove variables in a mode are not supported yet";
 						fail(os.str());
 						return NULL;
 					}

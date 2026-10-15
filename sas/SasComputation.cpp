@@ -25,6 +25,7 @@
 // ***************************************************************************************************
 //
 #include "sas/SasComputation.h"
+#include <map>
 #include <cmath>
 #include <string>
 #include <iostream>
@@ -1200,44 +1201,90 @@ namespace che {
 			return nullptr;
 		}
 
+		namespace {
+			// Continuous results sampled every `interval`, for the output files.
+			struct Curves {
+				vector<string> names;	 // continuous variables, in the order of the last solution's model
+				vector<double> times;	 // sample times; an event time appears once per solution segment
+				vector<double> segStart; // start time of the solution segment each sample was taken from
+				mat values;				 // names.size() x times.size()
+			};
+
+			// Samples are mapped to variables by name, so solution segments of different computation
+			// models (hybrid models whose equation structure depends on the mode) can be combined.
+			Curves collectCurves(SasSolutionSet &set, double interval) {
+				Curves c;
+				if (set.solutionLink.empty()) {
+					return c;
+				}
+				SasComputationModel *lastModel = set.solutionLink.back()->linkCompModel;
+				for (size_t i = 0; i < lastModel->idTable.size(); i++) {
+					const shared_ptr<IdPearl> &id = lastModel->idTable[i];
+					if (id->idTy == ID_VAR || id->idTy == ID_IVAR) {
+						c.names.push_back((const char *)id->str);
+					}
+				}
+				map<SasComputationModel *, vector<int>> rowOf; // per model: row of each name, or -1
+				auto rowsFor = [&](SasComputationModel *cm) -> const vector<int> & {
+					map<SasComputationModel *, vector<int>>::iterator it = rowOf.find(cm);
+					if (it != rowOf.end()) {
+						return it->second;
+					}
+					map<string, int> pos;
+					for (size_t i = 0; i < cm->idTable.size(); i++) {
+						const shared_ptr<IdPearl> &id = cm->idTable[i];
+						if (id->idTy == ID_VAR || id->idTy == ID_IVAR) {
+							pos[(const char *)id->str] = (int)i;
+						}
+					}
+					vector<int> rows;
+					for (const string &n : c.names) {
+						map<string, int>::const_iterator f = pos.find(n);
+						rows.push_back(f == pos.end() ? -1 : f->second);
+					}
+					return rowOf.insert(make_pair(cm, rows)).first->second;
+				};
+
+				vector<vec> samples;
+				vector<SasComputationModel *> sampleModel;
+				double t = 0.0;
+				double maxAlpha = set.solutionLink.back()->absEnd;
+				while (t <= maxAlpha - interval / 100) {
+					list<shared_ptr<SasSolution>> found = set.findSasSolution(t);
+					for (const shared_ptr<SasSolution> &sol : found) {
+						samples.push_back(sol->solution->getSolValue(t - sol->absStart));
+						sampleModel.push_back(sol->linkCompModel);
+						c.times.push_back(t);
+						c.segStart.push_back(sol->absStart);
+					}
+					t += interval;
+					if (t > maxAlpha) {
+						t = maxAlpha;
+					}
+				}
+				c.values = mat(c.names.size(), samples.size(), fill::zeros);
+				for (size_t j = 0; j < samples.size(); j++) {
+					const vector<int> &rows = rowsFor(sampleModel[j]);
+					for (size_t r = 0; r < c.names.size(); r++) {
+						bool ok = rows[r] >= 0 && rows[r] < (int)samples[j].n_rows;
+						c.values(r, j) = ok ? samples[j](rows[r]) : datum::nan;
+					}
+				}
+				return c;
+			}
+		} // namespace
+
 		void SasSolutionSet::writeMatFile(const char *fileName, double interval) {
 			if (solutionLink.empty()) {
 				return;
 			}
-			double t = 0.0;
-			double maxAlpha = solutionLink.back()->absEnd;
-			vector<vec> vecVec;
-			vector<double> tVec;
-			while (t <= maxAlpha - interval / 100) {
-				list<shared_ptr<SasSolution>> foundSolution = findSasSolution(t);
-				list<shared_ptr<SasSolution>>::iterator sasIt;
-				for (sasIt = foundSolution.begin(); sasIt != foundSolution.end(); sasIt++) {
-					vecVec.push_back((*sasIt)->solution->getSolValue(t - (*sasIt)->absStart));
-					tVec.push_back(t);
-				}
-				t += interval;
-				if (t > maxAlpha) {
-					t = maxAlpha;
-				}
+			Curves curves = collectCurves(*this, interval);
+			if (curves.times.empty() || curves.names.empty()) {
+				return;
 			}
-			mat solutionMat(vecVec[0].n_rows, vecVec.size(), fill::zeros);
-			for (int i = 0; i < vecVec.size(); i++) {
-				solutionMat.col(i) = vecVec[i];
-			}
+			mat solutionMat = curves.values;
 
-			vector<int> iVarVec;
-			// WARNING: Not rigorous, only use the CompModel of the last solution
-			SasComputationModel *linkCompModel = solutionLink.back()->linkCompModel;
-			for (int i = 0; i < linkCompModel->idTable.size(); i++) {
-				if (linkCompModel->idTable[i]->idTy == ID_VAR || linkCompModel->idTable[i]->idTy == ID_IVAR) {
-					if (i < solutionMat.n_rows) {
-						iVarVec.push_back(i);
-					}
-				}
-			}
-			solutionMat = solutionMat.rows(conv_to<uvec>::from(iVarVec));
-
-			vec tMat = conv_to<vec>::from(tVec);
+			vec tMat = conv_to<vec>::from(curves.times);
 
 			mat_t *matfp;
 			matvar_t *matvar;
@@ -1273,32 +1320,12 @@ namespace che {
 			if (solutionLink.empty()) {
 				return;
 			}
-			double t = 0.0;
-			double maxAlpha = solutionLink.back()->absEnd;
-			vector<vec> vecVec;
-			vector<double> tVec;
-			vector<double> segStart; // start time of the solution each sample was taken from
-			while (t <= maxAlpha - interval / 100) {
-				list<shared_ptr<SasSolution>> foundSolution = findSasSolution(t);
-				list<shared_ptr<SasSolution>>::iterator sasIt;
-				for (sasIt = foundSolution.begin(); sasIt != foundSolution.end(); sasIt++) {
-					vecVec.push_back((*sasIt)->solution->getSolValue(t - (*sasIt)->absStart));
-					tVec.push_back(t);
-					segStart.push_back((*sasIt)->absStart);
-				}
-				t += interval;
-				if (t > maxAlpha) {
-					t = maxAlpha;
-				}
-			}
-			if (vecVec.empty()) {
+			Curves curves = collectCurves(*this, interval);
+			if (curves.times.empty()) {
 				return;
 			}
-			mat solutionMat(vecVec[0].n_rows, vecVec.size(), fill::zeros);
-			for (int i = 0; i < vecVec.size(); i++) {
-				solutionMat.col(i) = vecVec[i];
-			}
-			vec tMat = conv_to<vec>::from(tVec);
+			const vector<double> &tVec = curves.times;
+			const vector<double> &segStart = curves.segStart;
 
 			Json::Value res;
 			Json::Value tVals;
@@ -1306,16 +1333,12 @@ namespace che {
 				tVals.append(Json::Value(tVec[i]));
 			}
 			res["time"] = tVals;
-			// WARNING: Not rigorous, only use the CompModel of the last solution
-			SasComputationModel *linkCompModel = solutionLink.back()->linkCompModel;
-			for (int i = 0; i < linkCompModel->idTable.size(); i++) {
-				if (linkCompModel->idTable[i]->idTy == ID_VAR || linkCompModel->idTable[i]->idTy == ID_IVAR) {
-					Json::Value vVals;
-					for (int j = 0; j < solutionMat.n_cols; j++) {
-						vVals.append(Json::Value(solutionMat(i, j)));
-					}
-					res[(char *)(linkCompModel->idTable[i]->str)] = vVals;
+			for (size_t r = 0; r < curves.names.size(); r++) {
+				Json::Value vVals;
+				for (size_t j = 0; j < curves.values.n_cols; j++) {
+					vVals.append(Json::Value(curves.values(r, j)));
 				}
+				res[curves.names[r]] = vVals;
 			}
 
 			// Hybrid results: the discrete variables sampled like the continuous ones (a sample takes the

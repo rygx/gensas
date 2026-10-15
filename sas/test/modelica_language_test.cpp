@@ -4,6 +4,7 @@
 #include "sas/test/test_util.h"
 
 #include <cmath>
+#include <limits>
 #include <string>
 
 using namespace che::core;
@@ -12,10 +13,13 @@ using std::string;
 static double lastValue(const SasResult &r, const string &name) {
 	for (size_t i = 0; i < r.names.size(); i++) {
 		if (r.names[i] == name) {
+			if (r.values[i].empty()) {
+				break;
+			}
 			return r.values[i].back();
 		}
 	}
-	return NAN;
+	return std::numeric_limits<double>::quiet_NaN();
 }
 
 static ModelicaJob job(const char *src, double endTime) {

@@ -34,8 +34,8 @@ how to test the solver quickly. Power flow (`-p`) is a separate path (`pf/`, `io
 `checkModel` takes a `SolverFeatures` set. With every flag false it describes the plain solver
 (continuous `Real`, parameters, `der`, algebraic equations). The application enables the hybrid
 flags and `timeEventsOnly` + `stateEvents`, which additionally forbid constructs the simulator
-cannot handle: relational operators and `abs`/`min`/`max` in continuous equations, `edge`/`change`,
-`when` inside `if`, assignments to discrete variables outside `when`.
+cannot handle: relational operators and `abs`/`min`/`max` in continuous equations, `edge`/`change`
+outside when-conditions (and of anything but one discrete variable), `when` inside `if`, assignments to discrete variables outside `when`.
 
 ### Hybrid simulation
 
@@ -49,7 +49,12 @@ cannot handle: relational operators and `abs`/`min`/`max` in continuous equation
    simulator's tracked state.
 3. Solve until the event time. The `onSolution` callback scans each new solution segment: it samples
    the dynamic guards (`guardSamples`, finer right after an event) and locates a flip by bisection on
-   the Pade solution; the solve stops there.
+   the Pade solution; the solve stops there. Between two samples it also follows the margin (left minus
+   right side) of every relation: a parabola through the interval tells whether the margin may cross
+   zero twice, and the extremum is then searched and used as an extra sample, so pulses shorter than
+   the sample spacing are found.
+   `edge(b)`/`change(d)` are true only while the event instant is handled (`HybridEnv::atEvent`),
+   compared with the discrete values at the start of the instant (`eventPre`).
 4. At the event, `fireEvents` runs the `when` bodies with the values before the event (`pre`),
    applies discrete assignments and returns `reinit`s; conditions made true by the event fire in
    further rounds (up to 50). Events that pile up in finite time stop the run with a Zeno error.

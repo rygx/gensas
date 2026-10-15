@@ -157,6 +157,8 @@ namespace che {
 
 				// ---- Rules for the time-event simulator (features.timeEventsOnly) ----
 
+				bool inWhenCondition = false; // checking a state-event when-condition (edge/change are allowed)
+
 				enum ExprCtx { CTX_CONT,  // continuous equation
 							   CTX_COND,  // evaluated from parameters and discrete variables only
 							   CTX_EVENT, // evaluated at an event: also continuous values and `time`
@@ -212,7 +214,18 @@ namespace che {
 								report(line, "function " + fn + "() is not supported in continuous equations yet");
 							}
 						} else if (fn == "edge" || fn == "change") {
-							report(line, "function " + fn + "() requires state events, which are not supported yet");
+							const AstNode *arg = p->subs[1];
+							shared_ptr<IdPearl> id = (arg != NULL && arg->op == OP_ID && arg->ty != TY_FUNCTION) ? lookup(arg) : nullptr;
+							if (!features.stateEvents) {
+								report(line, "function " + fn + "() requires state events, which are not supported yet");
+							} else if (!inWhenCondition) {
+								report(line, "function " + fn + "() can only be used in when-conditions");
+							} else if (arg == NULL || arg->next != NULL || id == nullptr || id->idTy != ID_DISC) {
+								report(line, "the argument of " + fn + "() must be one discrete variable");
+							} else if (fn == "edge" && id->ty != TY_BOOL) {
+								report(line, "the argument of edge() must be a Boolean variable");
+							}
+							return;
 						} else if (fn == "sample") {
 							report(line, "sample() can only be used as a when-condition");
 						}
@@ -235,7 +248,9 @@ namespace che {
 							if (!features.stateEvents) {
 								report(line, "when-condition must be `time >= e` or `sample(start, interval)`; state events are not supported yet");
 							} else {
+								inWhenCondition = true;
 								strictExpr(w->subs[0], line, CTX_EVENT);
+								inWhenCondition = false;
 							}
 						} else {
 							strictExpr(tc.a, line, CTX_COND);

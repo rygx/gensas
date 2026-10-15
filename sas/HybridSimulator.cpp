@@ -108,6 +108,20 @@ namespace che {
 				for (const pair<const string, double> &s : state) {
 					env.values[s.first] = s.second;
 				}
+				// edge() and change() compare with the values before this event instant.
+				env.eventPre.clear();
+				for (const string &n : env.discrete) {
+					env.eventPre[n] = env.values[n];
+				}
+				struct AtEvent {
+					HybridEnv &e;
+					explicit AtEvent(HybridEnv &env) : e(env) {
+						e.atEvent = true;
+					}
+					~AtEvent() {
+						e.atEvent = false;
+					}
+				} atEvent(env);
 				set<int> fired;
 				for (int iter = 0; iter < 50; iter++) {
 					map<int, bool> now;
@@ -211,7 +225,7 @@ namespace che {
 					HybridEnv scanEnv = env;
 					map<int, bool> scanCur = cur;
 					bool scanFailed = false;
-					auto truthAt = [&](const shared_ptr<SasSolution> &sol, double alpha, map<int, bool> &out) -> bool {
+					auto setEnvAt = [&](const shared_ptr<SasSolution> &sol, double alpha) {
 						arma::vec v = sol->solution->getSolValue(alpha - sol->absStart);
 						for (const pair<string, int> &ni : nameIdx) {
 							if (ni.second >= 0 && ni.second < (int)v.n_rows) {
@@ -219,11 +233,95 @@ namespace che {
 							}
 						}
 						scanEnv.time = alpha;
+					};
+					auto truthAt = [&](const shared_ptr<SasSolution> &sol, double alpha, map<int, bool> &out) -> bool {
+						setEnvAt(sol, alpha);
 						if (!evalGuards(guards, scanEnv, out, err)) {
 							scanFailed = true;
 							return false;
 						}
 						return true;
+					};
+					// Margin (left minus right side) of relation k at alpha, k = -1 for all of them.
+					const vector<const AstNode *> relations = collectRelations(guards);
+					auto marginsAt = [&](const shared_ptr<SasSolution> &sol, double alpha, vector<double> &out) -> bool {
+						setEnvAt(sol, alpha);
+						out.assign(relations.size(), 0.0);
+						for (size_t k = 0; k < relations.size(); k++) {
+							if (!relationMargin(relations[k], scanEnv, out[k], err)) {
+								scanFailed = true;
+								return false;
+							}
+						}
+						return true;
+					};
+					auto marginOf = [&](const shared_ptr<SasSolution> &sol, double alpha, size_t k, double &m) -> bool {
+						setEnvAt(sol, alpha);
+						if (!relationMargin(relations[k], scanEnv, m, err)) {
+							scanFailed = true;
+							return false;
+						}
+						return true;
+					};
+					// A relation whose margin has the same sign at both ends of (lo, hi) can still cross zero
+					// twice inside (a short pulse between two samples). Looks for the extremum of the margin
+					// and returns its time if the margin has the opposite sign there, else -1.
+					auto hiddenCrossing = [&](const shared_ptr<SasSolution> &sol, double lo, double hi, const vector<double> &m0, const vector<double> &m1) -> double {
+						for (size_t k = 0; k < relations.size(); k++) {
+							if (m0[k] == 0.0 || m1[k] == 0.0 || (m0[k] > 0.0) != (m1[k] > 0.0)) {
+								continue; // a sign change at the ends is handled by the guard test
+							}
+							const double sgn = m0[k] > 0.0 ? 1.0 : -1.0;
+							double fm;
+							double mid = 0.5 * (lo + hi);
+							if (!marginOf(sol, mid, k, fm)) {
+								return -1.0;
+							}
+							fm *= sgn;
+							if (fm < 0.0) {
+								return mid;
+							}
+							// Parabola through the three samples: f(x) = f0 + b x + c x^2 on [0, 1].
+							double f0 = sgn * m0[k];
+							double f1 = sgn * m1[k];
+							double c = 2.0 * f0 + 2.0 * f1 - 4.0 * fm;
+							double b = -3.0 * f0 - f1 + 4.0 * fm;
+							if (!(c > 0.0)) {
+								continue; // no interior minimum of sgn * margin
+							}
+							double x = -b / (2.0 * c);
+							if (x <= 0.0 || x >= 1.0) {
+								continue;
+							}
+							double fv = f0 + b * x + c * x * x;
+							if (fv > 0.25 * min(f0, f1)) {
+								continue; // the margin stays well away from zero
+							}
+							double l = lo;
+							double h = hi;
+							for (int it = 0; it < 60; it++) {
+								double a1 = l + (h - l) / 3.0;
+								double a2 = h - (h - l) / 3.0;
+								double v1, v2;
+								if (!marginOf(sol, a1, k, v1) || !marginOf(sol, a2, k, v2)) {
+									return -1.0;
+								}
+								if (sgn * v1 < sgn * v2) {
+									h = a2;
+								} else {
+									l = a1;
+								}
+							}
+							double xm = 0.5 * (l + h);
+							double vm;
+							if (!marginOf(sol, xm, k, vm)) {
+								return -1.0;
+							}
+							if (sgn * vm < 0.0 && xm > lo && xm < hi) {
+								return xm;
+							}
+						}
+						return -1.0;
 					};
 					// A guard has flipped if its truth differs from the tracked one, except when-conditions
 					// going true -> false, which only re-arm.
@@ -257,6 +355,18 @@ namespace che {
 								floorStep = min(base, (lastEventT - prevEventT) / 8.0);
 							}
 							double prevA = a0;
+							vector<double> prevM;
+							vector<double> curM;
+							if (!relations.empty() && !marginsAt(sol, a0, prevM)) {
+								return true;
+							}
+							auto rearm = [&](map<int, bool> &now) {
+								for (const Guard &g : guards) {
+									if (g.dynamic && g.kind == G_WHEN && !now[g.id]) {
+										scanCur[g.id] = false;
+									}
+								}
+							};
 							for (int iter = 0; prevA < a1 && iter < 5000000; iter++) {
 								double step = min(base, max(floorStep, (prevA - a0) / 32.0));
 								double a = prevA + step;
@@ -268,17 +378,43 @@ namespace che {
 								if (!truthAt(sol, a, now)) {
 									return true;
 								}
-								if (!flipped(now)) {
-									for (const Guard &g : guards) { // re-arm
-										if (g.dynamic && g.kind == G_WHEN && !now[g.id]) {
-											scanCur[g.id] = false;
+								if (!relations.empty() && !marginsAt(sol, a, curM)) {
+									return true;
+								}
+								double hi = a;
+								bool hit = flipped(now);
+								if (!hit && !relations.empty()) {
+									double pt = hiddenCrossing(sol, prevA, a, prevM, curM);
+									if (scanFailed) {
+										return true;
+									}
+									if (pt > prevA) {
+										map<int, bool> pm;
+										if (!truthAt(sol, pt, pm)) {
+											return true;
+										}
+										if (flipped(pm)) {
+											hit = true;
+											hi = pt;
+										} else {
+											// The pulse does not change a tracked guard (a when-condition that
+											// went false is re-armed); continue from the extremum.
+											rearm(pm);
+											prevA = pt;
+											if (!marginsAt(sol, pt, prevM)) {
+												return true;
+											}
+											continue;
 										}
 									}
+								}
+								if (!hit) {
+									rearm(now);
 									prevA = a;
+									prevM = curM;
 									continue;
 								}
 								double lo = prevA;
-								double hi = a;
 								for (int it = 0; it < 100 && hi - lo > 1e-13 * (1.0 + fabs(hi)); it++) {
 									double mid = 0.5 * (lo + hi);
 									map<int, bool> m;

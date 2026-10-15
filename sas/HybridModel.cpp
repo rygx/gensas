@@ -198,6 +198,23 @@ namespace che {
 			}
 			case OP_CALL: {
 				string fn = idName(p->subs[0]);
+				if ((fn == "edge" || fn == "change") && p->subs[1] != NULL && p->subs[1]->op == OP_ID && p->subs[1]->next == NULL) {
+					string n = idName(p->subs[1]);
+					map<string, double>::const_iterator now = values.find(n);
+					map<string, double>::const_iterator before = eventPre.find(n);
+					if (now == values.end()) {
+						err = "no value for '" + n + "'";
+						return false;
+					}
+					if (!atEvent || before == eventPre.end()) {
+						out = 0.0;
+					} else if (fn == "edge") {
+						out = (now->second != 0.0 && before->second == 0.0) ? 1.0 : 0.0;
+					} else {
+						out = (now->second != before->second) ? 1.0 : 0.0;
+					}
+					return true;
+				}
 				vector<double> args;
 				for (const AstNode *a = p->subs[1]; a != NULL; a = a->next) {
 					double v;
@@ -444,6 +461,38 @@ namespace che {
 				}
 				truth[g.id] = (v != 0.0);
 			}
+			return true;
+		}
+
+		namespace {
+			void gatherRelations(const AstNode *p, std::vector<const AstNode *> &out) {
+				if (p == NULL) {
+					return;
+				}
+				if (p->op == OP_GREAT || p->op == OP_LESS || p->op == OP_GREAT_EQ || p->op == OP_LESS_EQ) {
+					out.push_back(p);
+				}
+				gatherRelations(p->subs[0], out);
+				gatherRelations(p->subs[1], out);
+			}
+		} // namespace
+
+		vector<const AstNode *> collectRelations(const vector<Guard> &guards) {
+			vector<const AstNode *> rels;
+			for (const Guard &g : guards) {
+				if (g.dynamic) {
+					gatherRelations(g.cond, rels);
+				}
+			}
+			return rels;
+		}
+
+		bool relationMargin(const AstNode *relation, const HybridEnv &env, double &margin, string &err) {
+			double a, b;
+			if (!env.eval(relation->subs[0], a, err) || !env.eval(relation->subs[1], b, err)) {
+				return false;
+			}
+			margin = a - b;
 			return true;
 		}
 

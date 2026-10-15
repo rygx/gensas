@@ -445,7 +445,23 @@ static void testStateEventChecker() {
 		Parsed p;
 		parseInto(p, "model M\n  Real x(start=1);\n  Boolean b(start=false);\nequation\n  der(x) = -x;\n  when edge(b) then\n    reinit(x, 1);\n  end when;\nend M;\n");
 		std::ostringstream os;
-		CHECK(checkModel(*p.model, stateFeatures(), "test.mo", os) > 0); // edge() is not supported yet
+		CHECK_EQ(checkModel(*p.model, stateFeatures(), "test.mo", os), 0); // edge() in a when-condition
+	}
+	const char *bad[] = {
+		// outside a when-condition
+		"model M\n  Real x(start=1);\n  Boolean b(start=false);\n  Integer n(start=0);\nequation\n  der(x) = -x;\n  when time >= 1 then\n    n = if edge(b) then 1 else 0;\n  end when;\nend M;\n",
+		// edge() of a continuous variable
+		"model M\n  Real x(start=1);\nequation\n  der(x) = -x;\n  when edge(x) then\n    reinit(x, 1);\n  end when;\nend M;\n",
+		// edge() needs a Boolean
+		"model M\n  Real x(start=1);\n  Integer k(start=0);\nequation\n  der(x) = -x;\n  when edge(k) then\n    reinit(x, 1);\n  end when;\nend M;\n",
+		// an expression instead of a variable
+		"model M\n  Real x(start=1);\n  Boolean b(start=false);\nequation\n  der(x) = -x;\n  when change(not b) then\n    reinit(x, 1);\n  end when;\nend M;\n",
+	};
+	for (const char *src : bad) {
+		Parsed p;
+		parseInto(p, src);
+		std::ostringstream os;
+		CHECK(checkModel(*p.model, stateFeatures(), "test.mo", os) > 0);
 	}
 }
 

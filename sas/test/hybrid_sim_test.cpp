@@ -10,6 +10,7 @@
 #include "json/json.h"
 
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -494,6 +495,154 @@ static void testStateAlgebraicSwap() {
 	}
 }
 
+// A pulse that starts and ends between two guard samples (the default spacing is 1/48 s on a 1 s
+// segment). The parabola x(t) = h - 400 (t - c)^2 is above zero for |t - c| < sqrt(h / 400) only.
+static string pulseModel(const char *sign, const char *guard, const char *body) {
+	const double c = 49.0 / 96.0; // halfway between the samples 24/48 and 25/48
+	const double h = 0.005;
+	char buf[1024];
+	std::snprintf(buf, sizeof(buf),
+				  "model M\n"
+				  "  Real x(start = %.15g);\n"
+				  "  Real v(start = %.15g);\n"
+				  "  Real y(start = 0);\n"
+				  "  discrete Integer n(start = 0);\n"
+				  "equation\n"
+				  "  der(x) = v;\n"
+				  "  der(v) = %s800;\n"
+				  "%s"
+				  "%s"
+				  "end M;\n",
+				  *sign == '-' ? h - 400.0 * c * c : -h + 400.0 * c * c,
+				  *sign == '-' ? 800.0 * c : -800.0 * c, sign, guard, body);
+	return buf;
+}
+
+static void testPulseBetweenSamples() {
+	Run run;
+	string src = pulseModel("-",
+							"  der(y) = 0;\n"
+							"  when x > 0 then\n"
+							"    n = pre(n) + 1;\n"
+							"  end when;\n",
+							"");
+	if (!simulate(run, src, 1.0)) {
+		return;
+	}
+	CHECK_EQ(run.sim->events().size(), (size_t)1);
+	if (run.sim->events().size() == 1) {
+		CHECK_NEAR(run.sim->events()[0].time, 49.0 / 96.0 - std::sqrt(0.005 / 400.0), 1e-9);
+	}
+	CHECK_NEAR(finalValue(run, "n"), 1.0, 0.0);
+}
+
+// The margin dips below zero and comes back between two samples: a when-condition re-arms and
+// fires on the way up.
+static void testDipBetweenSamples() {
+	Run run;
+	string src = pulseModel("",
+							"  der(y) = 0;\n"
+							"  when x > 0 then\n"
+							"    n = pre(n) + 1;\n"
+							"  end when;\n",
+							"");
+	if (!simulate(run, src, 1.0)) {
+		return;
+	}
+	CHECK_EQ(run.sim->events().size(), (size_t)1);
+	if (run.sim->events().size() == 1) {
+		CHECK_NEAR(run.sim->events()[0].time, 49.0 / 96.0 + std::sqrt(0.005 / 400.0), 1e-9);
+	}
+	CHECK_NEAR(finalValue(run, "n"), 1.0, 0.0);
+}
+
+// An if-equation whose guard is true only during the pulse: y integrates the pulse length.
+static void testPulseInIfEquation() {
+	Run run;
+	string src = pulseModel("-",
+							"  if x > 0 then\n"
+							"    der(y) = 1;\n"
+							"  else\n"
+							"    der(y) = 0;\n"
+							"  end if;\n",
+							"");
+	if (!simulate(run, src, 1.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "y"), 2.0 * std::sqrt(0.005 / 400.0), 1e-6);
+}
+
+// edge() and change() in when-conditions: b toggles at t = 0.5, 1.5, 2.5; it rises at 0.5 and 2.5.
+static void testEdgeAndChange() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Boolean b(start = false);\n"
+				  "  Integer n(start = 0);\n"
+				  "  Integer m(start = 0);\n"
+				  "  Real x(start = 1);\n"
+				  "equation\n"
+				  "  der(x) = -x;\n"
+				  "  when sample(0.5, 1) then\n"
+				  "    b = not pre(b);\n"
+				  "  end when;\n"
+				  "  when edge(b) then\n"
+				  "    n = pre(n) + 1;\n"
+				  "  end when;\n"
+				  "  when change(b) then\n"
+				  "    m = pre(m) + 1;\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  3.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "n"), 2.0, 0.0);
+	CHECK_NEAR(finalValue(run, "m"), 3.0, 0.0);
+	CHECK_NEAR(finalValue(run, "b"), 1.0, 0.0);
+	CHECK_NEAR(finalValue(run, "x"), std::exp(-3.0), 1e-4);
+	// The counters are updated at the toggle instants (with the toggle in the same event record).
+	std::vector<double> nTimes;
+	for (const HybridEvent &ev : run.sim->events()) {
+		for (const auto &a : ev.assignments) {
+			if (a.first == "n") {
+				nTimes.push_back(ev.time);
+			}
+		}
+	}
+	CHECK_EQ(nTimes.size(), (size_t)2);
+	if (nTimes.size() == 2) {
+		CHECK_NEAR(nTimes[0], 0.5, 1e-9);
+		CHECK_NEAR(nTimes[1], 2.5, 1e-9);
+	}
+}
+
+// change() of a Real discrete variable assigned by a time event, together with a state event.
+static void testChangeOfDiscreteReal() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  discrete Real a(start = 1);\n"
+				  "  Integer m(start = 0);\n"
+				  "  Real x(start = 1);\n"
+				  "equation\n"
+				  "  der(x) = -x;\n"
+				  "  when time >= 1 then\n"
+				  "    a = 3;\n"
+				  "  end when;\n"
+				  "  when x < 0.2 then\n"
+				  "    a = 3;\n"
+				  "  end when;\n"
+				  "  when change(a) then\n"
+				  "    m = pre(m) + 1;\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  3.0)) {
+		return;
+	}
+	// x < 0.2 at t = ln 5 = 1.609 assigns a = 3 again (no change); only the first assignment counts.
+	CHECK_NEAR(finalValue(run, "m"), 1.0, 0.0);
+}
+
 // Equations listed in a different order per mode.
 static void testReorderedEquations() {
 	Run run;
@@ -522,6 +671,11 @@ static void testReorderedEquations() {
 }
 
 int main() {
+	testPulseBetweenSamples();
+	testDipBetweenSamples();
+	testPulseInIfEquation();
+	testEdgeAndChange();
+	testChangeOfDiscreteReal();
 	testStateAlgebraicSwap();
 	testReorderedEquations();
 	testJsonResult();

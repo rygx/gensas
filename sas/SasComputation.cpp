@@ -783,10 +783,18 @@ namespace che {
 			idTable.insert(idTable.end(), yTable.begin(), yTable.end());
 			eqnTable.insert(eqnTable.end(), aeTable.begin(), aeTable.end());
 
-			cout << "Number of DE: " << nDE << endl;
-			cout << "Number of AE: " << nAE << endl;
-			cout << "Number of X: " << nX << endl;
-			cout << "Number of Y: " << nY << endl;
+			if (log != nullptr) {
+				*log << "Number of DE: " << nDE << endl;
+			}
+			if (log != nullptr) {
+				*log << "Number of AE: " << nAE << endl;
+			}
+			if (log != nullptr) {
+				*log << "Number of X: " << nX << endl;
+			}
+			if (log != nullptr) {
+				*log << "Number of Y: " << nY << endl;
+			}
 			if (nDE != nX) {
 				cerr << "Number of DE not equal number of X" << endl;
 			}
@@ -1108,7 +1116,9 @@ namespace che {
 				}
 			}
 			alpha = alphaLeft;
-			cout << "Stage start " << startAbsAlpha << " end " << startAbsAlpha + alpha << ", length " << alpha << endl;
+			if (options.log != nullptr) {
+				*options.log << "Stage start " << startAbsAlpha << " end " << startAbsAlpha + alpha << ", length " << alpha << endl;
+			}
 
 			sasSol->absStart = startAbsAlpha;
 			sasSol->absEnd = startAbsAlpha + alpha;
@@ -1118,7 +1128,9 @@ namespace che {
 
 		SasSolutionSet *SasComputationModel::solve(const SasComputationOptions &options) {
 			vec init = getStartStateIVP();
-			cout << "Init values generated." << endl;
+			if (options.log != nullptr) {
+				*options.log << "Init values generated." << endl;
+			}
 			SasSolutionSet *solLink = new SasSolutionSet();
 			double alpha = options.startTime;
 			int noMoveCnt = 0;

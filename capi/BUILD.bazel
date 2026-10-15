@@ -1,0 +1,46 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
+package(default_visibility = ["//visibility:public"])
+
+# C API over the Simulation facade (see gensas.h).
+cc_library(
+    name = "gensas_capi",
+    hdrs = [
+        "gensas.h",
+    ],
+    srcs = [
+        "gensas.cpp",
+    ],
+    deps = [
+        "//sas:sas_simulation_lib",
+    ],
+)
+
+# Shared library for Python (ctypes) and other languages. Bazel wants the platform's suffix in the
+# name, so there is one target per platform: libgensas.so (Linux and macOS) and gensas.dll (Windows).
+# The other one is incompatible and skipped by //... patterns.
+cc_binary(
+    name = "libgensas.so",
+    linkshared = True,
+    local_defines = ["GENSAS_BUILD_SHARED"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":gensas_capi",
+    ],
+)
+
+cc_binary(
+    name = "gensas.dll",
+    linkshared = True,
+    local_defines = ["GENSAS_BUILD_SHARED"],
+    target_compatible_with = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":gensas_capi",
+    ],
+)

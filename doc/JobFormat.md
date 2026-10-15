@@ -30,7 +30,7 @@ bazel-bin/app/app run job.json [--set key=value ...] [--validate]
 | `solver.level` | order of the semi-analytical solution, integer 1 to 1000 | 15 |
 | `solver.alphaTol` | tolerance of the embedding variable | 1e-3 |
 | `solver.errorTol` | error tolerance of the equations | 1e-5 |
-| `output.step` | spacing of the samples in the result | 0.01 |
+| `output.step` | target spacing of the samples in the result; the last sample is always at the end time | 0.01 |
 | `output.json`, `output.csv`, `output.mat` | result files to write (see [Result format](ResultFormat.md)); each is optional | none |
 
 Rules:

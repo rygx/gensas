@@ -56,10 +56,8 @@ namespace che {
 				ifs.seekg(0, ifs.beg);
 				buffer = new uchar[length + 1];
 				ifs.read((char *)buffer, length);
-				if (ifs) {
-					cout << "All " << ifs.gcount() << " characters read successfully." << endl;
-				} else {
-					cout << "Only " << ifs.gcount() << " characters could be read" << endl;
+				if (!ifs) {
+					cerr << "Only " << ifs.gcount() << " characters could be read" << endl;
 					length = ifs.gcount();
 				}
 				buffer[length] = char_traits<uchar>::eof();

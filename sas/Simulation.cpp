@@ -364,7 +364,9 @@ namespace che {
 
 			SasComputationOptions options = jobData.options;
 			options.progress = progress;
+			options.log = jobData.verbose ? &cout : nullptr;
 			SasComputationModel compModel; // must outlive the solutions
+			compModel.log = options.log;
 			unique_ptr<SasSolutionSet> solutions;
 			HybridSimulator hybridSim(parser.currentModel);
 			if (hybrid) {

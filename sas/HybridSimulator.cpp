@@ -183,6 +183,7 @@ namespace che {
 
 				if (segEnd - t > options.alphaTol) {
 					shared_ptr<SasComputationModel> comp = make_shared<SasComputationModel>();
+					comp->log = options.log;
 					comp->generateCompModel(model);
 					SasModel &cm = *comp->topModels.front();
 					if (!specializeModel(cm, env, err, &cur)) {

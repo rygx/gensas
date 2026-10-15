@@ -1,0 +1,20 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+# The header compiled as C, with a basic run and cancellation.
+cc_test(
+    name = "capi_c_test",
+    srcs = ["capi_c_test.c"],
+    deps = [
+        "//capi:gensas_capi",
+    ],
+)
+
+# Hybrid results, errors and warnings, and several handles on different threads.
+cc_test(
+    name = "capi_test",
+    srcs = ["capi_test.cpp"],
+    deps = [
+        "//capi:gensas_capi",
+        "//sas/test:test_util",
+    ],
+)

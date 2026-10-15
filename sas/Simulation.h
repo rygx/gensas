@@ -58,7 +58,8 @@ namespace che {
 			std::string csvOutput;
 			std::string matOutput;
 
-			// Print the model trees to stdout (debugging).
+			// Print the model trees and solver diagnostics to stdout (debugging; not for concurrent runs,
+			// the tree printer redirects std::cout).
 			bool verbose = false;
 
 			ModelicaJob();

@@ -219,7 +219,9 @@ namespace che {
 			char buffer[MAX_PRINT_LEN + 1];
 			va_start(ap, formatMsg);
 			vsnprintf(buffer, sizeof buffer, formatMsg, ap);
-			*diag << "(Model " << modelInfo->str << ") error: " << buffer << endl;
+			if (diag != nullptr) {
+				*diag << "(Model " << modelInfo->str << ") error: " << buffer << endl;
+			}
 			errCount++;
 			va_end(ap);
 		}
@@ -229,7 +231,9 @@ namespace che {
 			char buffer[MAX_PRINT_LEN + 1];
 			va_start(ap, formatMsg);
 			vsnprintf(buffer, sizeof buffer, formatMsg, ap);
-			*diag << "(Model " << modelInfo->str << ") warn: " << buffer << endl;
+			if (diag != nullptr) {
+				*diag << "(Model " << modelInfo->str << ") warn: " << buffer << endl;
+			}
 			warnCount++;
 			va_end(ap);
 		}

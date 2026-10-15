@@ -93,6 +93,12 @@ class GenSASTest(unittest.TestCase):
                 with self.assertRaises(gensas.GenSASError):
                     sim.write("xml", os.path.join(d, "out.xml"))
 
+    def test_warnings(self):
+        with gensas.Simulation(job(DECAY, 5000.0)) as sim:
+            self.assertEqual(len(sim.warnings), 1)
+            self.assertIn("limited", sim.warnings[0])
+            self.assertAlmostEqual(sim.run().time[-1], 1000.0, places=6)
+
     def test_closed_simulation(self):
         sim = gensas.Simulation(job(DECAY, 1.0))
         sim.close()

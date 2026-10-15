@@ -148,7 +148,7 @@ class Simulation:
             base_dir = os.fspath(base_dir)
         if isinstance(job, dict):
             text = json.dumps(job)
-        elif isinstance(job, (str, os.PathLike)) and not str(job).lstrip().startswith("{"):
+        elif isinstance(job, os.PathLike) or (isinstance(job, str) and not job.lstrip().startswith("{")):
             path = os.fspath(job)
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read()
@@ -162,7 +162,6 @@ class Simulation:
             raise GenSASError(err.value.decode("utf-8", "replace"))
         self._lib = lib
         self._handle = ctypes.c_void_p(handle)
-        self.warnings = [_text(lib.gensas_warning(self._handle, i)) for i in range(lib.gensas_warning_count(self._handle))]
 
     def run(self, progress=None):
         """Runs the simulation and returns a Result. `progress(time, end_time)` is called after each
@@ -213,6 +212,13 @@ class Simulation:
         err = ctypes.create_string_buffer(_ERR_LEN)
         if self._lib.gensas_write_result(self._handle, format.encode("utf-8"), os.fspath(path).encode("utf-8"), err, _ERR_LEN) != 0:
             raise GenSASError(err.value.decode("utf-8", "replace"))
+
+    @property
+    def warnings(self):
+        """Messages about options that were adjusted, and about the last run."""
+        self._check_open()
+        lib, h = self._lib, self._handle
+        return [_text(lib.gensas_warning(h, i)) for i in range(lib.gensas_warning_count(h))]
 
     def _check_open(self):
         if not getattr(self, "_handle", None):

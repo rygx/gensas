@@ -232,7 +232,9 @@ namespace che {
 			char buffer[MAX_PRINT_LEN + 1];
 			va_start(ap, formatMsg);
 			vsnprintf(buffer, sizeof buffer, formatMsg, ap);
-			*diag << "(" << coord.filename << "," << coord.line << ") error: " << buffer << endl;
+			if (diag != nullptr) {
+				*diag << "(" << coord.filename << "," << coord.line << ") error: " << buffer << endl;
+			}
 			errCount++;
 			va_end(ap);
 		}
@@ -242,7 +244,9 @@ namespace che {
 			char buffer[MAX_PRINT_LEN + 1];
 			va_start(ap, formatMsg);
 			vsnprintf(buffer, sizeof buffer, formatMsg, ap);
-			*diag << "(" << coord.filename << "," << coord.line << ") warn: " << buffer << endl;
+			if (diag != nullptr) {
+				*diag << "(" << coord.filename << "," << coord.line << ") warn: " << buffer << endl;
+			}
 			warnCount++;
 			va_end(ap);
 		}

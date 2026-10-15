@@ -343,7 +343,9 @@ namespace che {
 			parser.currentModel->diag = &parseMessages;
 			parseSingleSasModel(&parser);
 			parser.diag = &cerr; // parseMessages ends with this scope, the model may live longer
-			parser.currentModel->diag = &cerr;
+			if (parser.currentModel != nullptr) {
+				parser.currentModel->diag = &cerr;
+			}
 			if (parser.errCount > 0) {
 				err = "parsing the model failed:\n" + parseMessages.str();
 				return false;

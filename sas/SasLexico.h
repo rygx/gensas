@@ -57,7 +57,7 @@ namespace che {
 			// When set, identifiers are scanned without being added to the model's id table
 			// (used for attribute names such as start/fixed that are not model symbols).
 			bool noInject = false;
-			// Where error and warning messages go (default: std::cerr).
+			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
 
 			SasModelParser();

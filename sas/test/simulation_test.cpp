@@ -83,6 +83,24 @@ static void testBadModels() {
 	}
 }
 
+// The solver throws on this model (an equation side that is a bare function call); run() reports it.
+static void testSolverFailureIsReported() {
+	Simulation sim(sourceJob(
+		"model M\n"
+		"  Real x(start = 1);\n"
+		"  Real y(start = 1);\n"
+		"equation\n"
+		"  der(x) = sqrt(y);\n"
+		"  der(y) = -0.1*y;\n"
+		"end M;\n",
+		1.0));
+	bool ok = sim.run();
+	if (!ok) {
+		CHECK(!sim.error().empty());
+		CHECK(!sim.cancelled());
+	}
+}
+
 static void testProgressAndCancel() {
 	for (const char *src : {kDecay, kGainSwitch}) {
 		// Progress is monotone, ends at the end time and sees the whole horizon.
@@ -211,6 +229,7 @@ int main() {
 	testPlainRun();
 	testHybridRun();
 	testBadModels();
+	testSolverFailureIsReported();
 	testProgressAndCancel();
 	testLimitsAreWarnings();
 	testParseJob();

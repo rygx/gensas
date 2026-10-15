@@ -40,4 +40,6 @@ Rules:
 * Numeric values outside the supported ranges are not errors: they are moved to the nearest limit and a warning is printed (end time at most 1000 s, segment between 1e-4 and 10 s, error tolerance between 1e-10 and 1e-2, output step between 1e-3 and 1 s, alpha tolerance between 1e-9 and 1 times the segment).
 * The flags of `app -g` build the same job, so both entry points behave the same way. In `-g` mode a missing or non-numeric flag value is an error.
 
+A job file can make the program write files at the paths it names, so treat job files from untrusted sources like scripts.
+
 The same structure is what the library takes (`ModelicaJob` and `Simulation` in `sas/Simulation.h`): fill it from a job file with `parseModelicaJob` or set the fields directly, call `Simulation::run` with an optional progress callback that can cancel the run, and read the sampled `SasResult`.

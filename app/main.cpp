@@ -180,6 +180,10 @@ static bool parseGeneralArgs(int argc, char **argv, ModelicaJob &job, bool &verb
 			if (!numberArg(argc, argv, i, "--level", v)) {
 				return false;
 			}
+			if (v != std::floor(v) || v < 1 || v > 1000) {
+				cerr << "Error: --level expects an integer between 1 and 1000." << endl;
+				return false;
+			}
 			job.options.nLvl = (int)v;
 		} else if (arg == "--atol" || arg == "-a") {
 			if (!numberArg(argc, argv, i, "--atol", job.options.alphaTol)) {

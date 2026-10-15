@@ -86,7 +86,7 @@ namespace che {
 			explicit Simulation(const ModelicaJob &job);
 
 			// Runs the job. Returns false on error (see error()) or if `progress` asked to cancel
-			// (see cancelled()).
+			// (see cancelled()). Never throws: failures inside the solver are reported through error().
 			bool run(const ProgressFn &progress = ProgressFn());
 
 			const std::string &error() const {
@@ -121,6 +121,8 @@ namespace che {
 			bool writeResult(const std::string &format, const std::string &path, std::string &error) const;
 
 		private:
+			bool runImpl(const ProgressFn &progress);
+
 			ModelicaJob jobData;
 			std::vector<std::string> warns;
 			std::string err;

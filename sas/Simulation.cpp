@@ -128,7 +128,18 @@ namespace che {
 
 		} // namespace
 
+		static bool parseModelicaJobImpl(const string &json, const string &baseDir, ModelicaJob &job, string &error);
+
 		bool parseModelicaJob(const string &json, const string &baseDir, ModelicaJob &job, string &error) {
+			try {
+				return parseModelicaJobImpl(json, baseDir, job, error);
+			} catch (const std::exception &e) {
+				error = string("invalid job: ") + e.what();
+				return false;
+			}
+		}
+
+		static bool parseModelicaJobImpl(const string &json, const string &baseDir, ModelicaJob &job, string &error) {
 			Json::Value root;
 			Json::CharReaderBuilder builder;
 			builder["allowComments"] = false;
@@ -296,6 +307,19 @@ namespace che {
 		}
 
 		bool Simulation::run(const ProgressFn &progress) {
+			// The solver reports some numerical failures by throwing; a library call must not.
+			try {
+				return runImpl(progress);
+			} catch (const std::exception &e) {
+				err = string("the solver failed: ") + e.what();
+			} catch (...) {
+				err = "the solver failed with an unknown error";
+			}
+			res = SasResult();
+			return false;
+		}
+
+		bool Simulation::runImpl(const ProgressFn &progress) {
 			err.clear();
 			wasCancelled = false;
 			res = SasResult();

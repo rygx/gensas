@@ -109,10 +109,9 @@ namespace che {
 				if (t >= maxAlpha) {
 					break;
 				}
-				t += interval;
-				if (t > maxAlpha - interval / 100) {
-					t = maxAlpha;
-				}
+				double next = t + interval;
+				// Also end the grid when the spacing is below the resolution of the time values.
+				t = (next > maxAlpha - interval / 100 || !(next > t)) ? maxAlpha : next;
 			}
 			res.values.assign(res.names.size(), vector<double>(samples.size(), 0.0));
 			for (size_t j = 0; j < samples.size(); j++) {

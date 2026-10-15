@@ -113,12 +113,15 @@ def _load():
 
 
 def _array(pointer, n):
-    values = pointer[:n] if pointer else []
-    return _np.array(values, dtype=float) if _np is not None else values
+    if not pointer or n == 0:
+        return _np.zeros(0) if _np is not None else []
+    if _np is not None:
+        return _np.ctypeslib.as_array(pointer, shape=(n,)).copy()  # the handle owns the C memory
+    return pointer[:n]
 
 
 def _text(raw):
-    return raw.decode("utf-8") if raw is not None else None
+    return raw.decode("utf-8", "replace") if raw is not None else None
 
 
 class Result:
@@ -165,6 +168,7 @@ class Simulation:
         """Runs the simulation and returns a Result. `progress(time, end_time)` is called after each
         solution segment; return True from it to cancel (raises Cancelled)."""
         lib = self._lib
+        self._check_open()
         failure = []
         callback = lib._progress_type()  # a NULL function pointer
         if progress is not None:
@@ -205,9 +209,14 @@ class Simulation:
 
     def write(self, format, path):
         """Writes the result of the last successful run as "json", "csv" or "mat"."""
+        self._check_open()
         err = ctypes.create_string_buffer(_ERR_LEN)
         if self._lib.gensas_write_result(self._handle, format.encode("utf-8"), os.fspath(path).encode("utf-8"), err, _ERR_LEN) != 0:
             raise GenSASError(err.value.decode("utf-8", "replace"))
+
+    def _check_open(self):
+        if not getattr(self, "_handle", None):
+            raise GenSASError("the simulation is closed")
 
     def close(self):
         if getattr(self, "_handle", None):

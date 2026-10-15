@@ -93,6 +93,15 @@ class GenSASTest(unittest.TestCase):
                 with self.assertRaises(gensas.GenSASError):
                     sim.write("xml", os.path.join(d, "out.xml"))
 
+    def test_closed_simulation(self):
+        sim = gensas.Simulation(job(DECAY, 1.0))
+        sim.close()
+        sim.close()  # closing twice is fine
+        with self.assertRaises(gensas.GenSASError):
+            sim.run()
+        with self.assertRaises(gensas.GenSASError):
+            sim.write("json", "unused.json")
+
     def test_threads(self):
         results = {}
 

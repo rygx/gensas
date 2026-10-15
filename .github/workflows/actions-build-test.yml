@@ -65,6 +65,11 @@ jobs:
         # The macOS .bazelrc exposes /opt/homebrew/opt/gcc/bin so the versioned
         # gfortran symlink installed by brew is visible inside Bazel sandboxes.
         run: brew install gcc cmake
+        env:
+          # Skip the Homebrew self-update, cleanup and analytics: they only cost time here.
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
@@ -92,12 +97,11 @@ jobs:
           key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
       - run: echo "This job's status is ${{ job.status }}."
 
-  # Windows (MSYS2 / MinGW-w64), see doc/Installation.md.  Not yet proven on
-  # GitHub's runners, hence continue-on-error; remove it to make this required.
+  # Windows (MSYS2 / MinGW-w64), see doc/Installation.md.  A required check: a failure
+  # must show as a failure (no continue-on-error).
   Build-Test-Windows:
     runs-on: windows-latest
     timeout-minutes: 90
-    continue-on-error: true
     defaults:
       run:
         shell: msys2 {0}

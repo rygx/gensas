@@ -32,7 +32,7 @@
 namespace che {
 	namespace core {
 
-		// MATLAB level 5 MAT file (no HDF5). Variables:
+		// MATLAB level 5 MAT file (no HDF5, no third-party library). Variables:
 		//   gensas_version  1x1 format version
 		//   t               1xN sample times
 		//   s               nVar x N continuous variables, rows in the order of `names`

@@ -4,6 +4,7 @@
 #include "sas/SasExpr.h"
 #include "sas/SasLexico.h"
 #include "sas/SasResult.h"
+#include "io/Mat5Writer.h"
 #include "sas/SasResultMat.h"
 #include "sas/test/test_util.h"
 
@@ -15,6 +16,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace che::core;
 using std::shared_ptr;
@@ -170,7 +172,59 @@ static void testMatFile() {
 	CHECK(!err.empty());
 }
 
+// The writer itself: odd name lengths (padding), a larger matrix, char rows of different length.
+static void testWriterRoundTrip() {
+	che::io::Mat5Writer w;
+	CHECK(w.open("mat5_roundtrip.mat"));
+	std::vector<double> big(37 * 53);
+	for (size_t i = 0; i < big.size(); i++) {
+		big[i] = std::sin(0.001 * (double)i) * 1e5 - (double)i;
+	}
+	double scalar = -2.5;
+	CHECK(w.writeMatrix("a", 1, 1, &scalar));
+	CHECK(w.writeMatrix("odd_name_x", 37, 53, big.data()));
+	CHECK(w.writeMatrix("seven77", 0, 0, NULL));
+	CHECK(w.writeChars("txt", std::vector<std::string>{"x", "longer.name", "mid"}));
+	CHECK(w.close());
+	CHECK(w.error().empty());
+
+	mat_t *fp = Mat_Open("mat5_roundtrip.mat", MAT_ACC_RDONLY);
+	CHECK(fp != NULL);
+	if (fp == NULL) {
+		return;
+	}
+	size_t rows, cols;
+	std::vector<double> a = readDoubles(fp, "a", rows, cols);
+	CHECK_EQ(a.size(), (size_t)1);
+	if (a.size() == 1) {
+		CHECK_NEAR(a[0], -2.5, 0.0);
+	}
+	std::vector<double> b = readDoubles(fp, "odd_name_x", rows, cols);
+	CHECK_EQ(rows, (size_t)37);
+	CHECK_EQ(cols, (size_t)53);
+	CHECK_EQ(b.size(), big.size());
+	for (size_t i = 0; i < b.size() && i < big.size(); i++) {
+		CHECK_NEAR(b[i], big[i], 0.0);
+	}
+	std::vector<double> e = readDoubles(fp, "seven77", rows, cols);
+	CHECK_EQ(e.size(), (size_t)0);
+	CHECK(charRow(fp, "txt", 0) == "x");
+	CHECK(charRow(fp, "txt", 1) == "longer.name");
+	CHECK(charRow(fp, "txt", 2) == "mid");
+	Mat_Close(fp);
+
+	// Errors are reported, not ignored.
+	che::io::Mat5Writer bad;
+	CHECK(!bad.open("/nonexistent-dir/x.mat"));
+	CHECK(!bad.error().empty());
+	che::io::Mat5Writer longName;
+	CHECK(longName.open("mat5_longname.mat"));
+	CHECK(!longName.writeMatrix(std::string(64, 'n'), 1, 1, &scalar));
+	CHECK(!longName.close());
+}
+
 int main() {
 	testMatFile();
+	testWriterRoundTrip();
 	return sastest::finish("result_mat_test");
 }

@@ -36,6 +36,17 @@ cc_library(
     ]
 )
 
+# MATLAB level 5 MAT file writer; no third-party dependencies.
+cc_library(
+    name = "mat5_writer_lib",
+    hdrs = [
+        "Mat5Writer.h",
+    ],
+    srcs = [
+        "Mat5Writer.cpp",
+    ],
+)
+
 cc_library(
     name = "mat_psat_rw_lib",
     hdrs = [

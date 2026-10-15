@@ -26,9 +26,8 @@
 //
 #include "sas/SasResultMat.h"
 
-#include <algorithm>
 #include <vector>
-#include "matio.h"
+#include "io/Mat5Writer.h"
 
 using namespace std;
 
@@ -36,41 +35,15 @@ namespace che {
 	namespace core {
 
 		namespace {
-			bool writeVar(mat_t *fp, const char *name, matio_classes cls, matio_types type, size_t rows, size_t cols, void *data) {
-				size_t dims[2] = {rows, cols};
-				matvar_t *var = Mat_VarCreate(name, cls, type, 2, dims, data, 0);
-				if (var == NULL) {
-					return false;
-				}
-				int rc = Mat_VarWrite(fp, var, MAT_COMPRESSION_NONE);
-				Mat_VarFree(var);
-				return rc == 0;
-			}
-
-			bool writeMatrix(mat_t *fp, const char *name, const vector<vector<double>> &rows, size_t cols) {
-				// MAT files are column-major.
+			// Row-major vector of rows to the column-major layout of MAT files.
+			vector<double> columnMajor(const vector<vector<double>> &rows, size_t cols) {
 				vector<double> data(rows.size() * cols);
 				for (size_t r = 0; r < rows.size(); r++) {
 					for (size_t c = 0; c < cols; c++) {
 						data[c * rows.size() + r] = rows[r][c];
 					}
 				}
-				return writeVar(fp, name, MAT_C_DOUBLE, MAT_T_DOUBLE, rows.size(), cols, data.data());
-			}
-
-			// Names as a char matrix, one name per row, blank padded.
-			bool writeNames(mat_t *fp, const char *name, const vector<string> &names) {
-				size_t width = 1;
-				for (const string &n : names) {
-					width = max(width, n.size());
-				}
-				vector<char> data(names.size() * width, ' ');
-				for (size_t r = 0; r < names.size(); r++) {
-					for (size_t c = 0; c < names[r].size(); c++) {
-						data[c * names.size() + r] = names[r][c];
-					}
-				}
-				return writeVar(fp, name, MAT_C_CHAR, MAT_T_UTF8, names.size(), width, data.data());
+				return data;
 			}
 
 			class MatResultWriter : public ResultWriter {
@@ -84,33 +57,28 @@ namespace che {
 						error = "no results to write";
 						return false;
 					}
-					mat_t *fp = Mat_CreateVer(path.c_str(), NULL, MAT_FT_MAT5);
-					if (fp == NULL) {
-						error = "cannot create MAT file \"" + path + "\"";
-						return false;
-					}
+					che::io::Mat5Writer w;
 					const size_t n = result.time.size();
-					bool ok = true;
 					double version = kResultFormatVersion;
-					ok = ok && writeVar(fp, "gensas_version", MAT_C_DOUBLE, MAT_T_DOUBLE, 1, 1, &version);
-					vector<double> t = result.time;
-					ok = ok && writeVar(fp, "t", MAT_C_DOUBLE, MAT_T_DOUBLE, 1, n, t.data());
-					ok = ok && writeMatrix(fp, "s", result.values, n);
-					ok = ok && writeNames(fp, "names", result.names);
-					if (!result.discreteNames.empty()) {
-						ok = ok && writeMatrix(fp, "d", result.discrete, n);
-						ok = ok && writeNames(fp, "dnames", result.discreteNames);
+					bool ok = w.open(path) && w.writeMatrix("gensas_version", 1, 1, &version) && w.writeMatrix("t", 1, n, result.time.data());
+					if (ok) {
+						vector<double> s = columnMajor(result.values, n);
+						ok = w.writeMatrix("s", result.names.size(), n, s.data()) && w.writeChars("names", result.names);
 					}
-					if (!result.events.empty()) {
+					if (ok && !result.discreteNames.empty()) {
+						vector<double> d = columnMajor(result.discrete, n);
+						ok = w.writeMatrix("d", result.discreteNames.size(), n, d.data()) && w.writeChars("dnames", result.discreteNames);
+					}
+					if (ok && !result.events.empty()) {
 						vector<double> et;
 						for (const SasEventRecord &e : result.events) {
 							et.push_back(e.time);
 						}
-						ok = ok && writeVar(fp, "event_t", MAT_C_DOUBLE, MAT_T_DOUBLE, 1, et.size(), et.data());
+						ok = w.writeMatrix("event_t", 1, et.size(), et.data());
 					}
-					Mat_Close(fp);
+					ok = w.close() && ok;
 					if (!ok) {
-						error = "error while writing MAT file \"" + path + "\"";
+						error = w.error();
 					}
 					return ok;
 				}

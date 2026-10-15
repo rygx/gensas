@@ -39,14 +39,14 @@ struct Run {
 	}
 };
 
-static bool simulate(Run &run, const string &src, double endTime) {
+static bool simulate(Run &run, const string &src, double endTime, PiecewiseMode mode = PW_EVENTS, double eps = 1e-6) {
 	SasModelParser parser;
 	parser.parseString(src.c_str());
 	shared_ptr<SasModel> model = GlobalPool::getInstance().createNewTopModel();
 	parser.currentModel = model;
 	parseSingleSasModel(&parser);
 	CHECK_EQ(parser.errCount, 0);
-	rewritePiecewiseFunctions(*model);
+	rewritePiecewiseFunctions(*model, mode, eps);
 	std::ostringstream os;
 	int nErr = checkModel(*model, hybridFeatures(), "test.mo", os);
 	if (nErr != 0) {
@@ -766,6 +766,84 @@ static void testPiecewiseWithOtherConstructs() {
 	CHECK_NEAR(finalValue(run, "x"), 1.0, 1e-4); // exp(-1) * exp(1)
 }
 
+// ---- Smooth approximations of abs/min/max/sign (no events) ----
+
+static string absModel() {
+	return "model M\n"
+		   "  Real x(start = 0);\n"
+		   "  Real y(start = 1);\n"
+		   "equation\n"
+		   "  der(x) = abs(y);\n"
+		   "  der(y) = -1;\n"
+		   "end M;\n";
+}
+
+// x' = abs(y), y = 1 - t: the exact x(2) is 1; the smooth version is off by about eps^2 ln(1/eps).
+static double smoothAbsError(double eps) {
+	Run run;
+	if (!simulate(run, absModel(), 2.0, PW_SMOOTH, eps)) {
+		return NAN;
+	}
+	CHECK_EQ(run.sim->events().size(), (size_t)0);
+	return std::fabs(finalValue(run, "x") - 1.0);
+}
+
+static void testSmoothAbsConverges() {
+	double coarse = smoothAbsError(1e-2);
+	double fine = smoothAbsError(1e-3);
+	CHECK(coarse < 2e-3);
+	CHECK(fine < 2e-4);
+	CHECK(fine < coarse); // the error shrinks with eps
+}
+
+static void testSmoothMinMaxSign() {
+	{
+		Run run;
+		if (simulate(run,
+					 "model M\n"
+					 "  Real x(start = 0);\n"
+					 "  Real y(start = 0);\n"
+					 "equation\n"
+					 "  der(x) = 1;\n"
+					 "  der(y) = min(x, 1) + max(-x, -2);\n"
+					 "end M;\n",
+					 3.0, PW_SMOOTH, 1e-3)) {
+			CHECK_NEAR(finalValue(run, "y"), 2.5 - 4.0, 2e-3);
+		}
+	}
+	{
+		Run run;
+		if (simulate(run,
+					 "model M\n"
+					 "  Real x(start = 0);\n"
+					 "  Real y(start = 1);\n"
+					 "equation\n"
+					 "  der(x) = sign(y);\n"
+					 "  der(y) = -1;\n"
+					 "end M;\n",
+					 2.0, PW_SMOOTH, 1e-3)) {
+			CHECK_NEAR(finalValue(run, "x"), 0.0, 5e-3);
+		}
+	}
+}
+
+// The model that chatters with events (sliding friction) runs through with smoothing and settles
+// where sign(v) = 0.5, i.e. v = eps / sqrt(3).
+static void testSmoothSlidingFriction() {
+	Run run;
+	const double eps = 1e-2;
+	if (!simulate(run,
+				  "model M\n"
+				  "  Real v(start = 0.5);\n"
+				  "equation\n"
+				  "  der(v) = 0.5 - sign(v);\n"
+				  "end M;\n",
+				  2.0, PW_SMOOTH, eps)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "v"), eps / std::sqrt(3.0), 1e-3);
+}
+
 // Equations listed in a different order per mode.
 static void testReorderedEquations() {
 	Run run;
@@ -794,6 +872,9 @@ static void testReorderedEquations() {
 }
 
 int main() {
+	testSmoothAbsConverges();
+	testSmoothMinMaxSign();
+	testSmoothSlidingFriction();
 	testSignChatterIsReported();
 	testAbsInContinuousEquation();
 	testMinMax();

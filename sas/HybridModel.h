@@ -60,12 +60,22 @@ namespace che {
 		// Builds an environment from a parsed model: parameters and the initial values of the discrete variables.
 		HybridEnv makeHybridEnv(const SasModel &model);
 
-		// Rewrites abs(), min(), max() and sign() calls in continuous equations into if-expressions
-		// (abs(e) = if e >= 0 then e else -e, ...), so that the switching points become state events
-		// and every mode is smooth. Conditions and when-bodies are left alone (they are evaluated
-		// directly). Returns the number of calls rewritten. Call before isHybridModel() and
-		// checkModel().
-		int rewritePiecewiseFunctions(SasModel &model);
+		// How abs(), min(), max() and sign() are treated in continuous equations.
+		enum PiecewiseMode {
+			PW_EVENTS, // exact: switching points are state events (default)
+			PW_SMOOTH  // smooth approximations with parameter eps, no events
+		};
+
+		// Rewrites abs(), min(), max() and sign() calls in continuous equations. Conditions and
+		// when-bodies are left alone (they are evaluated directly). Returns the number of calls
+		// rewritten. Call before isHybridModel() and checkModel().
+		//  - PW_EVENTS: into if-expressions (abs(e) = if e >= 0 then e else -e, ...), so that the
+		//    switching points become state events and every mode is smooth.
+		//  - PW_SMOOTH: into smooth functions without events, with s(e) = sqrt(e*e + eps*eps):
+		//    abs(e) = s(e), max(a,b) = (a + b + s(a-b)) / 2, min(a,b) = (a + b - s(a-b)) / 2,
+		//    sign(e) = e / s(e). The error is of the order eps; very small eps makes the series
+		//    steps near the kink small.
+		int rewritePiecewiseFunctions(SasModel &model, PiecewiseMode mode = PW_EVENTS, double eps = 1e-6);
 
 		// True if the model uses discrete variables, if/when statements, if-expressions or `time`.
 		bool isHybridModel(const SasModel &model);

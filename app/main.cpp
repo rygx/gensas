@@ -110,6 +110,8 @@ int main(int argc, char **argv) {
 		string output = "";
 		string jsonOutput = "";
 		string csvOutput = "";
+		PiecewiseMode piecewiseMode = PW_EVENTS;
+		double smoothEps = 1e-6;
 		//	parsing command line arguments
 		for (int iArg = 2; iArg < argc; iArg++) {
 			string arg = argv[iArg];
@@ -152,6 +154,20 @@ int main(int argc, char **argv) {
 					csvOutput = argv[iArg];
 				} else {
 					cerr << "CSV output file should be specified after --csv or -c. No CSV file is written." << endl;
+				}
+			} else if (arg == "--piecewise") {
+				if (++iArg < argc && (string(argv[iArg]) == "events" || string(argv[iArg]) == "smooth")) {
+					piecewiseMode = string(argv[iArg]) == "smooth" ? PW_SMOOTH : PW_EVENTS;
+				} else {
+					cerr << "Error: --piecewise expects events or smooth." << endl;
+					return -1;
+				}
+			} else if (arg == "--smooth-eps") {
+				if (++iArg < argc && stod(argv[iArg]) > 0.0) {
+					smoothEps = stod(argv[iArg]);
+				} else {
+					cerr << "Error: --smooth-eps expects a positive number." << endl;
+					return -1;
 				}
 			} else if (arg == "--time" || arg == "-t") {
 				if (++iArg < argc) {
@@ -274,8 +290,9 @@ int main(int argc, char **argv) {
 		// The default SolverFeatures describe what the solver can run today. Models with discrete
 		// variables, if/when statements or `time` go to the time-event simulator.
 		SolverFeatures solverFeatures;
-		// abs/min/max/sign in continuous equations become if-expressions: their switching points are state events.
-		rewritePiecewiseFunctions(*parser.currentModel);
+		// abs/min/max/sign in continuous equations become if-expressions (their switching points are state
+		// events) or, with --piecewise smooth, smooth approximations.
+		rewritePiecewiseFunctions(*parser.currentModel, piecewiseMode, smoothEps);
 		const bool hybrid = isHybridModel(*parser.currentModel);
 		if (hybrid) {
 			solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;

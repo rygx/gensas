@@ -44,6 +44,9 @@ outside when-conditions (and of anything but one discrete variable), `when` insi
 (`abs(e)` becomes `if e >= 0 then e else -e`). The conditions are ordinary dynamic guards, so the
 switching points are located like any other state event and every mode is smooth for the Pade solver.
 Conditions and when-bodies are not rewritten; they are evaluated directly.
+With `PW_SMOOTH` (`--piecewise smooth`) the calls become smooth `sqrt(e*e + eps*eps)` forms instead, with
+no events; `abs` is multiplied by 1 because the solver cannot handle an equation side that is a bare
+function call.
 
 ### Hybrid simulation
 

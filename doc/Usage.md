@@ -53,7 +53,7 @@ Explanations:
 * `-m/--mode file/string` (mandatory) specifies the format of input. If `-m file`, then expect the input file name after `-i`; and if `-m string`, then expect the Modelica model content after `-i`.
 * `-i/--input <input>` (mandatory) specifies the input data. The `<input>` depends on the mode specified after `-m`.
 * `-o/--output <output-file-name>` (mandatory) specifies the output curve data file name. Currently the output is a .mat file containing the output as a matrix.
-* `-j/--json <json-output-file-name>` (optional) specifies the name of the .json file containing output curve. 
+* `-j/--json <json-output-file-name>` (optional) specifies the name of the .json file containing output curve. For hybrid models the file also has a `discrete` object (the discrete variables, sampled like the curves; the two samples at an event time hold the values before and after the event) and an `events` array (`time`, `assignments` and `reinits` of each event). 
 * `-l/--level <sas-order>` (optional) specifies the order of SAS. If not specified, the order of SAS is 15.
 * `-t/--time <max-time>` (optional) specifies the maximum time of simulated process. If not specified, the time is set as 10.0.
 * `-s/--segment <segment-length>` (optional) specfies the length of a segment of SAS computation. If not specified, the the segment length is 1.0.

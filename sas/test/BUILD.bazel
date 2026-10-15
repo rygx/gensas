@@ -59,6 +59,7 @@ cc_test(
     srcs = ["hybrid_sim_test.cpp"],
     deps = [
         ":test_util",
+        "//:libjsoncpp",
         "//sas:sas_hybrid_sim_lib",
         "//sas:sas_model_checker_lib",
         "//sas:sas_model_parser_lib",

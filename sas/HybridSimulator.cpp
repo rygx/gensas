@@ -137,9 +137,22 @@ namespace che {
 				return false;
 			};
 
+			// Discrete variables over time, for the result.
+			vector<string> discreteNames(env.discrete.begin(), env.discrete.end());
+			total->discrete.names = discreteNames;
+			auto snapshot = [&](double T) {
+				vector<double> vals;
+				for (const string &n : discreteNames) {
+					vals.push_back(env.values[n]);
+				}
+				total->discrete.times.push_back(T);
+				total->discrete.values.push_back(vals);
+			};
+
 			if (!handleEvents(t, false, true)) { // sample() events at the start time
 				return NULL;
 			}
+			snapshot(t);
 
 			const size_t maxEvents = 1000000;
 			int stuck = 0; // consecutive iterations that hardly advance the time
@@ -338,8 +351,12 @@ namespace che {
 				}
 				t = segEnd;
 				bool timeNow = timeEvent && (!dynEvent || fabs(dynT - te) <= 1e-9 * max(1.0, fabs(te)));
+				size_t nBefore = firedEvents.size();
 				if (!handleEvents(t, timeNow, false)) {
 					return NULL;
+				}
+				if (firedEvents.size() > nBefore) {
+					snapshot(t);
 				}
 				if (firedEvents.size() > maxEvents) {
 					fail("too many events");
@@ -347,6 +364,13 @@ namespace che {
 				}
 			}
 
+			for (const HybridEvent &ev : firedEvents) {
+				SasEventRecord rec;
+				rec.time = ev.time;
+				rec.assignments = ev.assignments;
+				rec.reinits = ev.reinits;
+				total->events.push_back(rec);
+			}
 			finalVals = env.values;
 			for (const pair<const string, double> &s : state) {
 				finalVals[s.first] = s.second;

@@ -1277,19 +1277,24 @@ namespace che {
 			double maxAlpha = solutionLink.back()->absEnd;
 			vector<vec> vecVec;
 			vector<double> tVec;
+			vector<double> segStart; // start time of the solution each sample was taken from
 			while (t <= maxAlpha - interval / 100) {
 				list<shared_ptr<SasSolution>> foundSolution = findSasSolution(t);
 				list<shared_ptr<SasSolution>>::iterator sasIt;
 				for (sasIt = foundSolution.begin(); sasIt != foundSolution.end(); sasIt++) {
 					vecVec.push_back((*sasIt)->solution->getSolValue(t - (*sasIt)->absStart));
 					tVec.push_back(t);
+					segStart.push_back((*sasIt)->absStart);
 				}
 				t += interval;
 				if (t > maxAlpha) {
 					t = maxAlpha;
 				}
 			}
-			mat solutionMat(vecVec[1].n_rows, vecVec.size(), fill::zeros);
+			if (vecVec.empty()) {
+				return;
+			}
+			mat solutionMat(vecVec[0].n_rows, vecVec.size(), fill::zeros);
 			for (int i = 0; i < vecVec.size(); i++) {
 				solutionMat.col(i) = vecVec[i];
 			}
@@ -1311,6 +1316,46 @@ namespace che {
 					}
 					res[(char *)(linkCompModel->idTable[i]->str)] = vVals;
 				}
+			}
+
+			// Hybrid results: the discrete variables sampled like the continuous ones (a sample takes the
+			// value that holds from the start of its solution segment, so the two samples at an event time
+			// show the values before and after the event), and the list of events.
+			if (!discrete.names.empty() && !discrete.times.empty()) {
+				Json::Value dVals(Json::objectValue);
+				for (size_t n = 0; n < discrete.names.size(); n++) {
+					Json::Value series(Json::arrayValue);
+					for (size_t j = 0; j < segStart.size(); j++) {
+						size_t k = 0; // last trace entry at or before the start of the segment
+						for (size_t m = 0; m < discrete.times.size(); m++) {
+							if (discrete.times[m] <= segStart[j] + 1e-12 * (1.0 + fabs(segStart[j]))) {
+								k = m;
+							}
+						}
+						series.append(Json::Value(discrete.values[k][n]));
+					}
+					dVals[discrete.names[n]] = series;
+				}
+				res["discrete"] = dVals;
+			}
+			if (!events.empty()) {
+				Json::Value evVals(Json::arrayValue);
+				for (const SasEventRecord &ev : events) {
+					Json::Value e(Json::objectValue);
+					e["time"] = Json::Value(ev.time);
+					Json::Value as(Json::objectValue);
+					for (const pair<string, double> &a : ev.assignments) {
+						as[a.first] = Json::Value(a.second);
+					}
+					e["assignments"] = as;
+					Json::Value rs(Json::objectValue);
+					for (const pair<string, double> &r : ev.reinits) {
+						rs[r.first] = Json::Value(r.second);
+					}
+					e["reinits"] = rs;
+					evVals.append(e);
+				}
+				res["events"] = evVals;
 			}
 
 			std::ofstream fileWriter;

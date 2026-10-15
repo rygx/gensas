@@ -90,7 +90,7 @@ survives copying the AST into the computation model.
 
 ### Library entry point
 
-`sas/Simulation.h` wraps the whole pipeline for one Modelica run: `ModelicaJob` (model file or text, solver options, piecewise mode, output step and files; filled by `parseModelicaJob` from a job file, see [Job format](JobFormat.md)), `Simulation::run(progress)` (parse, check, solve, sample; the optional progress callback receives the time reached and the end time after each solution segment and returns true to cancel) and `Simulation::result()`. The command line (`app run`, `app -g`) is a thin layer over it, and the planned C API wraps the same class.
+`sas/Simulation.h` wraps the whole pipeline for one Modelica run: `ModelicaJob` (model file or text, solver options, piecewise mode, output step and files; filled by `parseModelicaJob` from a job file, see [Job format](JobFormat.md)), `Simulation::run(progress)` (parse, check, solve, sample; the optional progress callback receives the time reached and the end time after each solution segment and returns true to cancel) and `Simulation::result()`. The command line is a thin layer over it: `app run` (`runJobFile` in `app/main.cpp`) reads a job file, applies `--set` overrides and calls `parseModelicaJob`; `app -g` builds the same `ModelicaJob` from flags; both then go through `runModelica`, and the C API (`capi/gensas.h`, see [C API](CApi.md)) wraps the same class.
 
 ### Re-entrancy
 

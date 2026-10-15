@@ -304,6 +304,7 @@ namespace che {
 
 		Simulation::Simulation(const ModelicaJob &job) : jobData(job) {
 			applyJobLimits(jobData, warns);
+			nJobWarnings = warns.size();
 		}
 
 		bool Simulation::run(const ProgressFn &progress) {
@@ -321,6 +322,7 @@ namespace che {
 
 		bool Simulation::runImpl(const ProgressFn &progress) {
 			err.clear();
+			warns.resize(nJobWarnings); // warnings of an earlier run
 			wasCancelled = false;
 			res = SasResult();
 			const auto started = chrono::steady_clock::now();
@@ -364,7 +366,9 @@ namespace che {
 
 			SasComputationOptions options = jobData.options;
 			options.progress = progress;
+			options.log = jobData.verbose ? &cout : nullptr;
 			SasComputationModel compModel; // must outlive the solutions
+			compModel.log = options.log;
 			unique_ptr<SasSolutionSet> solutions;
 			HybridSimulator hybridSim(parser.currentModel);
 			if (hybrid) {

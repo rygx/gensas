@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:private"])
 cc_library(
     name = "test_util",
     hdrs = ["test_util.h"],
+    visibility = ["//capi/test:__pkg__"],
 )
 
 # Parser-only test; builds without the numeric dependencies (BLAS, SuperLU, ...).

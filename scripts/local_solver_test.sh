@@ -41,7 +41,7 @@ CXXFLAGS="-std=c++14 -O1 -w -DARMA_DONT_USE_WRAPPER -I. \
 
 # Library sources the solver tests depend on (no power flow, no PSAT/MAT input).
 SOURCES="sas/SasModel sas/SasConfig sas/SasInput sas/SasLexico sas/TokenScanner sas/ExprParser \
-sas/ModelParser sas/ModelChecker sas/HybridModel sas/HybridSimulator sas/Simulation sas/SasComputation sas/SasResult sas/SasResultMat io/Mat5Writer io/CaseFile io/MatPsatDataRW \
+sas/ModelParser sas/ModelChecker sas/HybridModel sas/HybridSimulator sas/Simulation capi/gensas sas/SasComputation sas/SasResult sas/SasResultMat io/Mat5Writer io/CaseFile io/MatPsatDataRW \
 util/AbstractCheCalculator util/CheCompUtil util/CheState io/CheDataFormat io/CheIoUtil"
 
 mkdir -p "${BUILD_DIR}/obj" "${BUILD_DIR}/bin"
@@ -60,16 +60,33 @@ export -f compile
 export BUILD_DIR CXX CXXFLAGS newest_header
 echo ${SOURCES} | tr ' ' '\n' | xargs -P "${JOBS}" -I{} bash -c 'compile {}'
 
+# Tests live in sas/test and capi/test (.cpp, or .c for the C header check).
+test_source() {
+  for ext in cpp c; do
+    for dir in sas/test capi/test; do
+      if [ -f "${dir}/$1.${ext}" ]; then echo "${dir}/$1.${ext}"; return; fi
+    done
+  done
+}
 if [ "$#" -gt 0 ]; then
   TESTS="$*"
 else
-  TESTS="$(cd sas/test && ls *_test.cpp | sed 's/\.cpp$//')"
+  TESTS="$(ls sas/test/*_test.cpp capi/test/*_test.c* | sed 's|.*/||; s/\.[a-z]*$//')"
 fi
 
 FAILED=0
 for t in ${TESTS}; do
   echo "=== ${t} ==="
-  ${CXX} ${CXXFLAGS} "sas/test/${t}.cpp" "${BUILD_DIR}"/obj/*.o ${LINK_LIBS} -o "${BUILD_DIR}/bin/${t}"
+  src="$(test_source "${t}")"
+  case "${src}" in
+    *.c)
+      ${CC:-gcc} -std=c99 -Wall -I. -c "${src}" -o "${BUILD_DIR}/${t}.o"
+      ${CXX} "${BUILD_DIR}/${t}.o" "${BUILD_DIR}"/obj/*.o ${LINK_LIBS} -o "${BUILD_DIR}/bin/${t}"
+      ;;
+    *)
+      ${CXX} ${CXXFLAGS} "${src}" "${BUILD_DIR}"/obj/*.o ${LINK_LIBS} -o "${BUILD_DIR}/bin/${t}"
+      ;;
+  esac
   # Run in the build directory: some tests write result files into the working directory.
   if ! (cd "${BUILD_DIR}" && "./bin/${t}" > "${t}.log" 2>&1); then
     echo "FAILED: ${t} (see ${BUILD_DIR}/${t}.log)"

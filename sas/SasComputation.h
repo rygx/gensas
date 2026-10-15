@@ -63,6 +63,8 @@ namespace che {
 			// Called after each solution segment with the absolute time reached and the end time. If it
 			// returns true, the run is cancelled (the solution set is marked `cancelled`).
 			std::function<bool(double time, double endTime)> progress;
+			// Where diagnostic messages (stage lengths, equation counts) go; null (default) is silent.
+			std::ostream *log = nullptr;
 		};
 
 		class SasSolution {
@@ -112,6 +114,8 @@ namespace che {
 			int nAE = 0;
 			int nX = 0;
 			int nY = 0;
+			// Where diagnostic messages go; null (default) is silent. Set before generateDAEs().
+			std::ostream *log = nullptr;
 
 			SasComputationModel();
 

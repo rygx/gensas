@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted
@@ -53,7 +54,7 @@ INITIAL_ROUND_BACKOFF_SECONDS = 30
 
 # Extensions worth reviewing in this repository (C++ / Bazel / CI / docs).
 REVIEW_EXTENSIONS = {
-    ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp",  # C/C++ sources and headers
+    ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hxx",  # C/C++ sources and headers
     ".bazel", ".bzl",                           # BUILD files and Starlark
     ".yml", ".yaml",                            # GitHub Actions
     ".sh", ".py",                               # scripts
@@ -277,5 +278,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
+        traceback.print_exc()
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)

@@ -33,14 +33,16 @@ from github import Github
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Models are tried in round-robin order; every model is attempted once per round
-# before any backoff. Verify IDs against https://ai.google.dev/gemini-api/docs/models
-# when changing this list.
+# Models are tried in order, best first; a model that is out of quota or fails is skipped and
+# the next one is used, and every model is attempted once per round before any backoff.
+# Verify IDs against https://ai.google.dev/gemini-api/docs/models when changing this list.
 MODELS = [
-    "gemini-2.5-flash-lite",
+    "gemini-3.8-flash",  # newest stable Flash (checked on ai.google.dev, Oct 2026)
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-3.5-flash",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemma-4-26b-a4b-it",
     "gemma-4-31b-it",
 ]

@@ -14,6 +14,8 @@ cc_library(
     deps = [
         "//sas:sas_simulation_lib",
     ],
+    # The shared libraries export these symbols without anything inside them calling them.
+    alwayslink = True,
 )
 
 # Shared library for Python (ctypes) and other languages. Bazel wants the platform's suffix in the

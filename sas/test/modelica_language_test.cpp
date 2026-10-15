@@ -171,7 +171,51 @@ static void testNoEvent() {
 	CHECK_NEAR(lastValue(sim.result(), "x"), 0.5 * std::exp(-2.0 * (t - std::log(2.0))), 1e-4);
 }
 
+// Real y = expr; is an equation, wherever y and the variables in expr are declared.
+static void testBindingEquations() {
+	const char *src =
+		"model M\n"
+		"  Real y = 2*x;\n"
+		"  Real x(start = 1);\n"
+		"  Real s(start = 0) = sin(x);\n"
+		"equation\n"
+		"  der(x) = -y;\n"
+		"end M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	CHECK(sim.error().empty());
+	double t = sim.result().time.back();
+	CHECK_NEAR(lastValue(sim.result(), "x"), std::exp(-2.0 * t), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "y"), 2.0 * std::exp(-2.0 * t), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "s"), std::sin(std::exp(-2.0 * t)), 1e-4);
+
+	// Combined with events.
+	const char *hybrid =
+		"model M\n"
+		"  Real x(start = 1);\n"
+		"  Real y = 3*x;\n"
+		"  discrete Real k(start = 1);\n"
+		"equation\n"
+		"  der(x) = -k*x;\n"
+		"  when time >= 1 then\n"
+		"    k = 2;\n"
+		"  end when;\n"
+		"end M;\n";
+	Simulation h(job(hybrid, 2.0));
+	CHECK(h.run());
+	t = h.result().time.back();
+	double x = std::exp(-1.0) * std::exp(-2.0 * (t - 1.0));
+	CHECK_NEAR(lastValue(h.result(), "x"), x, 1e-4);
+	CHECK_NEAR(lastValue(h.result(), "y"), 3.0 * x, 1e-4);
+
+	// Discrete variables are assigned in when-equations.
+	Simulation bad(job("model M\n  discrete Real d = 1;\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!bad.run());
+	CHECK(bad.error().find("discrete variable 'd'") != std::string::npos);
+}
+
 int main() {
+	testBindingEquations();
 	testBareFunctionCall();
 	testNoEvent();
 	testElementaryFunctions();

@@ -270,7 +270,8 @@ static void testSyntaxErrors() {
 	CHECK(parseErrors("model M\n  Real x;\n  Real x;\nequation\n  der(x)=1;\nend M;\n") > 0);													  // redeclaration
 	CHECK(parseErrors("model M\n  parameter Real k;\nequation\nend M;\n") > 0);																	  // parameter without value
 	CHECK(parseErrors("model M\n  parameter Real k=1;\n  parameter Real j=k*time;\nequation\nend M;\n") > 0);									  // non-constant parameter
-	CHECK(parseErrors("model M\n  Real x=1;\nequation\n  der(x)=1;\nend M;\n") > 0);															  // binding on a variable
+	CHECK(parseErrors("model M\n  discrete Real d=1;\nequation\nend M;\n") > 0);																  // binding on a discrete variable
+	CHECK(parseErrors("model M\n  Real x=1;\nequation\n  der(x)=1;\nend M;\n") == 0);															  // binding on a continuous variable is an equation
 	CHECK(parseErrors("model M\n  Real x;\nequation\n  reinit(x, 1);\nend M;\n") > 0);															  // reinit outside when
 	CHECK(parseErrors("model M\n  Real x;\nequation\n  when x>0 then\n    when x>1 then\n      x=1;\n    end when;\n  end when;\nend M;\n") > 0); // nested when
 	CHECK(parseErrors("model M\n  Real x;\nequation\n  if x>0 then\n    x=1;\n  else\n    x=2;\nend M;\n") > 0);								  // missing end if

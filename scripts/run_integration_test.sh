@@ -162,7 +162,7 @@ if [ -f "${OUTPUT_MAT}" ]; then
   MAT_SIZE=$(wc -c < "${OUTPUT_MAT}")
   if [ "${MAT_SIZE}" -gt 0 ]; then
     echo "PASS: output .mat created (${MAT_SIZE} bytes)"
-    check_mat_with_scipy "power-flow result" "${OUTPUT_MAT}" "assert m['s'].shape == (490000, 1)"
+    check_mat_with_scipy "power-flow result" "${INPUT_DIR}/${OUTPUT_NAME}" "assert m['s'].shape == (490000, 1)"
   else
     echo "FAIL: output .mat file is empty"
     PASS=0
@@ -226,7 +226,7 @@ fi
 # A MAT v5 file starts with the text header "MATLAB 5.0 MAT-file".
 if [ -s "${REPO_DIR}/${HYBRID_MAT}" ] && head -c 19 "${REPO_DIR}/${HYBRID_MAT}" | grep -q "MATLAB 5.0 MAT-file"; then
   echo "PASS: MAT v5 result written"
-  check_mat_with_scipy "Modelica result" "${REPO_DIR}/${HYBRID_MAT}" "assert m['s'].shape[0] == len(m['names']) and m['s'].shape[1] == m['t'].shape[1] and m['event_t'].size == 3"
+  check_mat_with_scipy "Modelica result" "${INPUT_DIR}/${HYBRID_MAT}" "assert m['s'].shape[0] == len(m['names']) and m['s'].shape[1] == m['t'].shape[1] and m['event_t'].size == 3"
 else
   echo "FAIL: MAT v5 result was not written to ${HYBRID_MAT}"
   PASS=0

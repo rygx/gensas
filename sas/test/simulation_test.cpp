@@ -78,7 +78,7 @@ static void testBadModels() {
 	{
 		Simulation sim(sourceJob("model M\n  Real x;\nequation\n  der(x) = \n", 1.0));
 		CHECK(!sim.run());
-		CHECK(!sim.error().empty());
+		CHECK(sim.error().find("error:") != string::npos); // the parser's message is part of the error
 		CHECK(!sim.cancelled());
 	}
 	{

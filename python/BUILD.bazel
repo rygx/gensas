@@ -1,0 +1,23 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "gensas",
+    srcs = ["gensas/__init__.py"],
+    imports = ["."],
+)
+
+# Runs the Python interface against the shared library. Not built on Windows yet (the test needs a
+# Python interpreter in the Bazel environment there); run it by hand with GENSAS_LIBRARY set.
+py_test(
+    name = "gensas_python_test",
+    srcs = ["tests/test_gensas.py"],
+    main = "tests/test_gensas.py",
+    data = ["//capi:libgensas.so"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [":gensas"],
+)

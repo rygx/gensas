@@ -218,6 +218,8 @@ namespace che {
 			std::list<std::shared_ptr<SasModel>> subModels;
 			// String literals scanned for this model; AST nodes point into these.
 			std::list<std::shared_ptr<StrPearl>> strTable;
+			// Where error and warning messages go (default: std::cerr; null discards them).
+			std::ostream *diag = &std::cerr;
 
 			SasModel();
 

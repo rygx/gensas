@@ -328,6 +328,8 @@ namespace che {
 			const auto started = chrono::steady_clock::now();
 
 			SasModelParser parser;
+			ostringstream parseMessages; // errors and warnings of the parser go to the result, not to stderr
+			parser.diag = &parseMessages;
 			if (!jobData.modelFile.empty()) {
 				parser.parseFromFile(jobData.modelFile.c_str());
 			} else {
@@ -338,9 +340,14 @@ namespace che {
 				return false;
 			}
 			parser.currentModel = parser.pool.createNewTopModel();
+			parser.currentModel->diag = &parseMessages;
 			parseSingleSasModel(&parser);
+			parser.diag = &cerr; // parseMessages ends with this scope, the model may live longer
+			if (parser.currentModel != nullptr) {
+				parser.currentModel->diag = &cerr;
+			}
 			if (parser.errCount > 0) {
-				err = "parsing the model failed";
+				err = "parsing the model failed:\n" + parseMessages.str();
 				return false;
 			}
 

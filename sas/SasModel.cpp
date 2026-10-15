@@ -218,8 +218,8 @@ namespace che {
 			va_list ap;
 			char buffer[MAX_PRINT_LEN + 1];
 			va_start(ap, formatMsg);
-			vsprintf(buffer, formatMsg, ap);
-			cerr << "(Model " << modelInfo->str << ") error: " << buffer << endl;
+			vsnprintf(buffer, sizeof buffer, formatMsg, ap);
+			*diag << "(Model " << modelInfo->str << ") error: " << buffer << endl;
 			errCount++;
 			va_end(ap);
 		}
@@ -228,8 +228,8 @@ namespace che {
 			va_list ap;
 			char buffer[MAX_PRINT_LEN + 1];
 			va_start(ap, formatMsg);
-			vsprintf(buffer, formatMsg, ap);
-			cerr << "(Model " << modelInfo->str << ") warn: " << buffer << endl;
+			vsnprintf(buffer, sizeof buffer, formatMsg, ap);
+			*diag << "(Model " << modelInfo->str << ") warn: " << buffer << endl;
 			warnCount++;
 			va_end(ap);
 		}

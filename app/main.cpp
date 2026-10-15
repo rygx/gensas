@@ -65,6 +65,7 @@ using namespace nvwa;
 #include <unistd.h>
 #define GetCurrentDir getcwd
 #endif
+#include <iomanip>
 #include <iostream>
 
 // #define new DEBUG_NEW
@@ -481,6 +482,11 @@ int main(int argc, char **argv) {
 			pctimer_t stTime = pctimer();
 			int pfFlag = pCalculator->calc();
 			pctimer_t endTime = pctimer();
+			{
+				// A compact fingerprint of the converged state, for regression checks.
+				CheState finalState = pCalculator->exportResult();
+				cout << "Final state: n=" << finalState.state.n_rows << ", norm=" << setprecision(10) << norm(finalState.state, 2) << ", sum=" << accu(finalState.state) << endl;
+			}
 			pCalculator->writeMatFile(outputPath.c_str());
 			delete pCalculator;
 			totalTime += endTime - stTime;

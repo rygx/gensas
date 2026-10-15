@@ -231,6 +231,30 @@ namespace che {
 				return tok == TK_K_PARA || tok == TK_K_CONSTANT || tok == TK_K_DISCRETE || tok == TK_K_INPUT || tok == TK_K_OUTPUT || tok == TK_K_REAL || tok == TK_K_INTEGER || tok == TK_K_BOOLEAN;
 			}
 
+			// Skips `annotation(...)`, which does not change the equations. The tokens inside are scanned without
+			// entering their names into the id table.
+			void skipAnnotation(SasModelParser *parser) {
+				parser->noInject = true;
+				getNextToken(parser); // consume `annotation`
+				int depth = 0;
+				while (parser->currentToken != TK_EOF) {
+					if (parser->currentToken == TK_LPAREN) {
+						depth++;
+					} else if (parser->currentToken == TK_RPAREN) {
+						depth--;
+						if (depth <= 0) {
+							parser->noInject = false;
+							getNextToken(parser);
+							return;
+						}
+					} else if (depth == 0) {
+						break; // `annotation` without parentheses
+					}
+					getNextToken(parser);
+				}
+				parser->noInject = false;
+			}
+
 			// One variable of a declaration: name, modification, binding and description string.
 			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isDiscrete, bool isInput) {
 				shared_ptr<IdPearl> var = parser->currentId;
@@ -283,30 +307,9 @@ namespace che {
 					var->setAnnotation((uchar *)parser->value.p);
 					getNextToken(parser);
 				}
-			}
-
-			// Skips `annotation(...)`, which does not change the equations. The tokens inside are scanned without
-			// entering their names into the id table.
-			void skipAnnotation(SasModelParser *parser) {
-				parser->noInject = true;
-				getNextToken(parser); // consume `annotation`
-				int depth = 0;
-				while (parser->currentToken != TK_EOF) {
-					if (parser->currentToken == TK_LPAREN) {
-						depth++;
-					} else if (parser->currentToken == TK_RPAREN) {
-						depth--;
-						if (depth <= 0) {
-							parser->noInject = false;
-							getNextToken(parser);
-							return;
-						}
-					} else if (depth == 0) {
-						break; // `annotation` without parentheses
-					}
-					getNextToken(parser);
+				if (parser->currentToken == TK_K_ANNOTATION) {
+					skipAnnotation(parser);
 				}
-				parser->noInject = false;
 			}
 
 			// One declaration statement: prefixes, a type and one or more declarators separated by commas.
@@ -347,9 +350,6 @@ namespace che {
 						break;
 					}
 					getNextToken(parser);
-				}
-				if (parser->currentToken == TK_K_ANNOTATION) {
-					skipAnnotation(parser);
 				}
 				expect(parser, TK_SEMICOLON);
 			}

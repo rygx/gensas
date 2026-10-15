@@ -364,6 +364,11 @@ int main(int argc, char **argv) {
 		int status = 0;
 		if (!jsonOutput.empty() || !csvOutput.empty() || !output.empty()) {
 			SasResult result = buildResult(*sasSolLink, outStep);
+			if (result.empty()) {
+				cerr << "Error: the simulation produced no results to write." << endl;
+				delete sasSolLink;
+				return -1;
+			}
 			const struct {
 				const char *format;
 				const string &path;

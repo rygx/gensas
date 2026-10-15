@@ -163,12 +163,19 @@ int main(int argc, char **argv) {
 					return -1;
 				}
 			} else if (arg == "--smooth-eps") {
-				if (++iArg < argc && stod(argv[iArg]) > 0.0) {
-					smoothEps = stod(argv[iArg]);
-				} else {
+				double value = -1.0;
+				try {
+					if (++iArg < argc) {
+						value = stod(argv[iArg]);
+					}
+				} catch (const std::exception &) {
+					value = -1.0;
+				}
+				if (!(value > 0.0)) {
 					cerr << "Error: --smooth-eps expects a positive number." << endl;
 					return -1;
 				}
+				smoothEps = value;
 			} else if (arg == "--time" || arg == "-t") {
 				if (++iArg < argc) {
 					options.endTime = stod(argv[iArg]);

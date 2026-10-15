@@ -81,5 +81,8 @@ Try running simulation of the model in `resources/mofile/test_solve_ode.mo` in t
     -t 15
 ```
 
+#### Job files
+The same simulation can be described in a JSON job file and started with `bazel-bin/app/app run job.json [--set key=value] [--validate]`; paths in the file are relative to the job file. See [Job format](JobFormat.md). The flags above remain available. A missing or non-numeric flag value is an error (exit code 1), and an unknown flag is rejected. The last sample of every result is at the end time.
+
 ### Paths on different operating systems
 Run the commands from the repository root, using relative paths; they behave identically on Linux, macOS and Windows (MSYS2 shell, with `app.exe`). The native Windows executable cannot open MSYS-style absolute paths like `/d/work/...`; convert them with `cygpath -m <path>`.

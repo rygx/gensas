@@ -97,7 +97,8 @@ namespace che {
 			vector<SasComputationModel *> sampleModel;
 			vector<double> segStart; // start time of the solution segment each sample was taken from
 			double t = res.startTime;
-			while (t <= maxAlpha - interval / 100) {
+			// The grid starts at the start time and always ends with a sample at the end time.
+			for (;;) {
 				list<shared_ptr<SasSolution>> found = set.findSasSolution(t);
 				for (const shared_ptr<SasSolution> &sol : found) {
 					samples.push_back(sol->solution->getSolValue(t - sol->absStart));
@@ -105,8 +106,11 @@ namespace che {
 					res.time.push_back(t);
 					segStart.push_back(sol->absStart);
 				}
+				if (t >= maxAlpha) {
+					break;
+				}
 				t += interval;
-				if (t > maxAlpha) {
+				if (t > maxAlpha - interval / 100) {
 					t = maxAlpha;
 				}
 			}

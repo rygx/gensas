@@ -60,6 +60,9 @@ namespace che {
 
 			const std::string &error() const { return err; }
 
+			// True if options.progress stopped the run (run() then returned NULL with error() "cancelled").
+			bool cancelled() const { return wasCancelled; }
+
 			// Events that fired, in time order. Events at the start time come first.
 			const std::vector<HybridEvent> &events() const { return firedEvents; }
 
@@ -78,6 +81,7 @@ namespace che {
 			std::vector<HybridEvent> firedEvents;
 			std::map<std::string, double> finalVals;
 			int nSegments = 0;
+			bool wasCancelled = false;
 			int guardSamples = 48;
 
 			bool fail(const std::string &msg);

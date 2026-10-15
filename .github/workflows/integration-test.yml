@@ -48,6 +48,10 @@ jobs:
         # gcc provides gfortran (required by armadillo/linear-algebra targets).
         # cmake is required by rules_foreign_cc cmake() rules.
         run: brew install gcc cmake
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
       - name: Configure Bazel caches
         run: |
           printf 'build --disk_cache=%s/.bazel-ci-cache/disk\nbuild --repository_cache=%s/.bazel-ci-cache/repo\n' "$HOME" "$HOME" > .bazelrc.local
@@ -70,14 +74,11 @@ jobs:
       - name: Run integration test
         run: bash scripts/run_integration_test.sh
 
-  # Windows (MSYS2 / MinGW-w64), see doc/Installation.md.
-  # Verified locally, but not yet on GitHub's runners: continue-on-error keeps a
-  # CI-specific problem from failing the workflow.  Remove that line to make
-  # this a required check once it has been green.
+  # Windows (MSYS2 / MinGW-w64), see doc/Installation.md.  Green on GitHub's runners,
+  # so a failure must show as a failure (no continue-on-error).
   Integration-Test-Windows:
     runs-on: windows-latest
     timeout-minutes: 90
-    continue-on-error: true
     defaults:
       run:
         shell: msys2 {0}

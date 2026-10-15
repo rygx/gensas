@@ -151,19 +151,24 @@ fi
 # ── Modelica (hybrid) command line ──────────────────────────────────────────
 # Bouncing ball: three state events (reinit of the velocity) before t = 1.2.
 HYBRID_JSON="gensas_integration_test_hybrid.json"
-rm -f "${REPO_DIR}/${HYBRID_JSON}"
+HYBRID_CSV="gensas_integration_test_hybrid.csv"
+HYBRID_EVENTS_CSV="gensas_integration_test_hybrid.events.csv"
+HYBRID_MAT="gensas_integration_test_hybrid.mat"
+rm -f "${REPO_DIR}/${HYBRID_JSON}" "${REPO_DIR}/${HYBRID_CSV}" "${REPO_DIR}/${HYBRID_EVENTS_CSV}" "${REPO_DIR}/${HYBRID_MAT}"
 set +e
 MO_OUTPUT=$("${APP_BIN}" \
   -g -m file \
   -i "${INPUT_DIR}/resources/mofile/test_bouncing_ball.mo" \
   -t 1.2 \
   -j "${HYBRID_JSON}" \
+  -c "${HYBRID_CSV}" \
+  -o "${HYBRID_MAT}" \
   2>&1)
 MO_EXIT=$?
 set -e
 
 echo "=== GenSAS Modelica hybrid integration test ==="
-echo "${MO_OUTPUT}" | grep -E "^Event at|Json output|rror" || true
+echo "${MO_OUTPUT}" | grep -E "^Event at|output written|rror" || true
 echo ""
 
 if [ "${MO_EXIT}" -ne 0 ]; then
@@ -187,7 +192,21 @@ else
   echo "FAIL: JSON result with events was not written to ${HYBRID_JSON}"
   PASS=0
 fi
-rm -f "${REPO_DIR}/${HYBRID_JSON}"
+if [ -s "${REPO_DIR}/${HYBRID_CSV}" ] && head -n 1 "${REPO_DIR}/${HYBRID_CSV}" | grep -q '^time,' && [ -s "${REPO_DIR}/${HYBRID_EVENTS_CSV}" ]; then
+  echo "PASS: CSV result and events written"
+else
+  echo "FAIL: CSV result or events file was not written (${HYBRID_CSV})"
+  PASS=0
+fi
+
+# A MAT v5 file starts with the text header "MATLAB 5.0 MAT-file".
+if [ -s "${REPO_DIR}/${HYBRID_MAT}" ] && head -c 19 "${REPO_DIR}/${HYBRID_MAT}" | grep -q "MATLAB 5.0 MAT-file"; then
+  echo "PASS: MAT v5 result written"
+else
+  echo "FAIL: MAT v5 result was not written to ${HYBRID_MAT}"
+  PASS=0
+fi
+rm -f "${REPO_DIR}/${HYBRID_JSON}" "${REPO_DIR}/${HYBRID_CSV}" "${REPO_DIR}/${HYBRID_EVENTS_CSV}" "${REPO_DIR}/${HYBRID_MAT}"
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo ""

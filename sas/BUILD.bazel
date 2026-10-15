@@ -139,14 +139,48 @@ cc_library(
     ],
     deps = [
         ":sas_lexico_lib",
+        ":sas_result_types_lib",
         "//util:abstract_che_calculator_lib",
+        "//:superlu_lib",
+    ]
+)
+
+# Result data types shared by the solver and the result writers (no numeric dependencies).
+cc_library(
+    name = "sas_result_types_lib",
+    hdrs = [
+        "SasResult.h",
+    ],
+)
+
+# SasResult sampling and the JSON and CSV result writers (no matio/HDF5).
+cc_library(
+    name = "sas_result_lib",
+    srcs = [
+        "SasResult.cpp",
+    ],
+    deps = [
+        ":sas_computation_lib",
+        ":sas_result_types_lib",
+        "//:libjsoncpp",
+    ]
+)
+
+# MAT v5 result writer; the only part of the solver that needs matio.
+cc_library(
+    name = "sas_result_mat_lib",
+    hdrs = [
+        "SasResultMat.h",
+    ],
+    srcs = [
+        "SasResultMat.cpp",
+    ],
+    deps = [
+        ":sas_result_types_lib",
     ] + select({
         "//:windows": ["//:libmatio_lib_cmake"],
         "//conditions:default": ["//:libmatio_lib"],
-    }) + [
-        "//:superlu_lib",
-        "//:libjsoncpp",
-    ]
+    })
 )
 
 # Time-event simulation of flat hybrid models on top of the semi-analytical solver.

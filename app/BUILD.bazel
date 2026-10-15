@@ -13,6 +13,8 @@ cc_binary(
         "//sas:sas_expr_parser_lib",
         "//sas:sas_model_parser_lib",
         "//sas:sas_hybrid_sim_lib",
+        "//sas:sas_result_lib",
+        "//sas:sas_result_mat_lib",
         "//sas:sas_model_checker_lib",
         "@nvwa//:nvwa_pctimer_headers",
     ],

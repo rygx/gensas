@@ -61,6 +61,7 @@ cc_test(
         ":test_util",
         "//:libjsoncpp",
         "//sas:sas_hybrid_sim_lib",
+        "//sas:sas_result_lib",
         "//sas:sas_model_checker_lib",
         "//sas:sas_model_parser_lib",
         "//util:safe_armadillo_headers",
@@ -78,4 +79,37 @@ cc_test(
         "//sas:sas_model_parser_lib",
         "//util:safe_armadillo_headers",
     ],
+)
+
+# Result sampling and the JSON and CSV writers.
+cc_test(
+    name = "result_test",
+    srcs = ["result_test.cpp"],
+    deps = [
+        ":test_util",
+        "//:libjsoncpp",
+        "//sas:sas_hybrid_sim_lib",
+        "//sas:sas_model_checker_lib",
+        "//sas:sas_model_parser_lib",
+        "//sas:sas_result_lib",
+        "//util:safe_armadillo_headers",
+    ],
+)
+
+# MAT v5 writer, read back with matio (needs the real matio, so the local script skips it).
+cc_test(
+    name = "result_mat_test",
+    srcs = ["result_mat_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_hybrid_sim_lib",
+        "//sas:sas_model_checker_lib",
+        "//sas:sas_model_parser_lib",
+        "//sas:sas_result_lib",
+        "//sas:sas_result_mat_lib",
+        "//util:safe_armadillo_headers",
+    ] + select({
+        "//:windows": ["//:libmatio_lib_cmake"],
+        "//conditions:default": ["//:libmatio_lib"],
+    }),
 )

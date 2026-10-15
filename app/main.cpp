@@ -374,7 +374,10 @@ int main(int argc, char **argv) {
 				}
 				unique_ptr<ResultWriter> writer = string(target.format) == "mat" ? makeMatResultWriter() : makeResultWriter(target.format);
 				string err;
-				if (writer->write(result, target.path, err)) {
+				if (writer == nullptr) {
+					cerr << "Error: unknown output format " << target.format << "." << endl;
+					status = -1;
+				} else if (writer->write(result, target.path, err)) {
 					cout << target.format << " output written to file " << target.path << "." << endl;
 				} else {
 					cerr << "Error: " << err << "." << endl;

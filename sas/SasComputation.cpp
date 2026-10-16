@@ -1065,7 +1065,7 @@ namespace che {
 							for (int k = 1; k <= lvl - 1; k++) {
 								d += (lvl - k) * sol(p->subs[1]->index, k) * sol(p->subs[0]->subs[1]->index, lvl - k);
 							}
-							rhs(row) = coeff * d / lvl;
+							rhs(row) = -coeff * d / lvl;
 						} else if (tok == TK_F_SQRT) { // sqrt(x)=y;
 							double d = 0.0;
 							for (int k = 1; k <= lvl - 1; k++) {

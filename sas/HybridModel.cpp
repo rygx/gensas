@@ -28,6 +28,7 @@
 #include "sas/MathFunctions.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <sstream>
 
@@ -439,6 +440,90 @@ namespace che {
 				return NULL;
 			}
 
+			// The value of a constant expression (numbers and parameters combined with + - * / and unary minus).
+			bool constantNumber(const AstNode *p, RewriteCtx &ctx, double &out) {
+				if (p == NULL) {
+					return false;
+				}
+				double a, b;
+				switch (p->op) {
+				case OP_CONST:
+					out = p->ty == TY_INT ? (double)p->value.i[0] : p->value.d;
+					return true;
+				case OP_ID: {
+					if (p->ty == TY_FUNCTION) {
+						return false;
+					}
+					const char *n = (const char *)p->value.p;
+					shared_ptr<IdPearl> id = ctx.model->lookupIdFromModel((char *)n, (int)strlen(n));
+					if (id == nullptr || id->idTy != ID_PARAM || (id->ty != TY_INT && id->ty != TY_REAL)) {
+						return false;
+					}
+					out = id->ty == TY_INT ? (double)id->value.i : id->value.d;
+					return true;
+				}
+				case OP_MINUS:
+					if (!constantNumber(p->subs[0], ctx, a)) {
+						return false;
+					}
+					out = -a;
+					return true;
+				case OP_POS:
+					return constantNumber(p->subs[0], ctx, out);
+				case OP_ADD:
+				case OP_SUB:
+				case OP_MUL:
+				case OP_DIV:
+					if (!constantNumber(p->subs[0], ctx, a) || !constantNumber(p->subs[1], ctx, b)) {
+						return false;
+					}
+					if (p->op == OP_DIV && b == 0.0) {
+						return false;
+					}
+					if (p->op == OP_ADD) {
+						out = a + b;
+					} else if (p->op == OP_SUB) {
+						out = a - b;
+					} else if (p->op == OP_MUL) {
+						out = a * b;
+					} else {
+						out = a / b;
+					}
+					return true;
+				default:
+					return false;
+				}
+			}
+
+			// x^y in terms of products and the functions the solver knows: a small integer power is a
+			// product (1/product for a negative one), x^0.5 is sqrt(x), and any other power is
+			// exp(y*log(x)), which needs x > 0.
+			AstNode *rewritePow(const AstNode *x, const AstNode *y, RewriteCtx &ctx) {
+				const int maxIntPower = 16;
+				double cx, n;
+				if (constantNumber(x, ctx, cx) && constantNumber(y, ctx, n) && std::isfinite(std::pow(cx, n))) {
+					return mkConst(std::pow(cx, n));
+				}
+				if (constantNumber(y, ctx, n)) {
+					if (n == std::floor(n) && std::fabs(n) <= maxIntPower) {
+						if (n == 0.0) {
+							return mkConst(1.0);
+						}
+						AstNode *prod = cloneNode(x);
+						for (int i = 1; i < (int)std::fabs(n); i++) {
+							prod = mkNode(OP_MUL, prod, cloneNode(x));
+						}
+						return n < 0.0 ? mkNode(OP_DIV, mkConst(1.0), prod) : prod;
+					}
+					if (n == 0.5) {
+						return mkCall("sqrt", cloneNode(x), ctx);
+					}
+				}
+				double bx;
+				AstNode *logx = (constantNumber(x, ctx, bx) && bx > 0.0) ? mkConst(std::log(bx)) : mkCall("log", cloneNode(x), ctx);
+				return mkCall("exp", mkNode(OP_MUL, cloneNode(y), logx), ctx);
+			}
+
 			// atan2(y, x) with the half-angle formula atan2(y, x) = 2 atan(y / (sqrt(x^2 + y^2) + x)), which is smooth
 			// for x >= 0; on the left half plane it is pi - atan2(y, -x) (y >= 0) or -pi - atan2(y, -x) (y < 0).
 			// The switches at x = 0 (continuous) and y = 0 with x < 0 (the branch cut) are state events.
@@ -472,13 +557,32 @@ namespace che {
 				}
 				p->subs[0] = rewriteChain(p->subs[0], ctx);
 				p->subs[1] = rewriteChain(p->subs[1], ctx);
+				if (p->op == OP_POW && p->subs[0] != NULL && p->subs[1] != NULL) {
+					AstNode *pw = rewritePow(p->subs[0], p->subs[1], ctx);
+					ctx.count++;
+					pw->next = p->next;
+					pw->line = p->line;
+					p->next = NULL;
+					freeTree(p);
+					return pw;
+				}
 				if (p->op != OP_CALL || p->subs[0] == NULL || p->subs[0]->op != OP_ID) {
 					return p;
 				}
 				string fn = idName(p->subs[0]);
 				const AstNode *a = p->subs[1];
 				const AstNode *b = a != NULL ? a->next : NULL;
-				AstNode *repl = (a != NULL && b == NULL) ? rewriteDerivedFunction(fn, a, ctx) : NULL;
+				AstNode *repl = NULL;
+				// A function of constants is a constant; the solver series need a variable as the argument.
+				double ca, cb, cv;
+				if (a != NULL && b == NULL && constantNumber(a, ctx, ca) && evalMathFunction(fn, ca, cv) && std::isfinite(cv)) {
+					repl = mkConst(cv);
+				} else if (fn == "atan2" && a != NULL && b != NULL && b->next == NULL && constantNumber(a, ctx, ca) && constantNumber(b, ctx, cb)) {
+					repl = mkConst(std::atan2(ca, cb));
+				}
+				if (repl == NULL && a != NULL && b == NULL) {
+					repl = rewriteDerivedFunction(fn, a, ctx);
+				}
 				if (repl == NULL && fn == "atan2" && a != NULL && b != NULL && b->next == NULL) {
 					repl = rewriteAtan2(a, b, ctx);
 				}

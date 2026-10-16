@@ -60,6 +60,8 @@ namespace che {
 			this->initVal = idp.initVal;
 			this->initDer = idp.initDer;
 			this->line = idp.line;
+			this->isConstant = idp.isConstant;
+			this->isInput = idp.isInput;
 		}
 
 		void IdPearl::setName(const unsigned char *s, int sz) {

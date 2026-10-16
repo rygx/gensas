@@ -63,7 +63,7 @@
 extern "C" {
 #endif
 
-/* Version 2 adds gensas_check and the gensas_diagnostic_* functions. */
+/* Version 2 adds gensas_check, gensas_diagnostic_* and gensas_model_info_json. */
 #define GENSAS_API_VERSION 2
 
 /* Return codes of gensas_run. */
@@ -104,6 +104,12 @@ GENSAS_API int gensas_check(gensas_simulation *sim);
  * the stage that found it ("parser" or "checker"). Errors of the solver itself (a function leaving its
  * domain, ...) are not tied to a line and only available through gensas_error. Index out of range gives
  * 0 or NULL. Strings stay valid until the next call that runs or checks the same handle. */
+/* What gensas_check found out about the model, as JSON text: name, description, hybrid, the variables
+ * (name, kind "state"/"algebraic"/"discrete", type, unit, description, start or null, input, line) and the
+ * parameters (name, type, unit, description, value, constant, line). NULL if the model could not be read.
+ * Valid until the next call that runs or checks the same handle. */
+GENSAS_API const char *gensas_model_info_json(const gensas_simulation *sim);
+
 #define GENSAS_DIAG_ERROR 0
 #define GENSAS_DIAG_WARNING 1
 GENSAS_API size_t gensas_diagnostic_count(const gensas_simulation *sim);

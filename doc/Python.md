@@ -23,6 +23,7 @@ result.termination          # None, or {"time": ..., "message": ...} if terminat
 * `gensas.Simulation(job)` gives control: `run(progress)` returns the result, `write("json" | "csv" | "mat", path)` writes the last result, `warnings` lists adjusted options, `close()` (or a `with` block) frees the handle.
 * `progress(time, end_time)` is called after each solution segment; return `True` to cancel (`gensas.Cancelled` is raised). An exception raised in the callback stops the run and is re-raised.
 * `sim.check()` parses and checks the model without running it and returns a list of `Diagnostic` objects (`severity` "error" or "warning", `line`, `column`, `message`, `source`; `as_dict()` for JSON); an empty list means the model is fine. `sim.diagnostics` gives the same for the last `run()` or `check()`, and a `GenSASError` raised for a bad model carries them in its `diagnostics` attribute.
+* `sim.model_info()` returns what the last `check()` or `run()` found out about the model as a dict (`name`, `description`, `hybrid`, `variables` with `kind` "state"/"algebraic"/"discrete", `unit`, `description`, `start`, `input`, `line`, and `parameters` with `value`, `constant`, ...), or `None` if the model could not be read. An editor can list variables and offer parameters for changing from it.
 * Errors raise `gensas.GenSASError` with the library's message (including the parser's messages for a bad model).
 * Several simulations may run in different threads at the same time.
 

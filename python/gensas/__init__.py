@@ -118,6 +118,7 @@ def _load_locked():
         "gensas_diagnostic_column": (ctypes.c_int, [sim, ctypes.c_size_t]),
         "gensas_diagnostic_message": (ctypes.c_char_p, [sim, ctypes.c_size_t]),
         "gensas_diagnostic_source": (ctypes.c_char_p, [sim, ctypes.c_size_t]),
+        "gensas_model_info_json": (ctypes.c_char_p, [sim]),
         "gensas_warning_count": (ctypes.c_size_t, [sim]),
         "gensas_warning": (ctypes.c_char_p, [sim, ctypes.c_size_t]),
         "gensas_sample_count": (ctypes.c_size_t, [sim]),
@@ -236,6 +237,15 @@ class Simulation:
         if status != _OK and not any(d.severity == "error" for d in found):
             raise self._failure()
         return found
+
+    def model_info(self):
+        """What the last check() found out about the model, as a dict: name, description, hybrid,
+        variables (name, kind "state"/"algebraic"/"discrete", type, unit, description, start, input, line)
+        and parameters (name, type, unit, description, value, constant, line). None if the model could
+        not be read."""
+        self._check_open()
+        text = self._lib.gensas_model_info_json(self._handle)
+        return json.loads(text.decode("utf-8")) if text else None
 
     @property
     def diagnostics(self):

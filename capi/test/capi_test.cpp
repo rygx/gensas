@@ -200,10 +200,32 @@ static void testCheckAndDiagnostics() {
 	}
 	CHECK_EQ(gensas_check(nullptr), GENSAS_ERROR);
 	CHECK_EQ(gensas_diagnostic_count(nullptr), (size_t)0);
+	CHECK(gensas_model_info_json(nullptr) == nullptr);
+}
+
+static void testModelInfo() {
+	char err[256];
+	gensas_simulation *sim = gensas_create(jobFor("model M \"m\"\n  parameter Real k = 2;\n  Real x(start = 1);\nequation\n  der(x) = -k * x;\nend M;\n", 1.0).c_str(), nullptr, err, sizeof err);
+	CHECK(sim != nullptr);
+	if (sim == nullptr) {
+		return;
+	}
+	CHECK(gensas_model_info_json(sim) == nullptr); // nothing checked yet
+	CHECK_EQ(gensas_check(sim), GENSAS_OK);
+	const char *json = gensas_model_info_json(sim);
+	CHECK(json != nullptr);
+	if (json != nullptr) {
+		const std::string text(json);
+		CHECK(text.find("\"name\":\"M\"") != std::string::npos);
+		CHECK(text.find("\"kind\":\"state\"") != std::string::npos);
+		CHECK(text.find("\"parameters\"") != std::string::npos);
+	}
+	gensas_destroy(sim);
 }
 
 int main() {
 	testCheckAndDiagnostics();
+	testModelInfo();
 	testHybridResult();
 	testErrorsAndWarnings();
 	testConcurrentHandles();

@@ -20,7 +20,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++ libarmadillo-dev libsuperlu-dev libjsoncpp-dev libblas-dev liblapack-dev
-          pip install gcovr coverage numpy
+          pip install gcovr coverage -r server/requirements-dev.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install the web client's dependencies
+        working-directory: web
+        run: npm ci
 
       - name: Run the tests with coverage
         run: bash scripts/coverage.sh
@@ -37,6 +47,8 @@ jobs:
             /tmp/gensas-coverage/summary.md
             /tmp/gensas-coverage/cpp/
             /tmp/gensas-coverage/python/
+            /tmp/gensas-coverage/server/
+            /tmp/gensas-coverage/web/
 
       - name: Comment the summary on the pull request
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository

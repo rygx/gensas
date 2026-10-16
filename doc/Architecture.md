@@ -136,8 +136,10 @@ A single model, parser or simulator is not thread safe and must stay on one thre
   `sudo apt install g++ libarmadillo-dev libsuperlu-dev libjsoncpp-dev libblas-dev liblapack-dev`)
   A full run takes seconds after the first compile.
 * Coverage: `bash scripts/coverage.sh` (needs `pip install gcovr coverage`) runs the same tests and the
-  Python tests with `--coverage` and writes line and branch coverage of `sas/`, `io/`, `util/` and
-  `capi/` plus line coverage of `python/gensas` to `/tmp/gensas-coverage` (`summary.md`, HTML reports).
+  Python and server tests with `--coverage` and writes line and branch coverage of `sas/`, `io/`, `util/` and
+  `capi/`, line coverage of `python/gensas` and `server/gensas_server` (worker processes excluded), and line
+  and branch coverage of the web client's unit tests (`web/src`) to `/tmp/gensas-coverage` (`summary.md`, HTML
+  reports). The browser tests (`web/e2e`) are not measured.
   The Coverage workflow does this on every pull request, shows the numbers in the job summary, comments
   them on the pull request and keeps the HTML reports as an artifact. Power flow and the PSAT reader are
   built and tested through Bazel only, so the script does not see them.

@@ -9,3 +9,5 @@ genhtml
 .envrc.local
 .bazelrc.local
 gensas_integration_test_output.mat
+__pycache__/
+.pytest_cache/

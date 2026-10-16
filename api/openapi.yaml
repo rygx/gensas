@@ -1,0 +1,489 @@
+openapi: 3.1.0
+info:
+  title: GenSAS server API
+  version: "1"
+  description: |
+    HTTP API of the GenSAS server (`server/`): check Modelica models, run simulations and fetch results.
+    This file is the contract between the server and its clients (`web/`); `server/tests` checks the
+    server against it. See `doc/Server.md` for running the server.
+
+    A simulation is a run: `POST /runs` returns at once with a run in state `queued`; follow it with
+    `GET /runs/{id}` or the event stream `GET /runs/{id}/events`, then fetch the samples with
+    `GET /runs/{id}/result`.
+
+    If the server was started with a token, every request except `GET /version` needs the header
+    `Authorization: Bearer <token>`.
+servers:
+  - url: http://127.0.0.1:8765
+    description: default local server
+
+paths:
+  /version:
+    get:
+      operationId: getVersion
+      summary: Server version, engine version and limits
+      security: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+
+  /examples:
+    get:
+      operationId: listExamples
+      summary: Example models to start from
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Example" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /check:
+    post:
+      operationId: checkModel
+      summary: Parse and check a model without running it
+      description: |
+        Always answers 200 when the request itself is valid, also when the model has errors (`ok` is then false
+        and `diagnostics` tells where). `info` is set whenever the model could be read.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelSpec" }
+      responses:
+        "200":
+          description: result of the check
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "503": { $ref: "#/components/responses/Busy" }
+
+  /runs:
+    post:
+      operationId: createRun
+      summary: Start a simulation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunRequest" }
+      responses:
+        "202":
+          description: accepted; the run is queued
+          headers:
+            Location:
+              description: URL of the run
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429":
+          description: too many runs are waiting or running
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      operationId: listRuns
+      summary: The runs the server still knows, newest first
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Run" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /runs/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: getRun
+      summary: State, progress and summary of a run
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteRun
+      summary: Cancel a run that is waiting or running, or forget a finished one
+      description: |
+        A queued or running run is stopped and ends in state `cancelled` (answer 200 with the run).
+        A finished run is removed together with its result (answer 204).
+      responses:
+        "200":
+          description: the run was stopped
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "204":
+          description: the finished run was removed
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /runs/{id}/events:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: streamRunEvents
+      summary: Server-sent events of a run
+      description: |
+        A `text/event-stream`. The first event is a `state` event with the current run; later `state` events
+        follow each change of state, `progress` events carry `{"time", "end"}` while the run is solving
+        (at most a few per second), and the stream ends with a `done` event (the finished run) after which
+        the server closes it. Lines starting with `:` are keep-alive comments.
+      responses:
+        "200":
+          description: event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /runs/{id}/result:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: getRunResult
+      summary: The samples of a completed (or terminated) run
+      parameters:
+        - name: format
+          in: query
+          description: |
+            `json` (default): object described by `ResultJson`. `csv` and `mat`: the result files of the
+            engine (doc/ResultFormat.md). `f64`: raw little-endian float64 matrix, column by column: the
+            time, then the variables, then the discrete variables, in the order of the run summary; the header
+            `X-Gensas-Samples` gives the number of rows.
+          schema: { type: string, enum: [json, csv, mat, f64], default: json }
+        - name: variables
+          in: query
+          description: comma-separated names; only these variables (and no discrete ones unless named) are returned in `json` and `f64`
+          schema: { type: string }
+        - name: maxPoints
+          in: query
+          description: |
+            for `json` and `f64`: reduce the number of samples to about this many, keeping the first and
+            last sample, the event times and the extremes of the selected variables
+          schema: { type: integer, minimum: 2 }
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Gensas-Samples:
+              description: number of samples in the body (`f64` only)
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResultJson" }
+            text/csv:
+              schema: { type: string }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: the run has no result (it is not finished, failed or was cancelled)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: the request is not valid
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: a token is required and missing or wrong
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: no such run (it may have been removed after its retention time)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooLarge:
+      description: the model text is larger than the server allows
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Busy:
+      description: no worker is available for the check within the time limit
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, description: "machine-readable, for example invalid_request, unauthorized, not_found, too_large, busy, no_result" }
+            message: { type: string }
+
+    Version:
+      type: object
+      required: [server, api, engine, limits]
+      properties:
+        server: { type: string, description: server software version }
+        api: { type: integer, description: version of this API }
+        engine:
+          type: object
+          required: [version, apiVersion]
+          properties:
+            version: { type: string }
+            apiVersion: { type: integer, description: version of the C API of the library }
+        authRequired: { type: boolean }
+        limits:
+          type: object
+          required: [maxSourceBytes, maxConcurrentRuns, runTimeoutSeconds]
+          properties:
+            maxSourceBytes: { type: integer }
+            maxConcurrentRuns: { type: integer }
+            maxQueuedRuns: { type: integer }
+            runTimeoutSeconds: { type: number }
+            checkTimeoutSeconds: { type: number }
+            retentionSeconds: { type: number }
+
+    Example:
+      type: object
+      required: [id, title, description, source]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        source: { type: string, description: Modelica text }
+        endTime: { type: number, description: suggested simulation length }
+
+    ValueMap:
+      type: object
+      description: names mapped to numbers (booleans count as 1 and 0)
+      additionalProperties:
+        oneOf:
+          - { type: number }
+          - { type: boolean }
+
+    ModelSpec:
+      type: object
+      required: [source]
+      additionalProperties: false
+      properties:
+        source: { type: string, description: the Modelica text }
+        piecewise: { type: string, enum: [events, smooth], description: "how abs, min, max and sign are handled (default events)" }
+        smoothEps: { type: number, exclusiveMinimum: 0 }
+        parameters: { $ref: "#/components/schemas/ValueMap" }
+        start: { $ref: "#/components/schemas/ValueMap" }
+
+    SolverSpec:
+      type: object
+      additionalProperties: false
+      description: see doc/JobFormat.md; values outside the supported ranges are moved to the nearest limit and reported as warnings
+      properties:
+        endTime: { type: number }
+        segment: { type: number }
+        level: { type: integer }
+        alphaTol: { type: number }
+        errorTol: { type: number }
+
+    RunRequest:
+      type: object
+      required: [model]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [modelica], default: modelica }
+        model: { $ref: "#/components/schemas/ModelSpec" }
+        solver: { $ref: "#/components/schemas/SolverSpec" }
+        output:
+          type: object
+          additionalProperties: false
+          properties:
+            step: { type: number, description: "spacing of the samples in the result" }
+
+    Diagnostic:
+      type: object
+      required: [severity, line, column, message, source]
+      properties:
+        severity: { type: string, enum: [error, warning] }
+        line: { type: integer, description: "1-based; 0 if unknown" }
+        column: { type: integer, description: "1-based; 0 if unknown" }
+        message: { type: string }
+        source: { type: string, description: "parser, checker or job" }
+
+    ModelVariable:
+      type: object
+      required: [name, kind, type, unit, description, start, input, line]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [state, algebraic, discrete] }
+        type: { type: string, enum: [Real, Integer, Boolean] }
+        unit: { type: string }
+        description: { type: string }
+        start: { type: [number, "null"] }
+        input: { type: boolean }
+        line: { type: integer }
+
+    ModelParameter:
+      type: object
+      required: [name, type, unit, description, value, constant, line]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [Real, Integer, Boolean] }
+        unit: { type: string }
+        description: { type: string }
+        value: { type: number }
+        constant: { type: boolean, description: "declared constant: it cannot be changed" }
+        line: { type: integer }
+
+    ModelInfo:
+      type: object
+      required: [name, description, hybrid, variables, parameters]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        hybrid: { type: boolean, description: "the model has events (discrete variables, if or when, time)" }
+        variables:
+          type: array
+          items: { $ref: "#/components/schemas/ModelVariable" }
+        parameters:
+          type: array
+          items: { $ref: "#/components/schemas/ModelParameter" }
+
+    CheckResponse:
+      type: object
+      required: [ok, diagnostics, info]
+      properties:
+        ok: { type: boolean, description: "the model has no errors (warnings are allowed)" }
+        diagnostics:
+          type: array
+          items: { $ref: "#/components/schemas/Diagnostic" }
+        info:
+          oneOf:
+            - { $ref: "#/components/schemas/ModelInfo" }
+            - { type: "null" }
+
+    RunSummary:
+      type: object
+      required: [samples, variables, discrete, events, endTime]
+      properties:
+        samples: { type: integer }
+        variables:
+          type: array
+          items: { type: string }
+        discrete:
+          type: array
+          items: { type: string }
+        events: { type: integer }
+        endTime: { type: number, description: "time of the last sample" }
+
+    Run:
+      type: object
+      required: [id, kind, state, createdAt, progress, diagnostics, warnings]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [modelica] }
+        state:
+          type: string
+          enum: [queued, running, completed, terminated, failed, cancelled]
+          description: "`terminated`: a terminate() in the model ended the run early; the result up to that time is available"
+        createdAt: { type: number, description: "seconds since 1970-01-01 (UTC)" }
+        startedAt: { type: [number, "null"] }
+        finishedAt: { type: [number, "null"] }
+        progress:
+          type: object
+          required: [time, end]
+          properties:
+            time: { type: number, description: "simulated time reached" }
+            end: { type: number, description: "simulated end time (0 until known)" }
+        error: { type: [string, "null"], description: "why the run failed (also set for cancelled runs: the reason)" }
+        diagnostics:
+          type: array
+          items: { $ref: "#/components/schemas/Diagnostic" }
+        warnings:
+          type: array
+          items: { type: string }
+        elapsedSeconds: { type: [number, "null"] }
+        termination:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [time, message]
+              properties:
+                time: { type: number }
+                message: { type: string }
+        summary:
+          oneOf:
+            - { $ref: "#/components/schemas/RunSummary" }
+            - { type: "null" }
+
+    ResultJson:
+      type: object
+      required: [time, variables, discrete, events, terminated]
+      description: |
+        All arrays have the length of `time`. A hybrid model has two samples at each event time (before and
+        after the event). `null` marks a value the solver did not provide.
+      properties:
+        time:
+          type: array
+          items: { type: number }
+        variables:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: [number, "null"] }
+        discrete:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: [number, "null"] }
+        events:
+          type: array
+          items:
+            type: object
+            required: [time, assignments, reinits]
+            properties:
+              time: { type: number }
+              assignments: { type: object, additionalProperties: { type: number } }
+              reinits: { type: object, additionalProperties: { type: number } }
+        terminated:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [time, message]
+              properties:
+                time: { type: number }
+                message: { type: string }

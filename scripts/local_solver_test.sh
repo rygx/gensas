@@ -39,10 +39,9 @@ JOBS="${JOBS:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null) || echo 4)
 CXXFLAGS="-std=c++14 -O1 -w -DARMA_DONT_USE_WRAPPER -I. \
 -I${ARMADILLO_INCLUDE} -I${SUPERLU_INCLUDE} -I${JSONCPP_INCLUDE}"
 
-# Library sources the solver tests depend on (no power flow, no PSAT/MAT input).
-SOURCES="sas/SasModel sas/SasConfig sas/SasInput sas/SasLexico sas/TokenScanner sas/ExprParser \
-sas/ModelParser sas/ModelChecker sas/HybridModel sas/HybridSimulator sas/Simulation capi/gensas sas/SasComputation sas/SasResult sas/SasResultMat io/Mat5Writer io/CaseFile io/MatPsatDataRW \
-util/AbstractCheCalculator util/CheCompUtil util/CheState io/CheDataFormat io/CheIoUtil"
+# Library sources the solver tests depend on (no power flow, no PSAT/MAT input); the list is shared with
+# scripts/build_shared_lib.sh.
+SOURCES="$(tr '\n' ' ' < scripts/solver_sources.txt)"
 
 mkdir -p "${BUILD_DIR}/obj" "${BUILD_DIR}/bin"
 

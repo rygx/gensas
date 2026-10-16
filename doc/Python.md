@@ -20,6 +20,7 @@ result.termination          # None, or {"time": ..., "message": ...} if terminat
 ```
 
 * A job is the dictionary form of a [job file](JobFormat.md), a JSON string, or the path of a job file (then relative paths resolve against that file; for a dictionary or string use `base_dir=`).
+* `gensas.version()` and `gensas.api_version()` give the version text and the C interface version of the loaded library.
 * `gensas.Simulation(job)` gives control: `run(progress)` returns the result, `write("json" | "csv" | "mat", path)` writes the last result, `warnings` lists adjusted options, `close()` (or a `with` block) frees the handle.
 * `progress(time, end_time)` is called after each solution segment; return `True` to cancel (`gensas.Cancelled` is raised). An exception raised in the callback stops the run and is re-raised.
 * `sim.check()` parses and checks the model without running it and returns a list of `Diagnostic` objects (`severity` "error" or "warning", `line`, `column`, `message`, `source`; `as_dict()` for JSON); an empty list means the model is fine. `sim.diagnostics` gives the same for the last `run()` or `check()`, and a `GenSASError` raised for a bad model carries them in its `diagnostics` attribute.

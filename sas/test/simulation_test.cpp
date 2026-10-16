@@ -304,6 +304,122 @@ static void testModelInfo() {
 	CHECK(bad.hasModelInfo()); // the model was read, so the editor can still list its variables
 }
 
+static void testOverrides() {
+	const char *src =
+		"model P\n  parameter Real k = 1;\n  parameter Real k2 = 2 * k;\n  constant Real c = 3;\n"
+		"  parameter Integer n = 2;\n  Real x(start = 1);\n  Real v[2](each start = 0.5);\nequation\n"
+		"  der(x) = -k2 * x;\n  for i in 1:2 loop\n    der(v[i]) = -v[i];\n  end for;\nend P;\n";
+	// the unchanged model: x = exp(-2 t)
+	{
+		Simulation sim(sourceJob(src, 1.0));
+		CHECK(sim.run());
+		CHECK_NEAR(lastValue(sim.result(), "x"), std::exp(-2.0), 1e-4);
+	}
+	// k2 = 2 * k follows the new k; a start value of x and of one array element
+	{
+		ModelicaJob job = sourceJob(src, 1.0);
+		job.parameters["k"] = 3.0;
+		job.start["x"] = 2.0;
+		job.start["v[2]"] = 4.0;
+		Simulation sim(job);
+		CHECK(sim.check());
+		CHECK_NEAR(sim.modelInfo().parameters[1].value, 6.0, 1e-12);
+		CHECK(sim.run());
+		CHECK_NEAR(lastValue(sim.result(), "x"), 2.0 * std::exp(-6.0), 1e-4);
+		CHECK_NEAR(lastValue(sim.result(), "v[1]"), 0.5 * std::exp(-1.0), 1e-4);
+		CHECK_NEAR(lastValue(sim.result(), "v[2]"), 4.0 * std::exp(-1.0), 1e-4);
+	}
+	// an array name sets every element
+	{
+		ModelicaJob job = sourceJob(src, 1.0);
+		job.start["v"] = 2.0;
+		Simulation sim(job);
+		CHECK(sim.run());
+		CHECK_NEAR(lastValue(sim.result(), "v[1]"), 2.0 * std::exp(-1.0), 1e-4);
+		CHECK_NEAR(lastValue(sim.result(), "v[2]"), 2.0 * std::exp(-1.0), 1e-4);
+	}
+	// mistakes are diagnostics that name the key
+	struct Bad {
+		const char *group, *name;
+		double value;
+		const char *expect;
+	};
+	const Bad bad[] = {
+		{"parameters", "nope", 1.0, "parameters.nope: the model has no such parameter"},
+		{"start", "nope", 1.0, "start.nope: the model has no such variable"},
+		{"parameters", "x", 1.0, "'x' is not a parameter"},
+		{"parameters", "c", 1.0, "'c' is a constant"},
+		{"start", "c", 1.0, "'c' is a constant"},
+		{"start", "k", 1.0, "'k' is a parameter"},
+		{"parameters", "n", 2.5, "needs a whole number"},
+	};
+	for (const Bad &b : bad) {
+		ModelicaJob job = sourceJob(src, 1.0);
+		(std::string(b.group) == "parameters" ? job.parameters : job.start)[b.name] = b.value;
+		Simulation sim(job);
+		CHECK(!sim.check());
+		CHECK(sim.error().find(b.expect) != std::string::npos);
+		bool found = false;
+		for (const Diagnostic &d : sim.diagnostics()) {
+			found = found || d.message.find(b.expect) != std::string::npos;
+		}
+		CHECK(found);
+	}
+	// a Boolean is 0 or 1; a wrong array override gives one message, not one per element
+	{
+		ModelicaJob job = sourceJob("model B\n  parameter Boolean on = true;\n  Real v[50](each start = 1);\nequation\n  for i in 1:50 loop\n    der(v[i]) = if on then -v[i] else 0;\n  end for;\nend B;\n", 1.0);
+		job.parameters["on"] = 2.0;
+		Simulation sim(job);
+		CHECK(!sim.check());
+		CHECK(sim.error().find("Boolean and must be 0 or 1") != std::string::npos);
+		job.parameters.clear();
+		job.parameters["v"] = 1.0;
+		Simulation arr(job);
+		CHECK(!arr.check());
+		size_t messages = 0;
+		for (const Diagnostic &d : arr.diagnostics()) {
+			messages += d.message.find("'v' is not a parameter") != std::string::npos ? 1 : 0;
+		}
+		CHECK_EQ(messages, (size_t)1);
+	}
+	// a parameter without a value in the text can be given one by the job
+	{
+		ModelicaJob job = sourceJob("model Q\n  parameter Real a;\n  Real x(start = 1);\nequation\n  der(x) = -a * x;\nend Q;\n", 1.0);
+		Simulation without(job);
+		CHECK(!without.check());
+		job.parameters["a"] = 1.0;
+		Simulation with(job);
+		CHECK(with.run());
+		CHECK_NEAR(lastValue(with.result(), "x"), std::exp(-1.0), 1e-4);
+	}
+	// an array parameter without values needs every element
+	{
+		ModelicaJob job = sourceJob("model R\n  parameter Real p[2];\n  Real x(start = 1);\nequation\n  der(x) = -(p[1] + p[2]) * x;\nend R;\n", 1.0);
+		job.parameters["p[2]"] = 1.0;
+		Simulation partial(job);
+		CHECK(!partial.check());
+		job.parameters["p[1]"] = 0.5;
+		Simulation all(job);
+		CHECK(all.run());
+		CHECK_NEAR(lastValue(all.result(), "x"), std::exp(-1.5), 1e-4);
+	}
+}
+
+static void testParseJobOverrides() {
+	ModelicaJob job;
+	std::string err;
+	const std::string head = "{\"gensas\":{\"format\":\"job\",\"version\":1},\"kind\":\"modelica\",";
+	CHECK(parseModelicaJob(head + "\"model\":{\"source\":\"m\",\"parameters\":{\"k\":2.5,\"flag\":true},\"start\":{\"x[1]\":-1}}}", "", job, err));
+	CHECK_EQ(job.parameters.size(), (size_t)2);
+	CHECK_NEAR(job.parameters["k"], 2.5, 0.0);
+	CHECK_NEAR(job.parameters["flag"], 1.0, 0.0);
+	CHECK_NEAR(job.start["x[1]"], -1.0, 0.0);
+	CHECK(!parseModelicaJob(head + "\"model\":{\"source\":\"m\",\"parameters\":{\"k\":\"two\"}}}", "", job, err));
+	CHECK(err.find("model.parameters.k: expected a number") != std::string::npos);
+	CHECK(!parseModelicaJob(head + "\"model\":{\"source\":\"m\",\"start\":[1]}}", "", job, err));
+	CHECK(err.find("model.start") != std::string::npos);
+}
+
 static void testDiagnostics() {
 	// a good model: no diagnostics, and it can be run afterwards
 	{
@@ -378,6 +494,8 @@ int main() {
 	testProgressAndCancel();
 	testLimitsAreWarnings();
 	testParseJob();
+	testParseJobOverrides();
+	testOverrides();
 	testWriteResult();
 	return sastest::finish("simulation_test");
 }

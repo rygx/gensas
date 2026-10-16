@@ -31,6 +31,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -66,6 +67,12 @@ namespace che {
 			std::map<std::string, std::vector<int>> arrayDims;
 			// Functions defined in the source, inlined at their calls once the model has been read.
 			std::map<std::string, std::shared_ptr<UserFunction>> functions;
+			// Values that replace those written in the model: parameter values and start values, by name
+			// ("k", or "x[2]" for an array element; an array name sets all its elements). The parser
+			// applies them while it reads the declarations, so parameters computed from them follow.
+			std::map<std::string, double> parameterOverrides, startOverrides;
+			// The keys of the two maps that matched a declaration.
+			std::set<std::string> usedOverrides;
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
 			// Every error and warning, also when `diag` is null.

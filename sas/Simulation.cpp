@@ -99,6 +99,30 @@ namespace che {
 				return true;
 			}
 
+			// An object of name -> number (or true/false).
+			bool getValueMap(const Json::Value &obj, const string &path, const char *key, map<string, double> &out, string &error) {
+				if (!obj.isMember(key)) {
+					return true;
+				}
+				const Json::Value &m = obj[key];
+				if (!m.isObject()) {
+					error = path + "." + key + ": expected an object that maps names to numbers";
+					return false;
+				}
+				for (const string &name : m.getMemberNames()) {
+					const Json::Value &v = m[name];
+					if (v.isBool()) {
+						out[name] = v.asBool() ? 1.0 : 0.0;
+					} else if (v.isNumeric() && std::isfinite(v.asDouble())) {
+						out[name] = v.asDouble();
+					} else {
+						error = path + "." + key + "." + name + ": expected a number";
+						return false;
+					}
+				}
+				return true;
+			}
+
 			bool getString(const Json::Value &obj, const string &path, const char *key, string &out, string &error) {
 				if (!obj.isMember(key)) {
 					return true;
@@ -173,7 +197,10 @@ namespace che {
 				return false;
 			}
 			const Json::Value &model = root["model"];
-			if (!checkKeys(model, "model", {"file", "source", "piecewise", "smoothEps"}, error)) {
+			if (!checkKeys(model, "model", {"file", "source", "piecewise", "smoothEps", "parameters", "start"}, error)) {
+				return false;
+			}
+			if (!getValueMap(model, "model", "parameters", out.parameters, error) || !getValueMap(model, "model", "start", out.start, error)) {
 				return false;
 			}
 			string file, source, piecewise;
@@ -469,7 +496,26 @@ namespace che {
 			}
 			parser.currentModel = parser.pool.createNewTopModel();
 			parser.currentModel->diag = &parseMessages;
+			parser.parameterOverrides = jobData.parameters;
+			parser.startOverrides = jobData.start;
 			parseSingleSasModel(&parser);
+			if (parser.errCount == 0) {
+				// every replacement must have found its declaration
+				for (int pass = 0; pass < 2; pass++) {
+					const string what = pass == 0 ? "parameters" : "start";
+					for (const auto &kv : pass == 0 ? jobData.parameters : jobData.start) {
+						if (parser.usedOverrides.count(what + "." + kv.first) == 0) {
+							const string msg = what + "." + kv.first + ": the model has no such " + (pass == 0 ? "parameter" : "variable");
+							Diagnostic d;
+							d.message = msg;
+							d.source = "job";
+							parser.diagnostics.push_back(d);
+							parser.errCount++;
+							parseMessages << msg << "\n";
+						}
+					}
+				}
+			}
 			parser.diag = &cerr; // parseMessages ends with this scope, the model may live longer
 			diags = parser.diagnostics;
 			if (parser.currentModel != nullptr) {

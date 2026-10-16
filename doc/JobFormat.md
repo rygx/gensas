@@ -25,6 +25,8 @@ bazel-bin/app/app run job.json [--set key=value ...] [--validate]
 | `model.file` or `model.source` | a Modelica file, or the model text itself; exactly one of them | required |
 | `model.piecewise` | `"events"` (exact) or `"smooth"` for `abs`, `min`, `max`, `sign` | `"events"` |
 | `model.smoothEps` | smoothing parameter, positive | 1e-6 |
+| `model.parameters` | replaces parameter values of the model text: an object `{"k": 3, "n": 2}`; see below | none |
+| `model.start` | replaces start values: `{"x": 2, "v[2]": 4}` | none |
 | `solver.endTime` | simulated time | 10 |
 | `solver.segment` | length of one solver segment | 1.0 |
 | `solver.level` | order of the semi-analytical solution, integer 1 to 1000 | 15 |
@@ -32,6 +34,8 @@ bazel-bin/app/app run job.json [--set key=value ...] [--validate]
 | `solver.errorTol` | error tolerance of the equations | 1e-5 |
 | `output.step` | target spacing of the samples in the result; the last sample is always at the end time | 0.01 |
 | `output.json`, `output.csv`, `output.mat` | result files to write (see [Result format](ResultFormat.md)); each is optional | none |
+
+Changing values without editing the model: `model.parameters` and `model.start` give names and numbers (booleans count as 1 and 0). A name is a scalar (`k`), an array element (`x[2]`) or a whole array (`x`, which sets every element). The replacement is applied where the model declares the name, so a parameter that is computed from a changed one (`parameter Real k2 = 2 * k;`) follows it. A parameter that has no value in the text gets one this way. A name the model does not have, a `constant`, a parameter listed under `start`, a variable listed under `parameters`, or a fractional value for an Integer is an error that names the key. On the command line, `--set model.parameters.k=3` does the same.
 
 Rules:
 

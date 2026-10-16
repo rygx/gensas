@@ -874,6 +874,47 @@ namespace che {
 			}
 
 			// One variable (or array) of a declaration: name, dimensions, modification, binding and description.
+			// Replaces values by those the job asks for (SasModelParser::parameterOverrides/startOverrides).
+			void applyOverrides(SasModelParser *parser, const vector<shared_ptr<IdPearl>> &elems, const string &name, bool isParam, bool isConstant, int line) {
+				if (parser->parameterOverrides.empty() && parser->startOverrides.empty()) {
+					return;
+				}
+				for (const shared_ptr<IdPearl> &el : elems) {
+					const string elemName = (const char *)el->str;
+					for (int pass = 0; pass < 2; pass++) {
+						const map<string, double> &table = pass == 0 ? parser->parameterOverrides : parser->startOverrides;
+						const char *what = pass == 0 ? "parameters" : "start";
+						auto hit = table.find(elemName);
+						if (hit == table.end()) {
+							hit = table.find(name);
+						}
+						if (hit == table.end()) {
+							continue;
+						}
+						parser->usedOverrides.insert(string(what) + "." + hit->first);
+						const double v = hit->second;
+						bool bad = true;
+						if (isConstant) {
+							parser->error("Line %d: %s.%s: '%s' is a constant and cannot be changed.", line, what, hit->first.c_str(), name.c_str());
+						} else if (pass == 0 && !isParam) {
+							parser->error("Line %d: %s.%s: '%s' is not a parameter; use start to change a start value.", line, what, hit->first.c_str(), name.c_str());
+						} else if (pass == 1 && isParam) {
+							parser->error("Line %d: %s.%s: '%s' is a parameter; give its value under parameters.", line, what, hit->first.c_str(), name.c_str());
+						} else if (el->ty == TY_BOOL && v != 0.0 && v != 1.0) {
+							parser->error("Line %d: %s.%s: '%s' is a Boolean and must be 0 or 1 (false or true).", line, what, hit->first.c_str(), name.c_str());
+						} else if (el->ty == TY_INT && v != std::floor(v)) {
+							parser->error("Line %d: %s.%s: '%s' is an Integer and needs a whole number.", line, what, hit->first.c_str(), name.c_str());
+						} else {
+							setValue(el.get(), v);
+							bad = false;
+						}
+						if (bad) {
+							return; // one message per declaration, not one per array element
+						}
+					}
+				}
+			}
+
 			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isConstant, bool isDiscrete, bool isInput, const vector<int> &typeDims) {
 				shared_ptr<IdPearl> var = parser->currentId;
 				const string name = (const char *)var->str;
@@ -958,10 +999,22 @@ namespace che {
 					}
 					freeAst(value);
 				} else if (isParam) {
-					parser->error("Parameter '%s' has no value.", name.c_str());
+					// a parameter without a binding needs a value from the job, for every element
+					bool missing = parser->parameterOverrides.count(name) == 0;
+					if (missing) {
+						missing = elems.empty();
+						for (const shared_ptr<IdPearl> &el : elems) {
+							missing = missing || parser->parameterOverrides.count((const char *)el->str) == 0;
+						}
+					}
+					if (missing) {
+						parser->error("Parameter '%s' has no value.", name.c_str());
+					}
 				} else if (isInput) {
 					parser->error("Input '%s' has no value; give it a binding, for example `input Real u = 1;`.", name.c_str());
 				}
+
+				applyOverrides(parser, elems, name, isParam, isConstant, line);
 
 				if (parser->currentToken == TK_STRING) {
 					for (const shared_ptr<IdPearl> &el : elems) {

@@ -32,6 +32,7 @@
 #include "sas/SasResult.h"
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -83,6 +84,10 @@ namespace che {
 			// The model: a file, or the Modelica text itself when `modelFile` is empty.
 			std::string modelFile;
 			std::string modelSource;
+			// Replacements for values in the model text: parameter values and start values, by name ("k",
+			// "x[2]"; an array name sets all its elements). Booleans are 0 and 1.
+			std::map<std::string, double> parameters;
+			std::map<std::string, double> start;
 
 			SasComputationOptions options;
 			PiecewiseMode piecewise = PW_EVENTS;

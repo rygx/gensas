@@ -22,6 +22,7 @@ end Name;
 ## Declarations
 
 * Types `Real`, `Integer` and `Boolean`, with the prefixes `parameter`, `constant`, `discrete`, `input` and `output`. Several variables can share a declaration (`Real x(start = 1), z;`).
+* Types of your own: `type Volt = Real(unit = "V", start = 5);`, then `Volt u;` or `parameter Volt limit = 12;`. A type is made from `Real`, `Integer`, `Boolean` or a type defined before it (`type Level = Volt(start = 2);`), can stand in a package (`Phys.Rate k;`) and may stand before or after the model. Its modifications are applied to every variable of the type, and the modifications written at the variable come after and win. Array types (`type V3 = Real[3];`) are not supported; write the size at the variable (`Volt u[3];`).
 * Modifications: `start` (a constant expression; it is the initial value of a state or the starting guess of an algebraic variable), `unit` and `fixed`. Other attributes are ignored with a warning.
 * Bindings: `parameter Real p = 2*k;` (a constant expression, which may use parameters declared earlier) and `Real y = expr;` (the equation `y = expr`, which may use variables declared later). `input` needs a binding. Bindings on `discrete`, `Integer` and `Boolean` variables are not supported; assign them in a `when` equation.
 * Arrays are sets of scalar variables: `Real x[3];`, `Real[2,3] A;`, `parameter Real k[3] = {1, 2, 3};`, `Real x[n](each start = 1)` or `start = {1, 2, 3}`. Subscripts are resolved when the model is read, so they must be constants: numbers, parameters declared earlier or loop variables (`x[i+1]`). Elements are named `x[2]` and `A[1,3]` in the results. `size(x, k)`, `sum(x)` and `prod(x)` are available.
@@ -54,7 +55,7 @@ equation
 end Fall;
 ```
 
-A `package` holds `constant`s and `function`s (and packages nested in it), used with qualified names such as `Phys.g` and `Phys.drag(v)`. A constant is a number or a constant expression of earlier constants of the same package. Functions of a package can call each other without the prefix. Not supported: types, models and `import` in a package.
+A `package` holds `constant`s and `function`s (and packages nested in it), used with qualified names such as `Phys.g` and `Phys.drag(v)`. A constant is a number or a constant expression of earlier constants of the same package. Functions of a package can call each other without the prefix. A package can also hold types (see Declarations). Not supported: models and `import` in a package.
 
 ## Algorithm sections
 

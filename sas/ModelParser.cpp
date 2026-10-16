@@ -876,6 +876,47 @@ namespace che {
 			// Declarations
 			// ---------------------------------------------------------------------
 
+			ParserState saveState(const SasModelParser *parser) {
+				ParserState s;
+				s.cursur = parser->reader.cursur;
+				s.lineHead = parser->reader.lineHead;
+				s.line = parser->reader.line;
+				s.value = parser->value;
+				s.coord = parser->coord;
+				s.prevCoord = parser->prevCoord;
+				s.token = parser->currentToken;
+				s.id = parser->currentId;
+				return s;
+			}
+
+			void restoreState(SasModelParser *parser, const ParserState &s) {
+				parser->reader.cursur = s.cursur;
+				parser->reader.lineHead = s.lineHead;
+				parser->reader.line = s.line;
+				parser->value = s.value;
+				parser->coord = s.coord;
+				parser->prevCoord = s.prevCoord;
+				parser->currentToken = s.token;
+				parser->currentId = s.id;
+			}
+
+			// A type made with `type`, looked up from inside the package `scope` ("A.B." or empty): first in the
+			// package itself, then in the ones around it, then by the full name.
+			const SasModelParser::TypeAlias *findTypeAlias(const SasModelParser *parser, string scope, const string &name) {
+				for (;;) {
+					const auto it = parser->typeAliases.find(scope + name);
+					if (it != parser->typeAliases.end()) {
+						return &it->second;
+					}
+					if (scope.empty()) {
+						return NULL;
+					}
+					scope.pop_back(); // the trailing dot
+					const size_t dot = scope.rfind('.');
+					scope = dot == string::npos ? string() : scope.substr(0, dot + 1);
+				}
+			}
+
 			// Parses  ( [each] name = value {, [each] name = value} )  after a variable name.
 			// `start` becomes the initial value of every element (an array literal gives one value per
 			// element); `unit` is stored; other attributes are parsed and ignored with a warning.
@@ -1031,7 +1072,7 @@ namespace che {
 				}
 			}
 
-			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isConstant, bool isDiscrete, bool isInput, const vector<int> &typeDims) {
+			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isConstant, bool isDiscrete, bool isInput, const vector<int> &typeDims, const vector<const ParserState *> &aliasMods) {
 				shared_ptr<IdPearl> var = parser->currentId;
 				const string name = (const char *)var->str;
 				const int line = parser->coord.line;
@@ -1073,6 +1114,13 @@ namespace che {
 					el->isInput = isInput;
 				}
 
+				// the modifications of the type come first, then those written at the variable
+				for (const ParserState *mods : aliasMods) {
+					const ParserState here = saveState(parser);
+					restoreState(parser, *mods);
+					parseModification(parser, elems, name);
+					restoreState(parser, here);
+				}
 				if (parser->currentToken == TK_LPAREN) {
 					parseModification(parser, elems, name);
 				}
@@ -1159,18 +1207,48 @@ namespace che {
 					getNextToken(parser);
 				}
 				Type ty = TY_REAL;
+				vector<const ParserState *> aliasMods; // from the innermost type to the outermost
+				bool builtin = true;
 				if (parser->currentToken == TK_K_REAL) {
 					ty = TY_REAL;
 				} else if (parser->currentToken == TK_K_INTEGER) {
 					ty = TY_INT;
 				} else if (parser->currentToken == TK_K_BOOLEAN) {
 					ty = TY_BOOL;
+				} else if (parser->currentToken == TK_ID) {
+					// a type made with `type T = Real(...)`, possibly qualified (Pkg.T)
+					string typeName = (const char *)parser->currentId->str;
+					const int typeLine = parser->coord.line;
+					getNextToken(parser);
+					while (parser->currentToken == TK_DOT) {
+						getNextToken(parser);
+						if (parser->currentToken != TK_ID) {
+							break;
+						}
+						typeName += string(".") + (const char *)parser->currentId->str;
+						getNextToken(parser);
+					}
+					const SasModelParser::TypeAlias *alias = findTypeAlias(parser, string(), typeName);
+					if (alias == NULL) {
+						parser->error("Line %d: unknown type '%s'.", typeLine, typeName.c_str());
+						skipStatement(parser);
+						return;
+					}
+					builtin = false;
+					ty = alias->ty;
+					for (const SasModelParser::TypeAlias *a = alias; a != NULL; a = a->base.empty() ? NULL : findTypeAlias(parser, string(), a->base)) {
+						if (a->hasMods) {
+							aliasMods.insert(aliasMods.begin(), &a->mods);
+						}
+					}
 				} else {
-					parser->error("Expect a type (Real, Integer or Boolean).");
+					parser->error("Expect a type (Real, Integer, Boolean or a type defined in the source).");
 					skipStatement(parser);
 					return;
 				}
-				getNextToken(parser);
+				if (builtin) {
+					getNextToken(parser);
+				}
 				vector<int> typeDims; // Real[3] x;
 				if (parser->currentToken == TK_LBRACKET) {
 					parseDims(parser, typeDims);
@@ -1181,7 +1259,7 @@ namespace che {
 						skipStatement(parser);
 						return;
 					}
-					parseDeclarator(parser, ty, isParam, isConstant, isDiscrete, isInput, typeDims);
+					parseDeclarator(parser, ty, isParam, isConstant, isDiscrete, isInput, typeDims, aliasMods);
 					if (parser->currentToken != TK_COMMA) {
 						break;
 					}
@@ -2096,41 +2174,6 @@ namespace che {
 			// first; the classes that are not models are read, then the model to simulate.
 			// ---------------------------------------------------------------------
 
-			// Where the scanner is, to come back to it later.
-			struct ParserState {
-				uchar *cursur = NULL;
-				uchar *lineHead = NULL;
-				int line = 0;
-				TokenValue value;
-				Coord coord, prevCoord;
-				int token = 0;
-				shared_ptr<IdPearl> id;
-			};
-
-			ParserState saveState(const SasModelParser *parser) {
-				ParserState s;
-				s.cursur = parser->reader.cursur;
-				s.lineHead = parser->reader.lineHead;
-				s.line = parser->reader.line;
-				s.value = parser->value;
-				s.coord = parser->coord;
-				s.prevCoord = parser->prevCoord;
-				s.token = parser->currentToken;
-				s.id = parser->currentId;
-				return s;
-			}
-
-			void restoreState(SasModelParser *parser, const ParserState &s) {
-				parser->reader.cursur = s.cursur;
-				parser->reader.lineHead = s.lineHead;
-				parser->reader.line = s.line;
-				parser->value = s.value;
-				parser->coord = s.coord;
-				parser->prevCoord = s.prevCoord;
-				parser->currentToken = s.token;
-				parser->currentId = s.id;
-			}
-
 			struct ClassSpan {
 				int kind = 0; // the keyword: TK_K_MDL, TK_K_FUNCTION, TK_K_PACKAGE, ...
 				string name;
@@ -2140,6 +2183,22 @@ namespace che {
 
 			bool isClassKeyword(int tok) {
 				return tok == TK_K_MDL || tok == TK_K_FUNCTION || tok == TK_K_PACKAGE || tok == TK_K_RECORD || tok == TK_K_CONNECTOR || tok == TK_K_BLOCK || tok == TK_K_CLASS || tok == TK_K_TYPE;
+			}
+
+			// From the `=` of a short class definition (type T = Real(...);) to just after its `;`.
+			void skipShortClass(SasModelParser *parser) {
+				int depth = 0;
+				while (parser->currentToken != TK_EOF) {
+					const int tok = parser->currentToken;
+					getNextToken(parser);
+					if (tok == TK_LPAREN || tok == TK_LBRACE || tok == TK_LBRACKET) {
+						depth++;
+					} else if (tok == TK_RPAREN || tok == TK_RBRACE || tok == TK_RBRACKET) {
+						depth--;
+					} else if (tok == TK_SEMICOLON && depth <= 0) {
+						return;
+					}
+				}
 			}
 
 			bool isClassPrefix(int tok) {
@@ -2180,8 +2239,12 @@ namespace che {
 							if (open.empty()) {
 								spans.push_back(span);
 							}
-							open.push_back(span.name);
 							getNextToken(parser);
+							if (parser->currentToken == TK_EQN) { // a short class has no `end`
+								skipShortClass(parser);
+							} else {
+								open.push_back(span.name);
+							}
 						}
 					} else if (tok == TK_K_END) {
 						getNextToken(parser);
@@ -2213,8 +2276,16 @@ namespace che {
 					const int tok = parser->currentToken;
 					getNextToken(parser);
 					if (isClassKeyword(tok) && parser->currentToken == TK_ID) {
-						open.push_back((const char *)parser->currentId->str);
+						const string name = (const char *)parser->currentId->str;
 						getNextToken(parser);
+						if (parser->currentToken == TK_EQN) { // a short class has no `end`
+							skipShortClass(parser);
+							if (open.empty()) {
+								break;
+							}
+						} else {
+							open.push_back(name);
+						}
 					} else if (tok == TK_K_END && parser->currentToken == TK_ID && !open.empty() && open.back() == (const char *)parser->currentId->str) {
 						open.pop_back();
 						getNextToken(parser);
@@ -2293,6 +2364,88 @@ namespace che {
 				expect(parser, TK_SEMICOLON);
 			}
 
+			// type T = Real(unit = "V", start = 1) "description";   `scope` is "P." inside package P.
+			void parseTypeAlias(SasModelParser *parser, const string &scope) {
+				const int line = parser->coord.line;
+				getNextToken(parser); // consume `type`
+				if (parser->currentToken != TK_ID) {
+					parser->error("Line %d: expect a type name.", line);
+					skipShortClass(parser);
+					return;
+				}
+				const string name = (const char *)parser->currentId->str;
+				getNextToken(parser);
+				if (parser->currentToken != TK_EQN) {
+					parser->error("Line %d: expect '=' after the type name '%s'; only types made from Real, Integer or Boolean can be defined.", line, name.c_str());
+					skipShortClass(parser);
+					return;
+				}
+				getNextToken(parser);
+				SasModelParser::TypeAlias alias;
+				if (parser->currentToken == TK_K_REAL || parser->currentToken == TK_K_INTEGER || parser->currentToken == TK_K_BOOLEAN) {
+					alias.ty = parser->currentToken == TK_K_INTEGER ? TY_INT : parser->currentToken == TK_K_BOOLEAN ? TY_BOOL
+																													: TY_REAL;
+					getNextToken(parser);
+				} else if (parser->currentToken == TK_ID) {
+					string baseName = (const char *)parser->currentId->str;
+					getNextToken(parser);
+					while (parser->currentToken == TK_DOT) {
+						getNextToken(parser);
+						if (parser->currentToken != TK_ID) {
+							break;
+						}
+						baseName += string(".") + (const char *)parser->currentId->str;
+						getNextToken(parser);
+					}
+					// the full name of the base, so that the declaration finds it from anywhere
+					string full = baseName;
+					for (string sc = scope; !sc.empty();) {
+						if (parser->typeAliases.count(sc + baseName) > 0) {
+							full = sc + baseName;
+							break;
+						}
+						sc.pop_back();
+						const size_t dot = sc.rfind('.');
+						sc = dot == string::npos ? string() : sc.substr(0, dot + 1);
+					}
+					const auto base = parser->typeAliases.find(full);
+					if (base == parser->typeAliases.end()) {
+						parser->error("Line %d: unknown type '%s' (a type must be defined before it is used).", line, baseName.c_str());
+						skipShortClass(parser);
+						return;
+					}
+					alias.ty = base->second.ty;
+					alias.base = full;
+				} else {
+					parser->error("Line %d: the type '%s' must be made from Real, Integer, Boolean or another defined type.", line, name.c_str());
+					skipShortClass(parser);
+					return;
+				}
+				if (parser->currentToken == TK_LBRACKET) {
+					parser->error("Line %d: array types are not supported ('%s'); put the size on the variable.", line, name.c_str());
+					skipShortClass(parser);
+					return;
+				}
+				if (parser->currentToken == TK_LPAREN) {
+					alias.hasMods = true;
+					alias.mods = saveState(parser);
+					const bool savedInject = parser->noInject;
+					parser->noInject = true; // the attribute names are not model symbols
+					skipParenthesized(parser);
+					parser->noInject = savedInject;
+				}
+				if (parser->currentToken == TK_STRING) {
+					getNextToken(parser);
+				}
+				if (parser->currentToken == TK_K_ANNOTATION) {
+					skipAnnotation(parser);
+				}
+				if (!parser->typeAliases.insert(make_pair(scope + name, alias)).second) {
+					parser->error("Line %d: the type '%s%s' is defined twice.", line, scope.c_str(), name.c_str());
+				}
+				expect(parser, TK_SEMICOLON);
+			}
+
 			// package P  constant ...;  function ... end f;  package Q ... end Q;  end P;
 			void parsePackage(SasModelParser *parser, const string &prefix) {
 				const int line = parser->coord.line;
@@ -2323,14 +2476,16 @@ namespace che {
 						parseFunction(parser, scope);
 					} else if (tok == TK_K_PACKAGE) {
 						parsePackage(parser, scope);
+					} else if (tok == TK_K_TYPE) {
+						parseTypeAlias(parser, scope);
 					} else if (isClassKeyword(tok) || isClassPrefix(tok)) {
-						parser->error("Line %d: a package can contain constants, functions and packages only.", parser->coord.line);
+						parser->error("Line %d: a package can contain constants, types, functions and packages only.", parser->coord.line);
 						while (isClassPrefix(parser->currentToken)) {
 							getNextToken(parser);
 						}
 						skipClass(parser);
 					} else {
-						parser->error("Line %d: a package can contain constants, functions and packages only.", parser->coord.line);
+						parser->error("Line %d: a package can contain constants, types, functions and packages only.", parser->coord.line);
 						skipStatement(parser);
 					}
 				}
@@ -2390,6 +2545,8 @@ namespace che {
 					parseFunction(parser);
 				} else if (c.kind == TK_K_PACKAGE) {
 					parsePackage(parser, string());
+				} else if (c.kind == TK_K_TYPE) {
+					parseTypeAlias(parser, string());
 				} else {
 					parser->error("Line %d: '%s' classes are not supported yet.", c.line, Lexer::getInstance().tokenStrings[c.kind]);
 				}
@@ -2430,7 +2587,7 @@ namespace che {
 					getNextToken(parser);
 				}
 
-				while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
+				while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_ID || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
 					if (parser->currentToken == TK_K_ANNOTATION) {
 						skipAnnotation(parser);
 						expect(parser, TK_SEMICOLON);

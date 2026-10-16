@@ -65,6 +65,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "503": { $ref: "#/components/responses/Busy" }
 
   /runs:
@@ -90,7 +91,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "413": { $ref: "#/components/responses/TooLarge" }
         "429":
-          description: too many runs are waiting or running
+          description: too many runs are waiting or running (code too_many_runs), or this address has started too many checks and runs in the last minute (code rate_limited, with Retry-After)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -238,6 +239,15 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: this address has started too many checks and runs in the last minute
+      headers:
+        Retry-After:
+          description: seconds to wait
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Busy:
       description: no worker is available for the check within the time limit
       content:
@@ -253,7 +263,7 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, description: "machine-readable, for example invalid_request, unauthorized, not_found, too_large, busy, no_result" }
+            code: { type: string, description: "machine-readable, for example invalid_request, unauthorized, not_found, too_large, busy, rate_limited, no_result" }
             message: { type: string }
 
     Version:

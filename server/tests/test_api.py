@@ -218,6 +218,22 @@ def test_queue_limit_gives_429():
         validate("Error", r.json())
 
 
+def test_rate_limit_per_client_address():
+    with make_client(rate_limit=3) as c:
+        for _ in range(3):
+            assert c.post("/check", json={"source": DECAY}).status_code == 200
+        r = c.post("/check", json={"source": DECAY})
+        assert r.status_code == 429 and r.json()["error"]["code"] == "rate_limited"
+        assert int(r.headers["Retry-After"]) >= 1
+        validate("Error", r.json())
+        assert c.post("/runs", json={"model": {"source": DECAY}}).status_code == 429  # checks and runs share the allowance
+        assert c.get("/examples").status_code == 200  # reading is not limited
+    with make_client(rate_limit=1, trust_proxy=True) as c:  # behind a proxy the address comes from the header
+        assert c.post("/check", json={"source": DECAY}, headers={"X-Forwarded-For": "10.0.0.1"}).status_code == 200
+        assert c.post("/check", json={"source": DECAY}, headers={"X-Forwarded-For": "10.0.0.2"}).status_code == 200
+        assert c.post("/check", json={"source": DECAY}, headers={"X-Forwarded-For": "spoofed, 10.0.0.1"}).status_code == 429
+
+
 def test_run_timeout():
     with make_client(run_timeout=0.01) as c:
         done = wait_for(c, start(c)["id"])
@@ -280,3 +296,13 @@ def test_finished_runs_are_collected():
         start(c)  # creating a run collects the old ones
         known = {r["id"] for r in c.get("/runs").json()}
         assert ids[0] not in known and ids[-1] in known
+
+
+def test_settings_from_the_environment():
+    from gensas_server.config import from_env
+
+    assert from_env({"PORT": "8080"}).port == 8080  # the variable of Cloud Run
+    assert from_env({"PORT": "8080", "GENSAS_PORT": "9000"}).port == 9000
+    cfg = from_env({"GENSAS_RATE_LIMIT": "30", "GENSAS_TRUST_PROXY": "true"})
+    assert cfg.rate_limit == 30 and cfg.trust_proxy
+    assert from_env({}).rate_limit == 0 and not from_env({}).trust_proxy

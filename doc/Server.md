@@ -12,7 +12,7 @@ cd server && python -m gensas_server --port 8765
 curl http://127.0.0.1:8765/version
 ```
 
-By default it listens on `127.0.0.1` only. To serve other machines use `--host 0.0.0.0` **and a token** (`--token SECRET` or `GENSAS_TOKEN`): every request except `GET /version` then needs `Authorization: Bearer SECRET`. Put the server behind a TLS proxy when it is reachable from the internet.
+By default it listens on `127.0.0.1` only. To serve other machines use `--host 0.0.0.0` **and a token** (`--token SECRET` or `GENSAS_TOKEN`): every request except `GET /version` then needs `Authorization: Bearer SECRET`. Put the server behind a TLS proxy when it is reachable from the internet. The [deployment guide](Deployment.md) covers the Docker image, a home network and Google Cloud.
 
 ## How it works
 
@@ -37,6 +37,9 @@ By default it listens on `127.0.0.1` only. To serve other machines use `--host 0
 | `--max-source-bytes` | `GENSAS_MAX_SOURCE_BYTES` | 200000 | largest model text |
 | | `GENSAS_MAX_KEPT_RUNS`, `GENSAS_RETENTION` | 50, 3600 | how many finished runs are kept and for how long |
 | `--work-dir` | `GENSAS_WORK_DIR` | a temporary directory | where results are stored |
+| `--rate-limit` | `GENSAS_RATE_LIMIT` | 0 (off) | checks and runs one client address may start per minute; more get 429 with `Retry-After` |
+| `--trust-proxy` | `GENSAS_TRUST_PROXY` | off | read the client address from `X-Forwarded-For` (behind a proxy you control) |
+| | `PORT` | | the port, when `GENSAS_PORT` is not set (Cloud Run) |
 
 The engine itself also limits what a job can ask for (end time at most 1000 s and so on, see the [job format](JobFormat.md)); values outside the limits are moved to the nearest limit and reported as `warnings` of the run.
 

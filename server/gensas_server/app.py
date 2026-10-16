@@ -3,6 +3,8 @@
 import asyncio
 import hmac
 import json
+import time
+from collections import deque
 from contextlib import asynccontextmanager
 from typing import Dict, Literal, Optional, Union
 
@@ -75,13 +77,13 @@ def build_job(model, solver=None, output=None):
     return job
 
 
-def _error(status, code, message):
-    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+def _error(status, code, message, headers=None):
+    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}}, headers=headers)
 
 
 class ApiError(Exception):
-    def __init__(self, status, code, message):
-        self.status, self.code, self.message = status, code, message
+    def __init__(self, status, code, message, headers=None):
+        self.status, self.code, self.message, self.headers = status, code, message, headers
 
 
 def create_app(config: Optional[Config] = None) -> FastAPI:
@@ -101,7 +103,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
 
     @app.exception_handler(ApiError)
     async def _api_error(request, exc):
-        return _error(exc.status, exc.code, exc.message)
+        return _error(exc.status, exc.code, exc.message, exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def _invalid(request, exc):
@@ -125,6 +127,33 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             raise ApiError(401, "unauthorized", "a valid bearer token is required")
 
     auth = [Depends(require_token)]
+
+    # a sliding window of the last minute for each client address
+    recent = {}
+
+    def client_address(request: Request):
+        if config.trust_proxy:
+            forwarded = request.headers.get("x-forwarded-for", "")
+            if forwarded:
+                return forwarded.split(",")[-1].strip()  # the address the proxy itself saw
+        return request.client.host if request.client else "unknown"
+
+    async def rate_limit(request: Request):  # on the event loop, so that `recent` needs no lock
+        if config.rate_limit <= 0:
+            return
+        now = time.monotonic()
+        if len(recent) > 10000:  # forget clients that have been quiet for a minute
+            for key in [k for k, v in recent.items() if not v or now - v[-1] > 60.0]:
+                del recent[key]
+        hits = recent.setdefault(client_address(request), deque())
+        while hits and now - hits[0] > 60.0:
+            hits.popleft()
+        if len(hits) >= config.rate_limit:
+            wait = int(60.0 - (now - hits[0])) + 1
+            raise ApiError(429, "rate_limited", "too many requests from this address; try again in %d s" % wait, {"Retry-After": str(wait)})
+        hits.append(now)
+
+    limited = [Depends(rate_limit)]
     if config.cors_origins or config.loopback:
         app.add_middleware(
             CORSMiddleware,
@@ -170,7 +199,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
     def examples():
         return EXAMPLES
 
-    @app.post("/check", dependencies=auth)
+    @app.post("/check", dependencies=auth + limited)
     async def check(spec: ModelSpec):
         check_size(spec)
         try:
@@ -178,7 +207,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
         except Busy as err:
             raise ApiError(503, "busy", str(err))
 
-    @app.post("/runs", status_code=202, dependencies=auth)
+    @app.post("/runs", status_code=202, dependencies=auth + limited)
     def create_run(req: RunRequest, response: Response):
         check_size(req.model)
         try:

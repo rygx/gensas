@@ -27,7 +27,7 @@ try:
 except ImportError:  # NumPy is optional
     _np = None
 
-__all__ = ["Simulation", "Result", "Diagnostic", "run", "GenSASError", "Cancelled", "library_path"]
+__all__ = ["Simulation", "Result", "Diagnostic", "run", "GenSASError", "Cancelled", "library_path", "version", "api_version"]
 
 _OK, _ERROR, _CANCELLED = 0, 1, 2
 _ERR_LEN = 1024
@@ -320,6 +320,16 @@ class Simulation:
             self.close()
         except Exception:
             pass
+
+
+def version():
+    """The version text of the shared library."""
+    return _text(_load().gensas_version())
+
+
+def api_version():
+    """The version number of the library's C interface."""
+    return _load().gensas_api_version()
 
 
 def run(job, base_dir=None, progress=None):

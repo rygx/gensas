@@ -79,6 +79,10 @@ class GenSASTest(unittest.TestCase):
             found = sim.check()
             self.assertIn("parameters.nope", found[0].message)
 
+    def test_versions(self):
+        self.assertTrue(gensas.version())
+        self.assertGreaterEqual(gensas.api_version(), 2)
+
     def test_decay(self):
         r = gensas.run(job(DECAY, 2.0))
         self.assertAlmostEqual(r.time[-1], 2.0, places=9)

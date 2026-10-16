@@ -67,6 +67,18 @@ class GenSASTest(unittest.TestCase):
             k = info["parameters"][0]
             self.assertEqual((k["name"], k["value"], k["unit"], k["constant"]), ("k", 2.0, "1/s", False))
 
+    def test_parameter_overrides(self):
+        src = "model P\n  parameter Real k = 1;\n  Real x(start = 1);\nequation\n  der(x) = -k * x;\nend P;\n"
+        job_json = job(src, 1.0)
+        job_json["model"]["parameters"] = {"k": 3}
+        job_json["model"]["start"] = {"x": 2}
+        r = gensas.run(job_json)
+        self.assertAlmostEqual(r.variables["x"][-1], 2 * math.exp(-3.0), places=4)
+        job_json["model"]["parameters"] = {"nope": 1}
+        with gensas.Simulation(job_json) as sim:
+            found = sim.check()
+            self.assertIn("parameters.nope", found[0].message)
+
     def test_decay(self):
         r = gensas.run(job(DECAY, 2.0))
         self.assertAlmostEqual(r.time[-1], 2.0, places=9)

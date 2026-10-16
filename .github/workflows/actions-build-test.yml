@@ -122,6 +122,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-make
+            mingw-w64-x86_64-python
       - name: Set up Bazelisk
         uses: bazelbuild/setup-bazelisk@v3
       - name: Configure Bazel caches
@@ -139,6 +140,12 @@ jobs:
       # //... skips the targets that are Linux/macOS-only (e.g. pcre).
       - run: bazel build //...
       - run: bazel test //...
+      # The py_test target is not built on Windows (Bazel has no Python interpreter there), so the
+      # Python interface is tested against gensas.dll directly, with the MSYS2 Python.
+      - name: Test the Python interface
+        run: |
+          export GENSAS_LIBRARY="$(cygpath -m "$(bazel info bazel-bin)")/capi/gensas.dll"
+          python -m unittest discover -s python/tests -v
       # Save even when the build failed so progress (e.g. finished dependency
       # builds) is not lost; main only, see the Linux job.
       - name: Save Bazel caches

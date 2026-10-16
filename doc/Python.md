@@ -25,4 +25,4 @@ result.termination          # None, or {"time": ..., "message": ...} if terminat
 * Errors raise `gensas.GenSASError` with the library's message (including the parser's messages for a bad model).
 * Several simulations may run in different threads at the same time.
 
-The library is found through the `GENSAS_LIBRARY` environment variable, next to the package, or in `bazel-bin/capi`. Build it with `bazel build //capi:libgensas.so` (`//capi:gensas.dll` on Windows). Tests: `bazel test //python:gensas_python_test` (Linux and macOS), or `GENSAS_LIBRARY=<path> python3 -m unittest discover -s python/tests`.
+The library is found through the `GENSAS_LIBRARY` environment variable, next to the package, or in `bazel-bin/capi`. Build it with `bazel build //capi:libgensas.so` (`//capi:gensas.dll` on Windows). Tests: `bazel test //python:gensas_python_test` (Linux and macOS), or `GENSAS_LIBRARY=<path> python3 -m unittest discover -s python/tests` (this is what the Windows CI job runs against `gensas.dll`).

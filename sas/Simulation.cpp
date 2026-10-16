@@ -197,14 +197,14 @@ namespace che {
 				return false;
 			}
 			const Json::Value &model = root["model"];
-			if (!checkKeys(model, "model", {"file", "source", "piecewise", "smoothEps", "parameters", "start"}, error)) {
+			if (!checkKeys(model, "model", {"file", "source", "className", "piecewise", "smoothEps", "parameters", "start"}, error)) {
 				return false;
 			}
 			if (!getValueMap(model, "model", "parameters", out.parameters, error) || !getValueMap(model, "model", "start", out.start, error)) {
 				return false;
 			}
 			string file, source, piecewise;
-			if (!getString(model, "model", "file", file, error) || !getString(model, "model", "source", source, error) || !getString(model, "model", "piecewise", piecewise, error) || !getNumber(model, "model", "smoothEps", out.smoothEps, error)) {
+			if (!getString(model, "model", "className", out.className, error) || !getString(model, "model", "file", file, error) || !getString(model, "model", "source", source, error) || !getString(model, "model", "piecewise", piecewise, error) || !getNumber(model, "model", "smoothEps", out.smoothEps, error)) {
 				return false;
 			}
 			if (file.empty() == source.empty()) {
@@ -424,6 +424,12 @@ namespace che {
 			Json::Value root(Json::objectValue);
 			root["name"] = info.name;
 			root["description"] = info.description;
+			Json::Value models(Json::arrayValue);
+			for (const string &m : info.models) {
+				models.append(m);
+			}
+			root["models"] = models;
+			root["complete"] = info.complete;
 			root["hybrid"] = info.hybrid;
 			Json::Value vars(Json::arrayValue);
 			for (const ModelVariable &v : info.variables) {
@@ -496,6 +502,7 @@ namespace che {
 			}
 			parser.currentModel = parser.pool.createNewTopModel();
 			parser.currentModel->diag = &parseMessages;
+			parser.className = jobData.className;
 			parser.parameterOverrides = jobData.parameters;
 			parser.startOverrides = jobData.start;
 			parseSingleSasModel(&parser);
@@ -522,6 +529,10 @@ namespace che {
 				parser.currentModel->diag = &cerr;
 			}
 			if (parser.errCount > 0) {
+				info = ModelInfo(); // the model could not be read, but the editor can still list the models of the source
+				info.models = parser.modelNames;
+				info.complete = false;
+				infoValid = true;
 				err = "parsing the model failed:\n" + parseMessages.str();
 				return false;
 			}
@@ -533,6 +544,7 @@ namespace che {
 			rewritePiecewiseFunctions(*parser.currentModel, jobData.piecewise, jobData.smoothEps);
 			hybrid = isHybridModel(*parser.currentModel);
 			info = buildModelInfo(*parser.currentModel, hybrid);
+			info.models = parser.modelNames;
 			infoValid = true;
 			if (hybrid) {
 				solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;

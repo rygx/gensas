@@ -304,6 +304,7 @@ components:
       additionalProperties: false
       properties:
         source: { type: string, description: the Modelica text }
+        className: { type: string, description: "the model to simulate when the text holds several classes (default: the last model)" }
         piecewise: { type: string, enum: [events, smooth], description: "how abs, min, max and sign are handled (default events)" }
         smoothEps: { type: number, exclusiveMinimum: 0 }
         parameters: { $ref: "#/components/schemas/ValueMap" }
@@ -374,6 +375,11 @@ components:
       required: [name, description, hybrid, variables, parameters]
       properties:
         name: { type: string }
+        models:
+          type: array
+          description: the models of the text, in order; the editor offers them for className
+          items: { type: string }
+        complete: { type: boolean, description: "false when the model could not be read: only models is filled in" }
         description: { type: string }
         hybrid: { type: boolean, description: "the model has events (discrete variables, if or when, time)" }
         variables:

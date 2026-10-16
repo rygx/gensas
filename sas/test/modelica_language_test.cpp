@@ -585,6 +585,59 @@ static void testUserFunctions() {
 	CHECK_NEAR(lastValue(g.result(), "z"), -10.0, 1e-9);
 }
 
+// Packages with constants and functions, several models in one source, and which one is simulated.
+static void testClassesAndPackages() {
+	const char *src =
+		"package Phys\n"
+		"  constant Real g = 9.81;\n  constant Real two_g = 2*g;\n  constant Integer n = 3;\n"
+		"  function drag\n    input Real v;\n    output Real f;\n  algorithm\n    f := two_g*v/n;\n  end drag;\n"
+		"  function twice\n    input Real v;\n    output Real f;\n  algorithm\n    f := drag(v) + drag(v);\n  end twice;\n"
+		"  package Inner\n    constant Real c = 0.5*g;\n    function half\n      input Real v;\n      output Real y;\n    algorithm\n      y := c*v;\n    end half;\n  end Inner;\n"
+		"end Phys;\n"
+		"model Unused\n  Real q(start = 1);\nequation\n  der(q) = 1;\nend Unused;\n"
+		"model Fall\n  parameter Real m = Phys.g / 9.81;\n  Real v(start = 0);\n  Real h(start = 10);\n  Real d, e, f;\nequation\n"
+		"  der(v) = -Phys.g*m;\n  der(h) = v;\n  d = Phys.twice(2);\n  e = Phys.Inner.half(4);\n  f = Phys.Inner.c + Phys.n;\nend Fall;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	CHECK_NEAR(lastValue(sim.result(), "v"), -9.81, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "d"), 2 * (2 * 9.81 * 2 / 3), 1e-6);
+	CHECK_NEAR(lastValue(sim.result(), "e"), 0.5 * 9.81 * 4, 1e-6);
+	CHECK_NEAR(lastValue(sim.result(), "f"), 0.5 * 9.81 + 3, 1e-6);
+	CHECK_EQ(sim.modelInfo().name, string("Fall")); // the last model unless one is named
+	CHECK_EQ(sim.modelInfo().models.size(), (size_t)2);
+	// another model of the source can be chosen
+	ModelicaJob chosen = job(src, 1.0);
+	chosen.className = "Unused";
+	Simulation other(chosen);
+	CHECK(other.run());
+	CHECK_NEAR(lastValue(other.result(), "q"), 2.0, 1e-6);
+	CHECK_EQ(other.modelInfo().name, string("Unused"));
+	// an unknown name is an error, and the list of models is still offered
+	chosen.className = "Nope";
+	Simulation missing(chosen);
+	CHECK(!missing.check());
+	CHECK(missing.error().find("no model named 'Nope'") != string::npos);
+	CHECK(missing.hasModelInfo() && !missing.modelInfo().complete);
+	CHECK_EQ(missing.modelInfo().models.size(), (size_t)2);
+	// functions and packages may stand after the model that uses them
+	const char *late =
+		"model M\n  Real x(start = 1);\nequation\n  der(x) = -P.k*sq(x);\nend M;\n"
+		"function sq\n  input Real a;\n  output Real y;\nalgorithm\n  y := a*a;\nend sq;\n"
+		"package P\n  constant Real k = 2;\nend P;\n";
+	Simulation after(job(late, 0.5));
+	CHECK(after.run());
+	CHECK_NEAR(lastValue(after.result(), "x"), 1.0 / (1.0 + 2.0 * 0.5), 1e-4);
+	// an error in a package is reported with its line
+	Simulation bad(job("package P\n  constant Real a = 1;\n  constant Real a = 2;\nend P;\nmodel M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!bad.check());
+	CHECK(bad.error().find("defined twice") != string::npos);
+	Simulation unknown(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -Q.k*x;\nend M;\n", 1.0));
+	CHECK(!unknown.check());
+	CHECK(unknown.error().find("'Q'") != string::npos);
+	Simulation nonConstant(job("package P\n  constant Real a = b;\nend P;\nmodel M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!nonConstant.check());
+}
+
 // Whole-array equations are expanded elementwise.
 static void testArrayExpressions() {
 	const char *src =
@@ -671,6 +724,7 @@ static void testDomainChecks() {
 int main() {
 	testAlgorithmSections();
 	testUserFunctions();
+	testClassesAndPackages();
 	testArrayExpressions();
 	testExpSeriesAccuracy();
 	testPowerOperator();

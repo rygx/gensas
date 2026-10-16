@@ -31,6 +31,7 @@ class _Strict(BaseModel):
 
 class ModelSpec(_Strict):
     source: str
+    className: Optional[str] = None
     piecewise: Optional[Literal["events", "smooth"]] = None
     smoothEps: Optional[float] = Field(default=None, gt=0)
     parameters: Optional[Numbers] = None

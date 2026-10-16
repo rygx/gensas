@@ -67,6 +67,23 @@ class GenSASTest(unittest.TestCase):
             k = info["parameters"][0]
             self.assertEqual((k["name"], k["value"], k["unit"], k["constant"]), ("k", 2.0, "1/s", False))
 
+    def test_model_selection(self):
+        src = ("model A\n  Real a(start = 1);\nequation\n  der(a) = -a;\nend A;\n"
+               "model B\n  Real b(start = 1);\nequation\n  der(b) = -b;\nend B;\n")
+        with gensas.Simulation(job(src, 1.0)) as sim:
+            self.assertEqual(sim.check(), [])
+            info = sim.model_info()
+            self.assertEqual((info["name"], info["models"], info["complete"]), ("B", ["A", "B"], True))
+        chosen = job(src, 1.0)
+        chosen["model"]["className"] = "A"
+        self.assertIn("a", gensas.run(chosen).variables)
+        chosen["model"]["className"] = "C"
+        with gensas.Simulation(chosen) as sim:
+            found = sim.check()
+            self.assertIn("no model named 'C'", found[0].message)
+            info = sim.model_info()
+            self.assertEqual((info["models"], info["complete"]), (["A", "B"], False))
+
     def test_parameter_overrides(self):
         src = "model P\n  parameter Real k = 1;\n  Real x(start = 1);\nequation\n  der(x) = -k * x;\nend P;\n"
         job_json = job(src, 1.0)

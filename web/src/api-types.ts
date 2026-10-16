@@ -192,6 +192,8 @@ export interface components {
         ModelSpec: {
             /** @description the Modelica text */
             source: string;
+            /** @description the model to simulate when the text holds several classes (default: the last model) */
+            className?: string;
             /**
              * @description how abs, min, max and sign are handled (default events)
              * @enum {string}
@@ -258,6 +260,10 @@ export interface components {
         };
         ModelInfo: {
             name: string;
+            /** @description the models of the text, in order; the editor offers them for className */
+            models?: string[];
+            /** @description false when the model could not be read: only models is filled in */
+            complete?: boolean;
             description: string;
             /** @description the model has events (discrete variables, if or when, time) */
             hybrid: boolean;

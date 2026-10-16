@@ -16,8 +16,8 @@ equation
 end Name;
 ```
 
-* One `model` per file. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
-* Not supported: `extends`, nested classes, `package`, `connector`/`connect` and `initial algorithm` sections (they give an error).
+* A file can hold several `model`s, `function`s and `package`s. The last model is simulated; `model.className` in a job (see [Job format](JobFormat.md)) picks another. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
+* Not supported: `extends`, nested models, `record`, `connector`/`connect` and `initial algorithm` sections (they give an error).
 
 ## Declarations
 
@@ -33,6 +33,28 @@ end Name;
 * `initial equation` sections set start values with `x = <constant>;` and `der(x) = <constant>;`.
 * `for i in 1:n loop ... end for;` (also `first:step:last`, and several iterators `for i in 1:n, j in 1:m loop`) is unrolled in `equation` and `initial equation` sections and inside `if` and `when` branches.
 * The number of states must equal the number of differential equations, and the number of algebraic variables the number of algebraic equations; otherwise the model is rejected.
+
+## Packages
+
+```modelica
+package Phys
+  constant Real g = 9.81;
+  function drag
+    input Real v;
+    output Real f;
+  algorithm
+    f := 0.1*v*abs(v);
+  end drag;
+end Phys;
+
+model Fall
+  Real v(start = 0);
+equation
+  der(v) = Phys.g - Phys.drag(v);
+end Fall;
+```
+
+A `package` holds `constant`s and `function`s (and packages nested in it), used with qualified names such as `Phys.g` and `Phys.drag(v)`. A constant is a number or a constant expression of earlier constants of the same package. Functions of a package can call each other without the prefix. Not supported: types, models and `import` in a package.
 
 ## Algorithm sections
 

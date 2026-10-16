@@ -34,17 +34,28 @@ def main():
     out = sys.argv[1]
     print("## Test coverage\n")
     rows, total = cpp_table(os.path.join(out, "cpp.json"))
-    print("C++ library (`sas/`, `io/`, `util/`, `capi/`), measured with the C++ unit tests and the Python tests.")
+    print("C++ library (`sas/`, `io/`, `util/`, `capi/`), measured with the C++ unit tests and the Python and server tests.")
     print("Power flow and the PSAT reader are tested through Bazel only and are not included.\n")
     print("| | Covered | Total | Percent |")
     print("|---|---:|---:|---:|")
-    print("| Lines | %d | %d | %.1f%% |" % (total[0], total[1], pct(total[0], total[1])))
-    print("| Branches | %d | %d | %.1f%% |" % (total[2], total[3], pct(total[2], total[3])))
+    print("| C++ lines | %d | %d | %.1f%% |" % (total[0], total[1], pct(total[0], total[1])))
+    print("| C++ branches | %d | %d | %.1f%% |" % (total[2], total[3], pct(total[2], total[3])))
     py = os.path.join(out, "python.json")
     if os.path.exists(py):
         with open(py) as f:
             t = json.load(f)["totals"]
         print("| Python wrapper lines | %d | %d | %.1f%% |" % (t["covered_lines"], t["num_statements"], t["percent_covered"]))
+    srv = os.path.join(out, "server.json")
+    if os.path.exists(srv):
+        with open(srv) as f:
+            t = json.load(f)["totals"]
+        print("| Server lines (Python, without the worker processes) | %d | %d | %.1f%% |" % (t["covered_lines"], t["num_statements"], t["percent_covered"]))
+    web = os.path.join(out, "web", "coverage-summary.json")
+    if os.path.exists(web):
+        with open(web) as f:
+            t = json.load(f)["total"]
+        print("| Web client lines (unit tests; the browser tests are not measured) | %d | %d | %.1f%% |" % (t["lines"]["covered"], t["lines"]["total"], t["lines"]["pct"]))
+        print("| Web client branches | %d | %d | %.1f%% |" % (t["branches"]["covered"], t["branches"]["total"], t["branches"]["pct"]))
     print("\n<details><summary>C++ per file</summary>\n")
     print("| File | Lines | Line % | Branches | Branch % |")
     print("|---|---:|---:|---:|---:|")

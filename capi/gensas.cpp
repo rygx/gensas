@@ -39,6 +39,7 @@ using namespace che::core;
 struct gensas_simulation {
 	std::unique_ptr<Simulation> sim;
 	std::string error;
+	std::string infoJson;
 	bool hasResult = false;
 };
 
@@ -136,7 +137,9 @@ int gensas_check(gensas_simulation *sim) {
 	try {
 		sim->hasResult = false;
 		sim->error.clear();
-		if (sim->sim->check()) {
+		const bool ok = sim->sim->check();
+		sim->infoJson = sim->sim->hasModelInfo() ? modelInfoJson(sim->sim->modelInfo()) : std::string();
+		if (ok) {
 			return GENSAS_OK;
 		}
 		sim->error = sim->sim->error();
@@ -179,6 +182,10 @@ const char *gensas_diagnostic_message(const gensas_simulation *sim, size_t index
 const char *gensas_diagnostic_source(const gensas_simulation *sim, size_t index) {
 	const Diagnostic *d = diagnosticOf(sim, index);
 	return d != nullptr ? d->source.c_str() : nullptr;
+}
+
+const char *gensas_model_info_json(const gensas_simulation *sim) {
+	return sim != nullptr && !sim->infoJson.empty() ? sim->infoJson.c_str() : nullptr;
 }
 
 const char *gensas_error(const gensas_simulation *sim) {

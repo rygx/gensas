@@ -42,6 +42,40 @@ namespace che {
 		class SasModelParser;
 		struct SolverFeatures;
 
+		// What an editor needs to know about a model, found by Simulation::check() without running it.
+		struct ModelVariable {
+			std::string name;
+			std::string kind; // "state" (der() is used), "algebraic" or "discrete"
+			std::string type; // "Real", "Integer" or "Boolean"
+			std::string unit;
+			std::string description;
+			bool hasStart = false; // a start value was given
+			double start = 0.0;
+			bool input = false;
+			int line = 0;
+		};
+
+		struct ModelParameter {
+			std::string name;
+			std::string type;
+			std::string unit;
+			std::string description;
+			double value = 0.0;
+			bool constant = false; // declared `constant`: it cannot be changed
+			int line = 0;
+		};
+
+		struct ModelInfo {
+			std::string name;
+			std::string description;
+			bool hybrid = false; // has events (discrete variables, if/when, time)
+			std::vector<ModelVariable> variables;
+			std::vector<ModelParameter> parameters;
+		};
+
+		// The model info as JSON text: {"name", "description", "hybrid", "variables": [...], "parameters": [...]}.
+		std::string modelInfoJson(const ModelInfo &info);
+
 		// Everything needed to run one Modelica simulation. Filled from a job file (parseModelicaJob) or
 		// directly by the caller. Limits on the numeric options are applied by Simulation (see
 		// applyJobLimits); out-of-range values are clamped and reported as warnings.
@@ -111,6 +145,15 @@ namespace che {
 			// error().
 			bool check();
 
+			// Variables and parameters of the model, valid after a check() or run() that read the model
+			// (even when it then failed a later check).
+			bool hasModelInfo() const {
+				return infoValid;
+			}
+			const ModelInfo &modelInfo() const {
+				return info;
+			}
+
 			// Errors and warnings about the model text found by the parser and the checker in the last
 			// run() or check(), with line numbers (empty if the model could not even be read).
 			const std::vector<Diagnostic> &diagnostics() const {
@@ -139,10 +182,14 @@ namespace che {
 			bool runImpl(const ProgressFn &progress);
 			// Reads and checks the model; `hybrid` and `features` are what the solver stage needs.
 			bool frontEnd(SasModelParser &parser, bool &hybrid, SolverFeatures &features);
+			// The numbers of states and algebraic variables must match those of the equations.
+			bool checkDaeShape(const SasComputationModel &comp);
 
 			ModelicaJob jobData;
 			std::vector<std::string> warns;
 			std::vector<Diagnostic> diags;
+			ModelInfo info;
+			bool infoValid = false;
 			size_t nJobWarnings = 0;
 			std::string err;
 			bool wasCancelled = false;

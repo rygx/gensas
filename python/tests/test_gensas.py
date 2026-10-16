@@ -52,6 +52,21 @@ class GenSASTest(unittest.TestCase):
             found = sim.check()
             self.assertEqual([d.severity for d in found], ["warning"])
 
+    def test_model_info(self):
+        src = ("model Tank \"a tank\"\n  parameter Real k(unit = \"1/s\") = 2 \"rate\";\n"
+               "  Real x(start = 1, unit = \"m\");\n  Real y;\nequation\n  der(x) = -k * x;\n  y = 2 * x;\nend Tank;\n")
+        with gensas.Simulation(job(src, 1.0)) as sim:
+            self.assertIsNone(sim.model_info())
+            self.assertEqual(sim.check(), [])
+            info = sim.model_info()
+            self.assertEqual((info["name"], info["description"], info["hybrid"]), ("Tank", "a tank", False))
+            kinds = {v["name"]: v["kind"] for v in info["variables"]}
+            self.assertEqual(kinds, {"x": "state", "y": "algebraic"})
+            x = [v for v in info["variables"] if v["name"] == "x"][0]
+            self.assertEqual((x["start"], x["unit"]), (1.0, "m"))
+            k = info["parameters"][0]
+            self.assertEqual((k["name"], k["value"], k["unit"], k["constant"]), ("k", 2.0, "1/s", False))
+
     def test_decay(self):
         r = gensas.run(job(DECAY, 2.0))
         self.assertAlmostEqual(r.time[-1], 2.0, places=9)

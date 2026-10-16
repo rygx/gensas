@@ -874,7 +874,7 @@ namespace che {
 			}
 
 			// One variable (or array) of a declaration: name, dimensions, modification, binding and description.
-			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isDiscrete, bool isInput, const vector<int> &typeDims) {
+			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isConstant, bool isDiscrete, bool isInput, const vector<int> &typeDims) {
 				shared_ptr<IdPearl> var = parser->currentId;
 				const string name = (const char *)var->str;
 				const int line = parser->coord.line;
@@ -912,6 +912,8 @@ namespace che {
 					el->ty = ty;
 					el->line = line;
 					el->idTy = idTy;
+					el->isConstant = isConstant;
+					el->isInput = isInput;
 				}
 
 				if (parser->currentToken == TK_LPAREN) {
@@ -974,7 +976,7 @@ namespace che {
 
 			// One declaration statement: prefixes, a type and one or more declarators separated by commas.
 			void parseDeclaration(SasModelParser *parser) {
-				bool isParam = false, isDiscrete = false, isInput = false;
+				bool isParam = false, isConstant = false, isDiscrete = false, isInput = false;
 				while (parser->currentToken == TK_K_PARA || parser->currentToken == TK_K_CONSTANT || parser->currentToken == TK_K_DISCRETE ||
 					   parser->currentToken == TK_K_INPUT || parser->currentToken == TK_K_OUTPUT) {
 					if (parser->currentToken == TK_K_DISCRETE) {
@@ -983,6 +985,7 @@ namespace che {
 						isInput = true;
 					} else if (parser->currentToken != TK_K_OUTPUT) { // an output is an ordinary variable
 						isParam = true;
+						isConstant = isConstant || parser->currentToken == TK_K_CONSTANT;
 					}
 					getNextToken(parser);
 				}
@@ -1009,7 +1012,7 @@ namespace che {
 						skipStatement(parser);
 						return;
 					}
-					parseDeclarator(parser, ty, isParam, isDiscrete, isInput, typeDims);
+					parseDeclarator(parser, ty, isParam, isConstant, isDiscrete, isInput, typeDims);
 					if (parser->currentToken != TK_COMMA) {
 						break;
 					}

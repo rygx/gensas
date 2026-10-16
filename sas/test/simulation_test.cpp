@@ -237,6 +237,73 @@ static void testWriteResult() {
 }
 
 // Errors and warnings about the model text come with line numbers, without running the model.
+static void testModelInfo() {
+	const char *src =
+	    "model Tank \"a tank\"\n"
+	    "  parameter Real k(unit = \"1/s\") = 2 \"rate\";\n"
+	    "  constant Real c = 3;\n"
+	    "  Real x(start = 1, unit = \"m\") \"level\";\n"
+	    "  Real y;\n"
+	    "  input Real u = 0.5;\n"
+	    "equation\n"
+	    "  der(x) = -k * x + u;\n"
+	    "  y = x * c;\n"
+	    "end Tank;\n";
+	Simulation sim(sourceJob(src, 1.0));
+	CHECK(sim.check());
+	CHECK(sim.hasModelInfo());
+	const ModelInfo &info = sim.modelInfo();
+	CHECK_EQ(info.name, string("Tank"));
+	CHECK_EQ(info.description, string("a tank"));
+	CHECK(!info.hybrid);
+	CHECK_EQ(info.parameters.size(), (size_t)2);
+	CHECK_EQ(info.variables.size(), (size_t)3);
+	for (const ModelParameter &p : info.parameters) {
+		if (p.name == "k") {
+			CHECK_NEAR(p.value, 2.0, 1e-12);
+			CHECK(!p.constant);
+			CHECK_EQ(p.unit, string("1/s"));
+			CHECK_EQ(p.description, string("rate"));
+			CHECK_EQ(p.line, 2);
+		} else {
+			CHECK_EQ(p.name, string("c"));
+			CHECK(p.constant);
+		}
+	}
+	for (const ModelVariable &v : info.variables) {
+		if (v.name == "x") {
+			CHECK_EQ(v.kind, string("state"));
+			CHECK(v.hasStart);
+			CHECK_NEAR(v.start, 1.0, 1e-12);
+			CHECK_EQ(v.unit, string("m"));
+			CHECK_EQ(v.description, string("level"));
+		} else if (v.name == "y") {
+			CHECK_EQ(v.kind, string("algebraic"));
+			CHECK(!v.hasStart);
+		} else {
+			CHECK_EQ(v.name, string("u"));
+			CHECK(v.input);
+		}
+	}
+	CHECK(modelInfoJson(info).find("\"kind\":\"state\"") != string::npos);
+
+	// discrete variables make a model hybrid
+	Simulation hybrid(sourceJob("model H\n  Real x(start = 1);\n  discrete Real d(start = 0);\nequation\n  der(x) = -x;\n  when time > 0.5 then\n    d = 1;\n  end when;\nend H;\n", 1.0));
+	CHECK(hybrid.check());
+	CHECK(hybrid.modelInfo().hybrid);
+	bool sawDiscrete = false;
+	for (const ModelVariable &v : hybrid.modelInfo().variables) {
+		sawDiscrete = sawDiscrete || (v.name == "d" && v.kind == "discrete");
+	}
+	CHECK(sawDiscrete);
+
+	// the equation count is checked without running: two unknowns, one equation
+	Simulation bad(sourceJob("model B\n  Real x(start = 1);\n  Real y;\nequation\n  der(x) = -x;\nend B;\n", 1.0));
+	CHECK(!bad.check());
+	CHECK(!bad.diagnostics().empty());
+	CHECK(bad.hasModelInfo()); // the model was read, so the editor can still list its variables
+}
+
 static void testDiagnostics() {
 	// a good model: no diagnostics, and it can be run afterwards
 	{
@@ -302,6 +369,7 @@ static void testDiagnostics() {
 
 int main() {
 	testDiagnostics();
+	testModelInfo();
 	testPlainRun();
 	testRunTwice();
 	testHybridRun();

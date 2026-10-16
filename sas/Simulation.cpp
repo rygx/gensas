@@ -320,8 +320,136 @@ namespace che {
 			return false;
 		}
 
+		namespace {
+
+			// Names of the variables that appear as der(x).
+			void collectDerivedNames(const AstNode *p, set<string> &names) {
+				for (; p != NULL; p = p->next) {
+					if (p->op == OP_CALL && p->subs[0] != NULL && p->subs[0]->op == OP_ID && p->subs[0]->value.p != NULL &&
+						string((const char *)p->subs[0]->value.p) == "der" && p->subs[1] != NULL && p->subs[1]->op == OP_ID && p->subs[1]->value.p != NULL) {
+						names.insert((const char *)p->subs[1]->value.p);
+					}
+					collectDerivedNames(p->subs[0], names);
+					collectDerivedNames(p->subs[1], names);
+				}
+			}
+
+			string typeName(Type ty) {
+				return ty == TY_INT ? "Integer" : ty == TY_BOOL ? "Boolean" : "Real";
+			}
+
+			string textOf(const unsigned char *s) {
+				return s != NULL ? string((const char *)s) : string();
+			}
+
+			double valueOf(const IdPearl &id) {
+				return (id.ty == TY_INT || id.ty == TY_BOOL) ? (double)id.value.i : id.value.d;
+			}
+
+			ModelInfo buildModelInfo(const SasModel &model, bool hybrid) {
+				ModelInfo info;
+				if (model.modelInfo != nullptr) {
+					info.name = textOf(model.modelInfo->str);
+					info.description = textOf(model.modelInfo->annotation);
+				}
+				info.hybrid = hybrid;
+				set<string> derived;
+				for (const shared_ptr<AstTree> &tree : model.modelTrees) {
+					collectDerivedNames(tree->pHead, derived);
+				}
+				for (const shared_ptr<IdPearl> &id : model.idTable) {
+					if (id->str == NULL) {
+						continue;
+					}
+					const string name = (const char *)id->str;
+					if (id->idTy == ID_PARAM) {
+						ModelParameter p;
+						p.name = name;
+						p.type = typeName(id->ty);
+						p.unit = textOf(id->unit);
+						p.description = textOf(id->annotation);
+						p.value = valueOf(*id);
+						p.constant = id->isConstant;
+						p.line = id->line;
+						info.parameters.push_back(p);
+					} else if (id->idTy == ID_VAR || id->idTy == ID_DISC) {
+						ModelVariable v;
+						v.name = name;
+						v.kind = id->idTy == ID_DISC ? "discrete" : derived.count(name) > 0 ? "state" : "algebraic";
+						v.type = typeName(id->ty);
+						v.unit = textOf(id->unit);
+						v.description = textOf(id->annotation);
+						v.hasStart = id->initVal;
+						v.start = id->initVal ? valueOf(*id) : 0.0;
+						v.input = id->isInput;
+						v.line = id->line;
+						info.variables.push_back(v);
+					}
+				}
+				return info;
+			}
+
+		} // namespace
+
+		string modelInfoJson(const ModelInfo &info) {
+			Json::Value root(Json::objectValue);
+			root["name"] = info.name;
+			root["description"] = info.description;
+			root["hybrid"] = info.hybrid;
+			Json::Value vars(Json::arrayValue);
+			for (const ModelVariable &v : info.variables) {
+				Json::Value j(Json::objectValue);
+				j["name"] = v.name;
+				j["kind"] = v.kind;
+				j["type"] = v.type;
+				j["unit"] = v.unit;
+				j["description"] = v.description;
+				j["start"] = v.hasStart ? Json::Value(v.start) : Json::Value();
+				j["input"] = v.input;
+				j["line"] = v.line;
+				vars.append(j);
+			}
+			root["variables"] = vars;
+			Json::Value params(Json::arrayValue);
+			for (const ModelParameter &p : info.parameters) {
+				Json::Value j(Json::objectValue);
+				j["name"] = p.name;
+				j["type"] = p.type;
+				j["unit"] = p.unit;
+				j["description"] = p.description;
+				j["value"] = p.value;
+				j["constant"] = p.constant;
+				j["line"] = p.line;
+				params.append(j);
+			}
+			root["parameters"] = params;
+			Json::StreamWriterBuilder builder;
+			builder["indentation"] = "";
+			return Json::writeString(builder, root);
+		}
+
+		bool Simulation::checkDaeShape(const SasComputationModel &comp) {
+			string msg;
+			if (comp.nX != comp.nDE) {
+				msg = "the number of state variables (" + to_string(comp.nX) + ") differs from the number of differential equations (" + to_string(comp.nDE) + "); the DAE is not well defined";
+			} else if (comp.nY != comp.nAE) {
+				msg = "the number of algebraic variables (" + to_string(comp.nY) + ") differs from the number of algebraic equations (" + to_string(comp.nAE) + "); the DAE is not well defined";
+			}
+			if (msg.empty()) {
+				return true;
+			}
+			err = msg;
+			Diagnostic d;
+			d.message = msg;
+			d.source = "checker";
+			diags.push_back(d);
+			return false;
+		}
+
 		bool Simulation::frontEnd(SasModelParser &parser, bool &hybrid, SolverFeatures &solverFeatures) {
 			diags.clear();
+			info = ModelInfo();
+			infoValid = false;
 			ostringstream parseMessages; // errors and warnings of the parser go to the result, not to stderr
 			parser.diag = &parseMessages;
 			if (!jobData.modelFile.empty()) {
@@ -356,6 +484,8 @@ namespace che {
 			// events) or, with PW_SMOOTH, smooth approximations.
 			rewritePiecewiseFunctions(*parser.currentModel, jobData.piecewise, jobData.smoothEps);
 			hybrid = isHybridModel(*parser.currentModel);
+			info = buildModelInfo(*parser.currentModel, hybrid);
+			infoValid = true;
 			if (hybrid) {
 				solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;
 				solverFeatures.whenEquations = solverFeatures.piecewiseFunctions = solverFeatures.eventFunctions = true;
@@ -377,7 +507,26 @@ namespace che {
 			SasModelParser parser;
 			bool hybrid = false;
 			SolverFeatures features;
-			return frontEnd(parser, hybrid, features);
+			if (!frontEnd(parser, hybrid, features)) {
+				return false;
+			}
+			if (hybrid) {
+				return true; // the equations of a hybrid model are only known mode by mode
+			}
+			try {
+				SasComputationModel comp;
+				comp.generateCompModel(parser.pool);
+				comp.preprocessModels();
+				comp.generateDAEs();
+				return checkDaeShape(comp);
+			} catch (const std::exception &e) {
+				err = e.what();
+				Diagnostic d;
+				d.message = err;
+				d.source = "checker";
+				diags.push_back(d);
+				return false;
+			}
 		}
 
 		bool Simulation::runImpl(const ProgressFn &progress) {
@@ -436,12 +585,7 @@ namespace che {
 						m->printIdTable();
 					}
 				}
-				if (compModel.nX != compModel.nDE) {
-					err = "the number of state variables (" + to_string(compModel.nX) + ") differs from the number of differential equations (" + to_string(compModel.nDE) + "); the DAE is not well defined";
-					return false;
-				}
-				if (compModel.nY != compModel.nAE) {
-					err = "the number of algebraic variables (" + to_string(compModel.nY) + ") differs from the number of algebraic equations (" + to_string(compModel.nAE) + "); the DAE is not well defined";
+				if (!checkDaeShape(compModel)) {
 					return false;
 				}
 				solutions.reset(compModel.solve(options));

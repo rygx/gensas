@@ -29,6 +29,7 @@ jobs:
         run: cat /tmp/gensas-coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report

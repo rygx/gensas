@@ -35,6 +35,8 @@ export function App() {
   const [endTime, setEndTime] = useState(String(saved?.endTime ?? 5));
   const [checked, setChecked] = useState<CheckResponse | null>(null);
   const [info, setInfo] = useState<ModelInfo | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [className, setClassName] = useState("");
   const [paramEdits, setParamEdits] = useState<Edits>({});
   const [startEdits, setStartEdits] = useState<Edits>({});
 
@@ -79,10 +81,13 @@ export function App() {
     let current = true;
     const timer = setTimeout(async () => {
       try {
-        const r = await api.check({ source });
+        const r = await api.check({ source, className: className || undefined });
         if (!current) return;
         setChecked(r);
-        if (r.info) setInfo(r.info);
+        if (r.info) {
+          setModels(r.info.models ?? []);
+          if (r.info.complete !== false) setInfo(r.info);
+        }
       } catch (err) {
         if (current) setChecked({ ok: false, diagnostics: [{ severity: "error", line: 0, column: 0, message: describe(err), source: "server" }], info: null });
       }
@@ -91,7 +96,12 @@ export function App() {
       current = false;
       clearTimeout(timer);
     };
-  }, [source, version, api]);
+  }, [source, className, version, api]);
+
+  // a model that the text no longer has is dropped
+  useEffect(() => {
+    if (className !== "" && models.length > 0 && !models.includes(className)) setClassName("");
+  }, [models, className]);
 
   useEffect(() => saveSource(source, Number(endTime) || 5), [source, endTime]);
 
@@ -121,7 +131,7 @@ export function App() {
     abort.current = controller;
     try {
       const created = await api.createRun({
-        model: { source, parameters: overrides(paramEdits), start: overrides(startEdits) },
+        model: { source, className: className || undefined, parameters: overrides(paramEdits), start: overrides(startEdits) },
         solver: { endTime: endValue },
         output: { step: Math.min(1, Math.max(0.001, endValue / 1000)) },
       });
@@ -137,7 +147,7 @@ export function App() {
     } catch (err) {
       if ((err as Error).name !== "AbortError") setRunError(describe(err));
     }
-  }, [api, source, paramEdits, startEdits, endValue]);
+  }, [api, source, className, paramEdits, startEdits, endValue]);
 
   const cancel = useCallback(async () => {
     if (run) {
@@ -180,6 +190,7 @@ export function App() {
             if (ex) {
               setSource(ex.source);
               setEndTime(String(ex.endTime ?? 5));
+              setClassName("");
               setParamEdits({});
               setStartEdits({});
               setResult(null);
@@ -222,6 +233,15 @@ export function App() {
         <section class="left">
           <Editor value={source} onChange={setSource} diagnostics={diagnostics} jumpTo={jump} />
           <div class="status-line">
+            {models.length > 1 && (
+              <select aria-label="model" value={className || models[models.length - 1]} onChange={(e) => setClassName((e.target as HTMLSelectElement).value)}>
+                {models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            )}
             {checked === null ? (
               <span class="muted">{version ? "checking…" : ""}</span>
             ) : checked.ok ? (

@@ -64,7 +64,8 @@ namespace che {
 		// A user-defined function: its body is a chain of statements (see AlgLowering) that is inlined at
 		// the call sites once the whole model has been read.
 		struct UserFunction {
-			std::string name;
+			std::string name;  // qualified with the package, "P.f"
+			std::string scope; // "P." for a function of package P, empty otherwise
 			int line = 0;
 			std::vector<std::string> inputs;
 			std::vector<std::shared_ptr<AstNode>> defaults; // per input, null without a default
@@ -186,11 +187,117 @@ namespace che {
 				}
 			}
 
-			string calleeName(const AstNode *call) {
-				if (call != NULL && call->op == OP_CALL && call->subs[0] != NULL && call->subs[0]->op == OP_ID && call->subs[0]->value.p != NULL) {
-					return (const char *)call->subs[0]->value.p;
+			AstNode *mkIntConst(long v);
+			void freeAst(AstNode *p);
+
+			// "a" for an identifier, "A.B.c" for a member chain; empty for anything else.
+			string qualifiedName(const AstNode *p) {
+				if (p == NULL || p->value.p == NULL) {
+					return "";
+				}
+				if (p->op == OP_ID) {
+					return (const char *)p->value.p;
+				}
+				if (p->op == OP_MEMBER) {
+					const string base = qualifiedName(p->subs[0]);
+					return base.empty() ? string() : base + "." + (const char *)p->value.p;
 				}
 				return "";
+			}
+
+			string calleeName(const AstNode *call) {
+				return call != NULL && call->op == OP_CALL ? qualifiedName(call->subs[0]) : string();
+			}
+
+			// A constant of a package, looked up from inside the package `scope` ("A.B." or empty): first in
+			// the package itself, then in the ones around it, then by the full name.
+			const SasModelParser::PackageConstant *findPackageConstant(const SasModelParser *parser, string scope, const string &name) {
+				for (;;) {
+					map<string, SasModelParser::PackageConstant>::const_iterator it = parser->packageConstants.find(scope + name);
+					if (it != parser->packageConstants.end()) {
+						return &it->second;
+					}
+					if (scope.empty()) {
+						return NULL;
+					}
+					scope.pop_back();
+					const size_t dot = scope.rfind('.');
+					scope = dot == string::npos ? string() : scope.substr(0, dot + 1);
+				}
+			}
+
+			AstNode *mkPackageConst(const SasModelParser::PackageConstant &c) {
+				if (c.ty == TY_INT || c.ty == TY_BOOL) {
+					AstNode *n = mkIntConst((long)c.value);
+					n->ty = c.ty;
+					return n;
+				}
+				AstNode *n = new AstNode();
+				n->op = OP_CONST;
+				n->ty = TY_REAL;
+				n->nodeKind = NK_Expression;
+				n->value.d = c.value;
+				return n;
+			}
+
+			AstNode *substConstants(const SasModelParser *parser, AstNode *p, const string &scope, const set<string> *locals);
+
+			// Replaces the constants of packages in one node (and below) by their values. Identifiers without a
+			// package name count only inside a package (`scope` is not empty) and not if they are `locals`.
+			AstNode *substConstantsNode(const SasModelParser *parser, AstNode *p, const string &scope, const set<string> *locals) {
+				const SasModelParser::PackageConstant *c = NULL;
+				if (p->op == OP_MEMBER) {
+					const string name = qualifiedName(p);
+					c = name.empty() ? NULL : findPackageConstant(parser, scope, name);
+				} else if (p->op == OP_ID && p->ty != TY_FUNCTION && p->value.p != NULL && !scope.empty()) {
+					const string name = (const char *)p->value.p;
+					c = locals != NULL && locals->count(name) > 0 ? NULL : findPackageConstant(parser, scope, name);
+				}
+				if (c != NULL) {
+					AstNode *r = mkPackageConst(*c);
+					r->next = p->next;
+					p->next = NULL;
+					freeAst(p);
+					return r;
+				}
+				if (p->op != OP_CALL) {
+					p->subs[0] = substConstants(parser, p->subs[0], scope, locals);
+				}
+				p->subs[1] = substConstants(parser, p->subs[1], scope, locals);
+				return p;
+			}
+
+			AstNode *substConstants(const SasModelParser *parser, AstNode *p, const string &scope, const set<string> *locals) {
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				while (p != NULL) {
+					AstNode *nxt = p->next;
+					p->next = NULL;
+					AstNode *r = substConstantsNode(parser, p, scope, locals);
+					*tail = r;
+					while (*tail != NULL) {
+						tail = &(*tail)->next;
+					}
+					p = nxt;
+				}
+				return head;
+			}
+
+			// The function with this name as seen from the package being inlined, or none.
+			shared_ptr<UserFunction> findFunction(const SasModelParser *parser, const string &name) {
+				string scope = parser->inlineScope;
+				for (;;) {
+					map<string, shared_ptr<UserFunction>>::const_iterator it = parser->functions.find(scope + name);
+					if (it != parser->functions.end()) {
+						return it->second;
+					}
+					if (scope.empty()) {
+						return nullptr;
+					}
+					scope.pop_back();
+					const size_t dot = scope.rfind('.');
+					scope = dot == string::npos ? string() : scope.substr(0, dot + 1);
+				}
 			}
 
 			// ---------------------------------------------------------------------
@@ -673,6 +780,14 @@ namespace che {
 				if (p->op == OP_INDEX) {
 					return elabIndex(ctx, p);
 				}
+				if (p->op == OP_MEMBER) { // a constant of a package, P.g
+					const string name = qualifiedName(p);
+					const SasModelParser::PackageConstant *pc = name.empty() ? NULL : findPackageConstant(ctx.parser, string(), name);
+					if (pc != NULL) {
+						return mkPackageConst(*pc);
+					}
+					// not a constant: left as it is (AssertionLevel.warning is one); the checker rejects what is not known
+				}
 				if (p->op == OP_ID && p->ty != TY_FUNCTION && p->value.p != NULL) {
 					const string name = (const char *)p->value.p;
 					for (size_t k = ctx.env.size(); k > 0; k--) {
@@ -693,7 +808,8 @@ namespace che {
 				AstNode *c = new AstNode(*p);
 				c->next = NULL;
 				c->index = -1;
-				c->subs[0] = elabChain(ctx, p->subs[0]);
+				// the callee of P.f(x) is a name, not an expression to elaborate
+				c->subs[0] = p->op == OP_CALL && p->subs[0] != NULL && p->subs[0]->op == OP_MEMBER ? cloneAst(p->subs[0]) : elabChain(ctx, p->subs[0]);
 				c->subs[1] = elabChain(ctx, p->subs[1]);
 				return c;
 			}
@@ -1679,7 +1795,7 @@ namespace che {
 				} while (depth > 0 && parser->currentToken != TK_EOF);
 			}
 
-			void parseFunction(SasModelParser *parser) {
+			void parseFunction(SasModelParser *parser, const string &prefix = string()) {
 				const int line = parser->coord.line;
 				getNextToken(parser); // consume `function`
 				if (parser->currentToken != TK_ID) {
@@ -1688,7 +1804,8 @@ namespace che {
 					return;
 				}
 				shared_ptr<UserFunction> fn = make_shared<UserFunction>();
-				fn->name = (const char *)parser->currentId->str;
+				fn->name = prefix + (const char *)parser->currentId->str;
+				fn->scope = prefix;
 				fn->line = line;
 				getNextToken(parser);
 				if (parser->currentToken == TK_STRING) {
@@ -1750,6 +1867,9 @@ namespace che {
 						if (parser->currentToken == TK_EQN) {
 							getNextToken(parser);
 							value = parseDeclValue(parser);
+							if (!prefix.empty()) {
+								value = substConstants(parser, value, prefix, &fn->locals);
+							}
 						}
 						if (isInput) {
 							fn->inputs.push_back(name);
@@ -1816,10 +1936,13 @@ namespace che {
 					skipAnnotation(parser);
 					expect(parser, TK_SEMICOLON);
 				}
+				if (!prefix.empty()) { // the constants of the package the function belongs to
+					body = substConstants(parser, body, prefix, &fn->locals);
+				}
 				fn->body = ownAst(body);
 				expect(parser, TK_K_END);
 				if (parser->currentToken == TK_ID) {
-					if (string((const char *)parser->currentId->str) != fn->name) {
+					if (prefix + (const char *)parser->currentId->str != fn->name) {
 						parser->warn("End name does not match the function name '%s'.", fn->name.c_str());
 					}
 					getNextToken(parser);
@@ -1840,11 +1963,11 @@ namespace che {
 					return p;
 				}
 				const string name = calleeName(p);
-				map<string, shared_ptr<UserFunction>>::const_iterator it = parser->functions.find(name);
-				if (it == parser->functions.end()) {
+				const shared_ptr<UserFunction> found = name.empty() ? nullptr : findFunction(parser, name);
+				if (found == nullptr) {
 					return p;
 				}
-				const UserFunction &fn = *it->second;
+				const UserFunction &fn = *found;
 				if (depth > 32) {
 					parser->error("Line %d: function '%s' calls itself (recursive functions are not supported).", line, name.c_str());
 					return p;
@@ -1891,7 +2014,10 @@ namespace che {
 				if (!low.ok) {
 					return p;
 				}
+				const string outerScope = parser->inlineScope;
+				parser->inlineScope = fn.scope; // calls in the body see the other functions of its package
 				AstNode *repl = inlineCalls(parser, cloneAst(res->second.get()), line, depth + 1);
+				parser->inlineScope = outerScope;
 				repl->next = p->next;
 				p->next = NULL;
 				freeAst(p);
@@ -1963,86 +2089,407 @@ namespace che {
 
 		} // namespace
 
+		namespace {
+
+			// ---------------------------------------------------------------------
+			// Classes: a source can hold several (functions, packages, models). An index of their places is made
+			// first; the classes that are not models are read, then the model to simulate.
+			// ---------------------------------------------------------------------
+
+			// Where the scanner is, to come back to it later.
+			struct ParserState {
+				uchar *cursur = NULL;
+				uchar *lineHead = NULL;
+				int line = 0;
+				TokenValue value;
+				Coord coord, prevCoord;
+				int token = 0;
+				shared_ptr<IdPearl> id;
+			};
+
+			ParserState saveState(const SasModelParser *parser) {
+				ParserState s;
+				s.cursur = parser->reader.cursur;
+				s.lineHead = parser->reader.lineHead;
+				s.line = parser->reader.line;
+				s.value = parser->value;
+				s.coord = parser->coord;
+				s.prevCoord = parser->prevCoord;
+				s.token = parser->currentToken;
+				s.id = parser->currentId;
+				return s;
+			}
+
+			void restoreState(SasModelParser *parser, const ParserState &s) {
+				parser->reader.cursur = s.cursur;
+				parser->reader.lineHead = s.lineHead;
+				parser->reader.line = s.line;
+				parser->value = s.value;
+				parser->coord = s.coord;
+				parser->prevCoord = s.prevCoord;
+				parser->currentToken = s.token;
+				parser->currentId = s.id;
+			}
+
+			struct ClassSpan {
+				int kind = 0; // the keyword: TK_K_MDL, TK_K_FUNCTION, TK_K_PACKAGE, ...
+				string name;
+				int line = 0;
+				ParserState at; // the first token of the class, including a prefix such as `partial`
+			};
+
+			bool isClassKeyword(int tok) {
+				return tok == TK_K_MDL || tok == TK_K_FUNCTION || tok == TK_K_PACKAGE || tok == TK_K_RECORD || tok == TK_K_CONNECTOR || tok == TK_K_BLOCK || tok == TK_K_CLASS || tok == TK_K_TYPE;
+			}
+
+			bool isClassPrefix(int tok) {
+				return tok == TK_K_PARTIAL || tok == TK_K_ENCAPSULATED || tok == TK_K_PURE || tok == TK_K_IMPURE || tok == TK_K_FINAL || tok == TK_K_EXPANDABLE;
+			}
+
+			// Finds the classes at the top of the source (and leaves the scanner where it was). A class ends with
+			// `end Name;`, which is how it differs from the `end if;`, `end for;` and `end when;` inside.
+			vector<ClassSpan> indexClasses(SasModelParser *parser) {
+				ostream *const savedDiag = parser->diag;
+				const int savedErrors = parser->errCount, savedWarnings = parser->warnCount;
+				const size_t savedDiagnostics = parser->diagnostics.size();
+				const bool savedInject = parser->noInject;
+				parser->diag = NULL;
+				parser->noInject = true;
+				const ParserState start = saveState(parser);
+				vector<ClassSpan> spans;
+				vector<string> open; // names of the classes the scanner is inside
+				bool havePending = false;
+				ParserState pending;
+				while (parser->currentToken != TK_EOF) {
+					const int tok = parser->currentToken;
+					if (open.empty() && isClassPrefix(tok)) {
+						if (!havePending) {
+							pending = saveState(parser);
+							havePending = true;
+						}
+						getNextToken(parser);
+					} else if (isClassKeyword(tok)) {
+						ClassSpan span;
+						span.kind = tok;
+						span.line = parser->coord.line;
+						span.at = havePending ? pending : saveState(parser);
+						havePending = false;
+						getNextToken(parser);
+						if (parser->currentToken == TK_ID) {
+							span.name = (const char *)parser->currentId->str;
+							if (open.empty()) {
+								spans.push_back(span);
+							}
+							open.push_back(span.name);
+							getNextToken(parser);
+						}
+					} else if (tok == TK_K_END) {
+						getNextToken(parser);
+						if (parser->currentToken == TK_ID && !open.empty() && open.back() == (const char *)parser->currentId->str) {
+							open.pop_back();
+						}
+					} else {
+						if (open.empty()) {
+							havePending = false;
+						}
+						getNextToken(parser);
+					}
+				}
+				restoreState(parser, start);
+				parser->diag = savedDiag;
+				parser->noInject = savedInject;
+				parser->errCount = savedErrors;
+				parser->warnCount = savedWarnings;
+				parser->diagnostics.resize(savedDiagnostics);
+				return spans;
+			}
+
+			// From the keyword of a class to just after its `end Name;` (used to step over classes that are not read).
+			void skipClass(SasModelParser *parser) {
+				const bool savedInject = parser->noInject;
+				parser->noInject = true;
+				vector<string> open;
+				while (parser->currentToken != TK_EOF) {
+					const int tok = parser->currentToken;
+					getNextToken(parser);
+					if (isClassKeyword(tok) && parser->currentToken == TK_ID) {
+						open.push_back((const char *)parser->currentId->str);
+						getNextToken(parser);
+					} else if (tok == TK_K_END && parser->currentToken == TK_ID && !open.empty() && open.back() == (const char *)parser->currentId->str) {
+						open.pop_back();
+						getNextToken(parser);
+						if (parser->currentToken == TK_SEMICOLON) {
+							getNextToken(parser);
+						}
+						if (open.empty()) {
+							break;
+						}
+					}
+				}
+				parser->noInject = savedInject;
+			}
+
+			// constant Real a = 1, b = a + 1;   inside a package; `scope` is "P." for package P.
+			void parsePackageConstants(SasModelParser *parser, const string &scope) {
+				getNextToken(parser); // consume `constant`
+				Type ty = TY_REAL;
+				if (parser->currentToken == TK_K_REAL || parser->currentToken == TK_K_INTEGER || parser->currentToken == TK_K_BOOLEAN) {
+					ty = parser->currentToken == TK_K_INTEGER ? TY_INT : parser->currentToken == TK_K_BOOLEAN ? TY_BOOL
+																											  : TY_REAL;
+					getNextToken(parser);
+				} else {
+					parser->error("Line %d: a constant of a package must be a Real, Integer or Boolean.", parser->coord.line);
+					skipStatement(parser);
+					return;
+				}
+				for (;;) {
+					const int line = parser->coord.line;
+					if (parser->currentToken != TK_ID) {
+						parser->error("Line %d: expect a constant name.", line);
+						skipStatement(parser);
+						return;
+					}
+					const string name = (const char *)parser->currentId->str;
+					getNextToken(parser);
+					if (parser->currentToken == TK_LBRACKET) {
+						parser->error("Line %d: array constants are not supported ('%s').", line, name.c_str());
+						skipStatement(parser);
+						return;
+					}
+					if (parser->currentToken == TK_LPAREN) {
+						skipParenthesized(parser);
+					}
+					if (parser->currentToken != TK_EQN) {
+						parser->error("Line %d: the constant '%s' needs a value.", line, name.c_str());
+						skipStatement(parser);
+						return;
+					}
+					getNextToken(parser);
+					AstNode *value = parseDeclValue(parser);
+					value = substConstants(parser, value, scope, NULL);
+					double v = 0.0;
+					if (evalConst(value, parser->currentModel.get(), v)) {
+						if ((ty == TY_INT || ty == TY_BOOL) && v != std::floor(v)) {
+							parser->error("Line %d: the constant '%s' is an Integer or Boolean and needs a whole number.", line, name.c_str());
+						}
+						SasModelParser::PackageConstant c;
+						c.ty = ty;
+						c.value = v;
+						if (!parser->packageConstants.insert(make_pair(scope + name, c)).second) {
+							parser->error("Line %d: the constant '%s%s' is defined twice.", line, scope.c_str(), name.c_str());
+						}
+					} else {
+						parser->error("Line %d: the value of the constant '%s' must be a constant expression.", line, name.c_str());
+					}
+					freeAst(value);
+					if (parser->currentToken == TK_STRING) {
+						getNextToken(parser);
+					}
+					if (parser->currentToken != TK_COMMA) {
+						break;
+					}
+					getNextToken(parser);
+				}
+				expect(parser, TK_SEMICOLON);
+			}
+
+			// package P  constant ...;  function ... end f;  package Q ... end Q;  end P;
+			void parsePackage(SasModelParser *parser, const string &prefix) {
+				const int line = parser->coord.line;
+				getNextToken(parser); // consume `package`
+				if (parser->currentToken != TK_ID) {
+					parser->error("Line %d: expect a package name.", line);
+					skipClass(parser);
+					return;
+				}
+				const string name = (const char *)parser->currentId->str;
+				const string scope = prefix + name + ".";
+				getNextToken(parser);
+				if (parser->currentToken == TK_STRING) {
+					getNextToken(parser);
+				}
+				while (parser->currentToken != TK_K_END && parser->currentToken != TK_EOF) {
+					const int tok = parser->currentToken;
+					if (tok == TK_K_ANNOTATION) {
+						skipAnnotation(parser);
+						expect(parser, TK_SEMICOLON);
+					} else if (tok == TK_K_PUBLIC || tok == TK_K_PROTECTED) {
+						getNextToken(parser);
+					} else if (tok == TK_K_CONSTANT) {
+						parsePackageConstants(parser, scope);
+					} else if (tok == TK_K_PURE || tok == TK_K_IMPURE) {
+						getNextToken(parser);
+					} else if (tok == TK_K_FUNCTION) {
+						parseFunction(parser, scope);
+					} else if (tok == TK_K_PACKAGE) {
+						parsePackage(parser, scope);
+					} else if (isClassKeyword(tok) || isClassPrefix(tok)) {
+						parser->error("Line %d: a package can contain constants, functions and packages only.", parser->coord.line);
+						while (isClassPrefix(parser->currentToken)) {
+							getNextToken(parser);
+						}
+						skipClass(parser);
+					} else {
+						parser->error("Line %d: a package can contain constants, functions and packages only.", parser->coord.line);
+						skipStatement(parser);
+					}
+				}
+				expect(parser, TK_K_END);
+				if (parser->currentToken == TK_ID) {
+					if (string((const char *)parser->currentId->str) != name) {
+						parser->warn("End name does not match the package name '%s'.", name.c_str());
+					}
+					getNextToken(parser);
+				}
+				expect(parser, TK_SEMICOLON);
+			}
+
+			void parseModelClass(SasModelParser *parser);
+
+		} // namespace
+
 		void parseSingleSasModel(SasModelParser *parser) {
 			getNextToken(parser);
-			while (parser->currentToken == TK_K_FUNCTION) { // functions defined before the model
-				parseFunction(parser);
-			}
-			if (parser->currentToken != TK_K_MDL) {
-				parser->error("actual token %s: expect \"model\".", Lexer::getInstance().tokenStrings[parser->currentToken]);
-			}
-			getNextToken(parser);
-			if (parser->currentToken != TK_ID) {
-				parser->error("actual token %s: expect identifier.", Lexer::getInstance().tokenStrings[parser->currentToken]);
-				parser->currentId = parser->currentModel->lookupIdentifier("Unknown", 7);
-			}
-			parser->currentModel->modelInfo = parser->currentId;
-			parser->currentId->idTy = ID_MODEL;
-
-			getNextToken(parser);
-			if (parser->currentToken == TK_STRING) {
-				parser->currentModel->modelInfo->setAnnotation((uchar *)parser->value.p);
-				getNextToken(parser);
-			}
-
-			while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
-				if (parser->currentToken == TK_K_ANNOTATION) {
-					skipAnnotation(parser);
-					expect(parser, TK_SEMICOLON);
-				} else if (parser->currentToken == TK_K_FUNCTION) {
-					parseFunction(parser);
-				} else {
-					parseDeclaration(parser);
+			if (parser->currentToken == TK_K_WITHIN) { // within A.B;  names the package the file belongs to
+				while (parser->currentToken != TK_SEMICOLON && parser->currentToken != TK_EOF) {
+					getNextToken(parser);
+				}
+				if (parser->currentToken == TK_SEMICOLON) {
+					getNextToken(parser);
 				}
 			}
-
-			while (parser->currentToken != TK_K_END && parser->currentToken != TK_EOF) {
-				if (parser->currentToken == TK_K_ANNOTATION) {
-					skipAnnotation(parser);
-					expect(parser, TK_SEMICOLON);
-				} else if (parser->currentToken == TK_K_INIT) {
+			const ParserState first = saveState(parser);
+			const vector<ClassSpan> spans = indexClasses(parser);
+			parser->modelNames.clear();
+			const ClassSpan *chosen = NULL;
+			for (const ClassSpan &c : spans) {
+				if (c.kind == TK_K_MDL) {
+					parser->modelNames.push_back(c.name);
+					if (parser->className.empty() || c.name == parser->className) {
+						chosen = &c; // the last model unless one is named
+					}
+				}
+			}
+			if (!parser->className.empty() && chosen == NULL) {
+				parser->error("The source has no model named '%s'.", parser->className.c_str());
+				return;
+			}
+			// Functions and packages first, so that the model can use them wherever they stand in the source.
+			for (const ClassSpan &c : spans) {
+				if (c.kind == TK_K_MDL) {
+					continue;
+				}
+				restoreState(parser, c.at);
+				while (isClassPrefix(parser->currentToken)) {
+					if (parser->currentToken == TK_K_PARTIAL) {
+						parser->error("Line %d: partial classes cannot be used.", parser->coord.line);
+					}
 					getNextToken(parser);
-					if (parser->currentToken == TK_K_ALGORITHM) {
-						parser->error("Initial algorithm sections are not supported; use an initial equation section.");
+				}
+				if (c.kind == TK_K_FUNCTION) {
+					parseFunction(parser);
+				} else if (c.kind == TK_K_PACKAGE) {
+					parsePackage(parser, string());
+				} else {
+					parser->error("Line %d: '%s' classes are not supported yet.", c.line, Lexer::getInstance().tokenStrings[c.kind]);
+				}
+			}
+			if (chosen == NULL) {
+				restoreState(parser, first);
+				parser->error("actual token %s: expect \"model\".", Lexer::getInstance().tokenStrings[parser->currentToken]);
+				return;
+			}
+			restoreState(parser, chosen->at);
+			while (isClassPrefix(parser->currentToken)) {
+				if (parser->currentToken == TK_K_PARTIAL) {
+					parser->error("Line %d: a partial model cannot be simulated.", parser->coord.line);
+				}
+				getNextToken(parser);
+			}
+			parseModelClass(parser);
+		}
+
+		namespace {
+
+			// The model at the current token (`model`): its declarations, equations and the functions inside it.
+			void parseModelClass(SasModelParser *parser) {
+				if (parser->currentToken != TK_K_MDL) {
+					parser->error("actual token %s: expect \"model\".", Lexer::getInstance().tokenStrings[parser->currentToken]);
+				}
+				getNextToken(parser);
+				if (parser->currentToken != TK_ID) {
+					parser->error("actual token %s: expect identifier.", Lexer::getInstance().tokenStrings[parser->currentToken]);
+					parser->currentId = parser->currentModel->lookupIdentifier("Unknown", 7);
+				}
+				parser->currentModel->modelInfo = parser->currentId;
+				parser->currentId->idTy = ID_MODEL;
+
+				getNextToken(parser);
+				if (parser->currentToken == TK_STRING) {
+					parser->currentModel->modelInfo->setAnnotation((uchar *)parser->value.p);
+					getNextToken(parser);
+				}
+
+				while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
+					if (parser->currentToken == TK_K_ANNOTATION) {
+						skipAnnotation(parser);
+						expect(parser, TK_SEMICOLON);
+					} else if (parser->currentToken == TK_K_FUNCTION) {
+						parseFunction(parser);
+					} else {
+						parseDeclaration(parser);
+					}
+				}
+
+				while (parser->currentToken != TK_K_END && parser->currentToken != TK_EOF) {
+					if (parser->currentToken == TK_K_ANNOTATION) {
+						skipAnnotation(parser);
+						expect(parser, TK_SEMICOLON);
+					} else if (parser->currentToken == TK_K_INIT) {
+						getNextToken(parser);
+						if (parser->currentToken == TK_K_ALGORITHM) {
+							parser->error("Initial algorithm sections are not supported; use an initial equation section.");
+							getNextToken(parser);
+							parseAlgorithmSection(parser);
+							continue;
+						}
+						expect(parser, TK_K_EQN);
+						parseEquationSection(parser, CTX_INITIAL);
+					} else if (parser->currentToken == TK_K_ALGORITHM) {
 						getNextToken(parser);
 						parseAlgorithmSection(parser);
-						continue;
-					}
-					expect(parser, TK_K_EQN);
-					parseEquationSection(parser, CTX_INITIAL);
-				} else if (parser->currentToken == TK_K_ALGORITHM) {
-					getNextToken(parser);
-					parseAlgorithmSection(parser);
-				} else if (parser->currentToken == TK_K_FUNCTION) {
-					parseFunction(parser);
-				} else if (parser->currentToken == TK_K_EQN) {
-					getNextToken(parser);
-					parseEquationSection(parser, CTX_TOP);
-				} else {
-					if (startsDeclaration(parser->currentToken)) {
-						parser->error("Declarations must come before the equation sections.");
-					} else if (parser->currentToken == TK_K_EXTENDS) {
-						parser->error("Inheritance (extends) is not supported; flatten the model first.");
-					} else if (parser->currentToken == TK_K_PACKAGE || parser->currentToken == TK_K_CLASS) {
-						parser->error("Nested classes are not supported.");
+					} else if (parser->currentToken == TK_K_FUNCTION) {
+						parseFunction(parser);
+					} else if (parser->currentToken == TK_K_EQN) {
+						getNextToken(parser);
+						parseEquationSection(parser, CTX_TOP);
 					} else {
-						parser->error("actual token %s: expect `initial equation`, `equation` or `end`.", Lexer::getInstance().tokenStrings[parser->currentToken]);
+						if (startsDeclaration(parser->currentToken)) {
+							parser->error("Declarations must come before the equation sections.");
+						} else if (parser->currentToken == TK_K_EXTENDS) {
+							parser->error("Inheritance (extends) is not supported; flatten the model first.");
+						} else if (parser->currentToken == TK_K_PACKAGE || parser->currentToken == TK_K_CLASS) {
+							parser->error("Nested classes are not supported.");
+						} else {
+							parser->error("actual token %s: expect `initial equation`, `equation` or `end`.", Lexer::getInstance().tokenStrings[parser->currentToken]);
+						}
+						skipStatement(parser);
 					}
-					skipStatement(parser);
+				}
+
+				if (parser->currentToken == TK_K_END) {
+					getNextToken(parser);
+					if (parser->currentToken == TK_ID && parser->currentId != parser->currentModel->modelInfo) {
+						parser->warn("End name does not match the model name.");
+					}
+					getNextToken(parser);
+					expect(parser, TK_SEMICOLON);
+					inlineUserFunctions(parser);
+				} else {
+					parser->error("Missing end statement of model.");
 				}
 			}
 
-			if (parser->currentToken == TK_K_END) {
-				getNextToken(parser);
-				if (parser->currentToken == TK_ID && parser->currentId != parser->currentModel->modelInfo) {
-					parser->warn("End name does not match the model name.");
-				}
-				getNextToken(parser);
-				expect(parser, TK_SEMICOLON);
-				inlineUserFunctions(parser);
-			} else {
-				parser->error("Missing end statement of model.");
-			}
-		}
+		} // namespace
 	} // namespace core
 } // namespace che

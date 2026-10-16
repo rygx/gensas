@@ -53,6 +53,22 @@ def test_check_reports_errors_with_lines(client):
     assert body["diagnostics"][0]["line"] == 4 and "undeclared identifier 'y'" in body["diagnostics"][0]["message"]
 
 
+def test_check_and_run_choose_a_model(client):
+    source = "model A\n  Real a(start = 1);\nequation\n  der(a) = -a;\nend A;\n" + DECAY
+    body = client.post("/check", json={"source": source}).json()
+    validate("CheckResponse", body)
+    assert body["ok"] and body["info"]["name"] == "D" and body["info"]["models"] == ["A", "D"] and body["info"]["complete"]
+    body = client.post("/check", json={"source": source, "className": "A"}).json()
+    assert body["info"]["name"] == "A"
+    body = client.post("/check", json={"source": source, "className": "Z"}).json()
+    validate("CheckResponse", body)
+    assert not body["ok"] and "no model named 'Z'" in body["diagnostics"][0]["message"]
+    assert body["info"]["models"] == ["A", "D"] and not body["info"]["complete"]
+    run = client.post("/runs", json={"model": {"source": source, "className": "A"}, "solver": {"endTime": 1}}).json()
+    done = wait_for(client, run["id"])
+    assert done["state"] == "completed" and "a" in done["summary"]["variables"], done
+
+
 def test_check_bad_override_is_a_diagnostic(client):
     body = client.post("/check", json={"source": DECAY, "parameters": {"nope": 1}}).json()
     validate("CheckResponse", body)

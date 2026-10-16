@@ -73,6 +73,19 @@ namespace che {
 			std::map<std::string, double> parameterOverrides, startOverrides;
 			// The keys of the two maps that matched a declaration.
 			std::set<std::string> usedOverrides;
+			// The model to simulate when the source has several (empty: the last one), and the names of all the
+			// models in the source, in order; set by the parser.
+			std::string className;
+			std::vector<std::string> modelNames;
+			// While the calls in a function body are inlined: the package the function belongs to ("A.B."),
+			// where its calls of other functions are looked up first.
+			std::string inlineScope;
+			// Constants of packages by qualified name ("P.g", "A.B.c"), known once the package has been read.
+			struct PackageConstant {
+				Type ty = TY_REAL;
+				double value = 0.0;
+			};
+			std::map<std::string, PackageConstant> packageConstants;
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
 			// Every error and warning, also when `diag` is null.

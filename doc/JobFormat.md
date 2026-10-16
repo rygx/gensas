@@ -23,6 +23,7 @@ bazel-bin/app/app run job.json [--set key=value ...] [--validate]
 | `gensas.format`, `gensas.version` | must be `"job"` and `1` | required |
 | `kind` | must be `"modelica"` (power flow is not available as a job yet) | required |
 | `model.file` or `model.source` | a Modelica file, or the model text itself; exactly one of them | required |
+| `model.className` | the model to simulate when the text holds several classes | the last model |
 | `model.piecewise` | `"events"` (exact) or `"smooth"` for `abs`, `min`, `max`, `sign` | `"events"` |
 | `model.smoothEps` | smoothing parameter, positive | 1e-6 |
 | `model.parameters` | replaces parameter values of the model text: an object `{"k": 3, "n": 2}`; see below | none |

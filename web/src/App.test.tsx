@@ -122,6 +122,33 @@ describe("App", () => {
     expect(el.querySelector(".status-line .error-text")!.textContent).toContain("1 error");
   });
 
+  it("offers the models of the text and checks and runs the chosen one", async () => {
+    checkReply = { ok: true, diagnostics: [], info: { ...info, models: ["Decay", "Other"], complete: true } };
+    const el = await mount();
+    const select = el.querySelector("select[aria-label=model]") as HTMLSelectElement;
+    expect(select.value).toBe("Other"); // the last model is simulated unless one is chosen
+    expect(calls.filter((c) => c.path === "/check").at(-1)!.body.className).toBeUndefined();
+    await act(async () => {
+      select.value = "Decay";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    expect(calls.filter((c) => c.path === "/check").at(-1)!.body.className).toBe("Decay");
+    await click(button("Run"));
+    await settle(300);
+    expect(calls.find((c) => c.method === "POST" && c.path === "/runs")!.body.model.className).toBe("Decay");
+    // a name that does not exist (any more) is dropped
+    checkReply = { ok: false, diagnostics: [], info: { name: "", description: "", hybrid: false, parameters: [], variables: [], models: ["Other"], complete: false } };
+    const editor = el.querySelector("[data-testid=editor]") as HTMLTextAreaElement;
+    await act(async () => {
+      editor.value = "model Other end Other;";
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+    await settle(600);
+    expect(calls.filter((c) => c.path === "/check").at(-1)!.body.className).toBeUndefined();
+  });
+
   it("loads another example and clears the result", async () => {
     const el = await mount();
     await click(button("Run"));

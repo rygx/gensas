@@ -69,7 +69,9 @@ namespace che {
 		struct ModelInfo {
 			std::string name;
 			std::string description;
-			bool hybrid = false; // has events (discrete variables, if/when, time)
+			std::vector<std::string> models; // every model in the source; `name` is the one that is simulated
+			bool complete = true;			 // false if the simulated model could not be read: only `models` is filled
+			bool hybrid = false;			 // has events (discrete variables, if/when, time)
 			std::vector<ModelVariable> variables;
 			std::vector<ModelParameter> parameters;
 		};
@@ -84,6 +86,8 @@ namespace che {
 			// The model: a file, or the Modelica text itself when `modelFile` is empty.
 			std::string modelFile;
 			std::string modelSource;
+			// Which model of the source to simulate (empty: the last one).
+			std::string className;
 			// Replacements for values in the model text: parameter values and start values, by name ("k",
 			// "x[2]"; an array name sets all its elements). Booleans are 0 and 1.
 			std::map<std::string, double> parameters;

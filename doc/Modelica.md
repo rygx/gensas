@@ -17,7 +17,7 @@ end Name;
 ```
 
 * A file can hold several `model`s, `function`s and `package`s. The last model is simulated; `model.className` in a job (see [Job format](JobFormat.md)) picks another. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
-* Not supported: nested models, `connector`/`connect` and `initial algorithm` sections (they give an error). See [Components](#components) for models used inside models and [Inheritance](#inheritance) for `extends`.
+* Not supported: nested models and `initial algorithm` sections (they give an error). See [Components](#components) for models used inside models and [Inheritance](#inheritance) for `extends`.
 
 ## Declarations
 
@@ -83,7 +83,7 @@ A `model`, `block` or `record` of the source can be used as a component of the s
 * Modifications: `Tank a(k = 0.4)` sets a parameter (a constant expression, which may use parameters declared earlier), `a(h(start = 2))` sets a start value, `a(inner(k = 1))` or `a(inner.k = 1)` reach into a component of the component. A modification of a variable that is not a parameter (`Tank a(qout = 1)`) adds the equation `a.qout = 1`. The job's values win over the modifications, and a name the class does not have is an error.
 * `parameter Pt c(x = 2, y = 3);` makes every variable of the record `Pt` a parameter, so records are the way to group parameters. `input` variables of a component can stay without a binding: the model around it must give them an equation (`b.qin = a.qout;`).
 * Names of packages, functions, types and classes, and `time`, are not renamed inside a component. A class that contains itself is an error.
-* Not supported: arrays of components (`Tank t[3];`), functions defined inside a class that is used as a component (define them before the class), `connector`s and `connect` equations, redeclarations and `inner`/`outer`.
+* Not supported: arrays of components (`Tank t[3];`), functions defined inside a class that is used as a component (define them before the class), redeclarations and `inner`/`outer`.
 
 ## Inheritance
 
@@ -109,6 +109,40 @@ model Fast = Derived(k = 10) "a short class definition";
 
 * The base class is read where the `extends` stands, so its equations come before the declarations that follow the `extends`; a base class that needs a parameter of the class that extends it (for a `for` range, say) cannot be used. Declaring a name that the base class already has is an error.
 * Not supported: functions defined inside a base class (define them before it), base classes inside packages, `extends` after the first equation section, `redeclare`.
+
+## Connectors
+
+```modelica
+connector Pin
+  Real v;
+  flow Real i;
+end Pin;
+
+model Resistor
+  parameter Real R = 1;
+  Pin p, n;
+  Real u;
+equation
+  u = p.v - n.v;
+  0 = p.i + n.i;
+  p.i = u/R;
+end Resistor;
+
+model Circuit
+  Source s(V = 5);
+  Resistor r(R = 2);
+  Ground g;
+equation
+  connect(s.p, r.p);
+  connect(r.n, s.n);
+  connect(s.n, g.p);
+end Circuit;
+```
+
+A `connector` is a class of variables that components share; a `flow` variable is a flow (current, mass flow), the others are potentials (voltage, pressure) or signals. A connector is declared as a component (`Pin p, n;`) and its variables are named `p.v`, `p.i`. Each `connect(a, b)` in the equation section of a class joins two connectors: the connectors that are joined, directly or through others, form a set; the potentials of a set are equal (one equation for each connector after the first) and the flows add up to zero. For the flows, connectors of the components of the class count with a plus sign and connectors of the class itself with a minus sign, so a class can pass a connection through (`connect(p, r.p)` in a branch whose own connector is `p`). The flow of a connector of a component that no `connect` mentions is zero (an open end).
+
+* Only `Real` variables in connectors; the sets are formed for each class separately, as Modelica defines them, and `connect` stands in the equation section of the class itself (not inside `if`, `for` or `when`).
+* Not supported: arrays of connectors, `stream` variables, `expandable` connectors, connecting variables that are not connectors, and `Connections.*` operators.
 
 ## Algorithm sections
 

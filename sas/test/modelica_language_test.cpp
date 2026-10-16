@@ -724,6 +724,82 @@ static void testExtends() {
 	fails("model A\n  function f\n    input Real a;\n    output Real b;\n  algorithm\n    b := a;\n  end f;\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend A;\nmodel M\n  extends A;\nend M;\n", "function inside a class used as a component");
 }
 
+// Connectors and connect(): potentials are equal, flows add up to zero.
+static void testConnectors() {
+	const string parts =
+		"connector Pin\n"
+		"  Real v;\n"
+		"  flow Real i;\n"
+		"end Pin;\n"
+		"model Resistor\n"
+		"  parameter Real R = 1;\n"
+		"  Pin p, n;\n"
+		"  Real u;\n"
+		"equation\n"
+		"  u = p.v - n.v;\n"
+		"  0 = p.i + n.i;\n"
+		"  p.i = u / R;\n"
+		"end Resistor;\n"
+		"model Capacitor\n"
+		"  parameter Real C = 1;\n"
+		"  Pin p, n;\n"
+		"  Real u(start = 0);\n"
+		"equation\n"
+		"  u = p.v - n.v;\n"
+		"  0 = p.i + n.i;\n"
+		"  C * der(u) = p.i;\n"
+		"end Capacitor;\n"
+		"model Source\n"
+		"  parameter Real V = 1;\n"
+		"  Pin p, n;\n"
+		"equation\n"
+		"  V = p.v - n.v;\n"
+		"  0 = p.i + n.i;\n"
+		"end Source;\n"
+		"model Ground\n"
+		"  Pin p;\n"
+		"equation\n"
+		"  p.v = 0;\n"
+		"end Ground;\n";
+	Simulation rc(job((parts + "model RC\n  Source s(V = 5);\n  Resistor r(R = 2);\n  Capacitor c(C = 0.5);\n  Ground g;\nequation\n  connect(s.p, r.p);\n  connect(r.n, c.p);\n  connect(c.n, s.n);\n  connect(s.n, g.p);\nend RC;\n").c_str(), 1.0));
+	CHECK(rc.run());
+	CHECK_NEAR(lastValue(rc.result(), "c.u"), 5.0 * (1.0 - std::exp(-1.0)), 1e-4);
+	CHECK_NEAR(lastValue(rc.result(), "r.p.i"), (5.0 * std::exp(-1.0)) / 2.0, 1e-4);
+	CHECK_NEAR(lastValue(rc.result(), "s.p.i"), -lastValue(rc.result(), "r.p.i"), 1e-9);
+	CHECK_NEAR(lastValue(rc.result(), "g.p.i"), 0.0, 1e-9);
+	// a class with connectors of its own (outside connectors) and a connection inside: the same circuit, with the
+	// resistor and the capacitor in a branch; a node with three connectors; an unconnected pin has zero flow
+	const char *nested =
+		"model Branch\n  Pin p, n;\n  Resistor r(R = 2);\n  Capacitor c(C = 0.5);\nequation\n  connect(p, r.p);\n  connect(r.n, c.p);\n  connect(c.n, n);\nend Branch;\n"
+		"model Top\n  Source s(V = 5);\n  Branch b;\n  Resistor spare;\n  Ground g;\nequation\n  connect(s.p, b.p);\n  connect(b.n, s.n);\n  connect(s.n, g.p);\n  connect(s.p, spare.p);\n  connect(spare.n, s.n);\nend Top;\n";
+	Simulation tree(job((parts + nested).c_str(), 1.0));
+	CHECK(tree.run());
+	CHECK_NEAR(lastValue(tree.result(), "b.c.u"), 5.0 * (1.0 - std::exp(-1.0)), 1e-4);
+	CHECK_NEAR(lastValue(tree.result(), "spare.p.i"), 5.0, 1e-9); // R = 1 across 5 V
+	CHECK_NEAR(lastValue(tree.result(), "s.p.i"), -(5.0 + lastValue(tree.result(), "b.p.i")), 1e-6);
+	Simulation open(job((parts + "model Top\n  Source s(V = 5);\n  Resistor r;\n  Ground g;\nequation\n  connect(s.p, r.p);\n  connect(s.n, g.p);\n  connect(r.n, s.n);\nend Top;\n").c_str(), 1.0));
+	CHECK(open.run());
+	CHECK_NEAR(lastValue(open.result(), "r.p.i"), 5.0, 1e-9);
+	CHECK_NEAR(lastValue(open.result(), "s.p.i"), -5.0, 1e-9);
+	// an unconnected connector of a component: its flow is zero (a resistor with one open end carries no current)
+	Simulation floating(job((parts + "model Top\n  Source s(V = 5);\n  Resistor r;\n  Ground g;\nequation\n  connect(s.p, r.p);\n  connect(s.n, g.p);\nend Top;\n").c_str(), 1.0));
+	CHECK(floating.run());
+	CHECK_NEAR(lastValue(floating.result(), "r.n.i"), 0.0, 1e-12);
+	CHECK_NEAR(lastValue(floating.result(), "r.p.i"), 0.0, 1e-9);
+	CHECK_NEAR(lastValue(floating.result(), "r.n.v"), 5.0, 1e-9); // no current, no voltage drop
+	auto fails = [&](const string &text, const char *needle) {
+		Simulation bad(job((parts + text).c_str(), 1.0));
+		CHECK(!bad.check());
+		CHECK(bad.error().find(needle) != string::npos);
+	};
+	fails("model Top\n  Source s;\n  Real x;\nequation\n  connect(s.p, x);\n  x = 1;\nend Top;\n", "'x' is not a connector");
+	fails("connector Other\n  Real w;\nend Other;\nmodel Top\n  Source s;\n  Other o;\nequation\n  connect(s.p, o);\nend Top;\n", "do not have the same variables");
+	fails("model Top\n  Source s;\n  Ground g;\nequation\n  if time > 1 then\n    connect(s.p, g.p);\n  end if;\nend Top;\n", "only allowed in the equation section");
+	fails("model Top\n  Source s;\n  Ground g;\nequation\n  connect(s.p);\nend Top;\n", "needs the names of two connectors");
+	fails("expandable connector E\n  Real v;\nend E;\nmodel Top\n  E e;\nend Top;\n", "expandable connectors are not supported");
+	fails("connector S\n  Real v;\n  stream Real h;\nend S;\nmodel Top\n  S a;\nend Top;\n", "stream variables are not supported");
+}
+
 // Types made with `type T = Real(...)`: unit and start values come with the type, the variable can change them.
 static void testTypeAliases() {
 	const char *src =
@@ -929,6 +1005,7 @@ int main() {
 	testTypeAliases();
 	testComponents();
 	testExtends();
+	testConnectors();
 	testArrayExpressions();
 	testExpSeriesAccuracy();
 	testPowerOperator();

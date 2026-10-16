@@ -30,6 +30,7 @@
 #include "sas/SasLexico.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -992,7 +993,7 @@ namespace che {
 			}
 
 			bool startsDeclaration(int tok) {
-				return tok == TK_K_PARA || tok == TK_K_CONSTANT || tok == TK_K_DISCRETE || tok == TK_K_INPUT || tok == TK_K_OUTPUT || tok == TK_K_REAL || tok == TK_K_INTEGER || tok == TK_K_BOOLEAN;
+				return tok == TK_K_PARA || tok == TK_K_CONSTANT || tok == TK_K_DISCRETE || tok == TK_K_INPUT || tok == TK_K_OUTPUT || tok == TK_K_FLOW || tok == TK_K_STREAM || tok == TK_K_REAL || tok == TK_K_INTEGER || tok == TK_K_BOOLEAN;
 			}
 
 			// Skips `annotation(...)`, which does not change the equations. The tokens inside are scanned without
@@ -1107,7 +1108,7 @@ namespace che {
 				}
 			}
 
-			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isConstant, bool isDiscrete, bool isInput, const vector<int> &typeDims, const vector<const ParserState *> &aliasMods) {
+			void parseDeclarator(SasModelParser *parser, Type ty, bool isParam, bool isConstant, bool isDiscrete, bool isInput, bool isFlow, const vector<int> &typeDims, const vector<const ParserState *> &aliasMods) {
 				shared_ptr<IdPearl> var = parser->currentId;
 				const string name = (const char *)var->str;
 				const int line = parser->coord.line;
@@ -1147,6 +1148,7 @@ namespace che {
 					el->idTy = idTy;
 					el->isConstant = isConstant;
 					el->isInput = isInput;
+					el->isFlow = isFlow;
 				}
 
 				// the modifications of the type come first, then those written at the variable
@@ -1231,10 +1233,14 @@ namespace che {
 
 			// One declaration statement: prefixes, a type and one or more declarators separated by commas.
 			void parseDeclaration(SasModelParser *parser) {
-				bool isParam = false, isConstant = false, isDiscrete = false, isInput = false;
+				bool isParam = false, isConstant = false, isDiscrete = false, isInput = false, isFlow = false;
 				while (parser->currentToken == TK_K_PARA || parser->currentToken == TK_K_CONSTANT || parser->currentToken == TK_K_DISCRETE ||
-					   parser->currentToken == TK_K_INPUT || parser->currentToken == TK_K_OUTPUT) {
-					if (parser->currentToken == TK_K_DISCRETE) {
+					   parser->currentToken == TK_K_INPUT || parser->currentToken == TK_K_OUTPUT || parser->currentToken == TK_K_FLOW || parser->currentToken == TK_K_STREAM) {
+					if (parser->currentToken == TK_K_STREAM) {
+						parser->error("Line %d: stream variables are not supported.", parser->coord.line);
+					} else if (parser->currentToken == TK_K_FLOW) {
+						isFlow = true;
+					} else if (parser->currentToken == TK_K_DISCRETE) {
 						isDiscrete = true;
 					} else if (parser->currentToken == TK_K_INPUT) {
 						isInput = true;
@@ -1309,7 +1315,7 @@ namespace che {
 						skipStatement(parser);
 						return;
 					}
-					parseDeclarator(parser, ty, isParam, isConstant, isDiscrete, isInput, typeDims, aliasMods);
+					parseDeclarator(parser, ty, isParam, isConstant, isDiscrete, isInput, isFlow, typeDims, aliasMods);
 					if (parser->currentToken != TK_COMMA) {
 						break;
 					}
@@ -1413,6 +1419,162 @@ namespace che {
 			void parseClassBody(SasModelParser *parser, bool component);
 			bool isClassPrefix(int tok);
 
+			// The variables inside the connector `name` ("p.v", "p.i"), by the part after the name; the Real ones only.
+			map<string, shared_ptr<IdPearl>> connectorFields(SasModelParser *parser, const string &name) {
+				map<string, shared_ptr<IdPearl>> fields;
+				const string head = name + ".";
+				for (const shared_ptr<IdPearl> &id : parser->currentModel->idTable) {
+					const string full = (const char *)id->str;
+					if (id->idTy != ID_NONE && full.compare(0, head.size(), head) == 0) {
+						fields[full.substr(head.size())] = id;
+					}
+				}
+				return fields;
+			}
+
+			AstNode *mkVarNode(const shared_ptr<IdPearl> &id) {
+				AstNode *n = new AstNode();
+				n->op = OP_ID;
+				n->value.p = (decltype(n->value.p))id->str;
+				return n;
+			}
+
+			// An equation  lhs = rhs;  added to the model.
+			void addEquation(SasModelParser *parser, AstNode *lhs, AstNode *rhs, int line) {
+				AstNode *eqn = new AstNode();
+				eqn->op = OP_EQN;
+				eqn->subs[0] = lhs;
+				eqn->subs[1] = rhs;
+				shared_ptr<AstTree> tree = make_shared<AstTree>();
+				tree->pHead = eqn;
+				tree->line = line;
+				parser->currentModel->modelTrees.push_back(tree);
+			}
+
+			// A sum of variables, or 0.
+			AstNode *sumOf(const vector<shared_ptr<IdPearl>> &ids) {
+				AstNode *acc = NULL;
+				for (const shared_ptr<IdPearl> &id : ids) {
+					AstNode *n = mkVarNode(id);
+					if (acc == NULL) {
+						acc = n;
+					} else {
+						AstNode *both = new AstNode();
+						both->op = OP_ADD;
+						both->nodeKind = NK_Expression;
+						both->subs[0] = acc;
+						both->subs[1] = n;
+						acc = both;
+					}
+				}
+				return acc != NULL ? acc : mkRealConst(0.0);
+			}
+
+			// The equations of the connect() statements of one class level (`prefix` is "" for the model, "x." for the
+			// component x): the connectors joined by connect() form sets; the potential variables of a set are equal and the
+			// flow variables add up to zero, the ones of connectors of the class itself counted with a minus sign. The flow
+			// variables of connectors of the components that no connect() mentions are zero.
+			void finishConnections(SasModelParser *parser, const string &prefix) {
+				const auto found = parser->connects.find(prefix);
+				vector<SasModelParser::Connect> list;
+				if (found != parser->connects.end()) {
+					list = found->second;
+					parser->connects.erase(found);
+				}
+				map<string, string> parent; // union-find over the names of the connectors
+				std::function<string(const string &)> root = [&](const string &n) {
+					const auto it = parent.find(n);
+					if (it == parent.end() || it->second == n) {
+						return n;
+					}
+					const string r = root(it->second);
+					parent[n] = r;
+					return r;
+				};
+				map<string, int> lineOf;
+				for (const SasModelParser::Connect &c : list) {
+					bool ok = true;
+					for (const string &n : {c.a, c.b}) {
+						if (parser->connectors.count(n) == 0) {
+							parser->error("Line %d: '%s' is not a connector.", c.line, n.c_str());
+							ok = false;
+						}
+					}
+					if (!ok) {
+						continue;
+					}
+					for (const string &n : {c.a, c.b}) {
+						if (parent.count(n) == 0) {
+							parent[n] = n;
+							lineOf[n] = c.line;
+						}
+					}
+					parent[root(c.a)] = root(c.b);
+				}
+				map<string, vector<string>> sets; // root -> members, in order of appearance
+				for (const SasModelParser::Connect &c : list) {
+					for (const string &n : {c.a, c.b}) {
+						if (parent.count(n) > 0) {
+							vector<string> &m = sets[root(n)];
+							if (std::find(m.begin(), m.end(), n) == m.end()) {
+								m.push_back(n);
+							}
+						}
+					}
+				}
+				for (const auto &set : sets) {
+					const vector<string> &members = set.second;
+					const int line = lineOf[members[0]];
+					const map<string, shared_ptr<IdPearl>> first = connectorFields(parser, members[0]);
+					bool same = true;
+					for (size_t k = 1; k < members.size() && same; k++) {
+						const map<string, shared_ptr<IdPearl>> other = connectorFields(parser, members[k]);
+						same = other.size() == first.size();
+						for (const auto &f : first) {
+							const auto o = other.find(f.first);
+							same = same && o != other.end() && o->second->isFlow == f.second->isFlow && o->second->ty == f.second->ty;
+						}
+						if (!same) {
+							parser->error("Line %d: the connectors '%s' and '%s' do not have the same variables.", line, members[0].c_str(), members[k].c_str());
+						}
+					}
+					if (!same) {
+						continue;
+					}
+					for (const auto &f : first) {
+						if (f.second->ty != TY_REAL) {
+							parser->error("Line %d: '%s.%s': only Real variables in connectors are supported.", line, members[0].c_str(), f.first.c_str());
+							continue;
+						}
+						if (!f.second->isFlow) {
+							for (size_t k = 1; k < members.size(); k++) { // potential variables are equal
+								addEquation(parser, mkVarNode(f.second), mkVarNode(connectorFields(parser, members[k]).at(f.first)), line);
+							}
+						} else {
+							vector<shared_ptr<IdPearl>> inside, outside;
+							for (const string &m : members) {
+								const shared_ptr<IdPearl> v = connectorFields(parser, m).at(f.first);
+								(m.substr(prefix.size()).find('.') != string::npos ? inside : outside).push_back(v);
+							}
+							addEquation(parser, sumOf(inside), sumOf(outside), line);
+						}
+					}
+				}
+				// connectors of the components that are not connected
+				for (const string &c : parser->connectors) {
+					const string rel = c.compare(0, prefix.size(), prefix) == 0 ? c.substr(prefix.size()) : string();
+					const size_t dot = rel.find('.');
+					if (rel.empty() || dot == string::npos || rel.find('.', dot + 1) != string::npos || parent.count(c) > 0) {
+						continue;
+					}
+					for (const auto &f : connectorFields(parser, c)) {
+						if (f.second->isFlow && f.second->ty == TY_REAL) {
+							addEquation(parser, mkVarNode(f.second), mkRealConst(0.0), f.second->line);
+						}
+					}
+				}
+			}
+
 			// Modifications under `scope` ("a." or empty) that no variable took; each is reported once.
 			void reportUnusedMods(SasModelParser *parser, const string &scope, const string &owner, int line) {
 				for (int pass = 0; pass < 2; pass++) {
@@ -1443,6 +1605,9 @@ namespace che {
 					if (parser->currentToken == TK_K_PARTIAL && prefix != NULL) {
 						parser->error("Line %d: the partial class '%s' cannot be used as a component.", line, className.c_str());
 					}
+					if (parser->currentToken == TK_K_EXPANDABLE) {
+						parser->error("Line %d: expandable connectors are not supported ('%s').", line, className.c_str());
+					}
 					getNextToken(parser);
 				}
 				parser->noInject = true; // the name of the class is not a symbol of the model
@@ -1469,6 +1634,7 @@ namespace che {
 				const string prefix = flat + ".";
 				readClassBody(parser, cls, className, line, &prefix);
 				reportUnusedMods(parser, prefix, "'" + flat + "'", line); // a modification of something the class does not have
+				finishConnections(parser, prefix);
 				parser->forceParam = savedForce;
 				parser->forceConstant = savedConstant;
 			}
@@ -1536,6 +1702,9 @@ namespace che {
 						skipAnnotation(parser);
 					}
 					instantiate(parser, cls, className, flat, isParam, isConstant, line);
+					if (cls.kind == TK_K_CONNECTOR) {
+						parser->connectors.insert(flat);
+					}
 					if (parser->currentToken != TK_COMMA) {
 						break;
 					}
@@ -1787,6 +1956,25 @@ namespace che {
 						}
 					} else if (name == "terminate" || name == "assert") {
 						valid = true;
+					} else if (name == "connect") {
+						if (ctx != CTX_TOP) {
+							parser->error("Line %d: connect() is only allowed in the equation section of a class (not in if, for or when).", line);
+						} else {
+							const AstNode *a = expr->subs[1];
+							const AstNode *b = a != NULL ? a->next : NULL;
+							if (a == NULL || b == NULL || b->next != NULL || a->op != OP_ID || b->op != OP_ID || a->ty == TY_FUNCTION || b->ty == TY_FUNCTION) {
+								parser->error("Line %d: connect() needs the names of two connectors (arrays of connectors are not supported).", line);
+							} else {
+								SasModelParser::Connect c;
+								c.a = (const char *)a->value.p;
+								c.b = (const char *)b->value.p;
+								c.line = line;
+								parser->connects[parser->idPrefix].push_back(c);
+							}
+						}
+						freeAst(expr);
+						expect(parser, TK_SEMICOLON);
+						return NULL;
 					}
 				}
 				if (!valid) {
@@ -2816,7 +3004,7 @@ namespace che {
 			}
 			// Models, blocks and records can be used as components of the model.
 			for (const ClassSpan &c : spans) {
-				if (c.kind == TK_K_MDL || c.kind == TK_K_BLOCK || c.kind == TK_K_RECORD) {
+				if (c.kind == TK_K_MDL || c.kind == TK_K_BLOCK || c.kind == TK_K_RECORD || c.kind == TK_K_CONNECTOR) {
 					SasModelParser::ClassRef ref;
 					ref.kind = c.kind;
 					ref.line = c.line;
@@ -2828,7 +3016,7 @@ namespace che {
 			}
 			// Functions and packages first, so that the model can use them wherever they stand in the source.
 			for (const ClassSpan &c : spans) {
-				if (c.kind == TK_K_MDL || c.kind == TK_K_BLOCK || c.kind == TK_K_RECORD) {
+				if (c.kind == TK_K_MDL || c.kind == TK_K_BLOCK || c.kind == TK_K_RECORD || c.kind == TK_K_CONNECTOR) {
 					continue;
 				}
 				restoreState(parser, c.at);
@@ -2903,6 +3091,7 @@ namespace che {
 				parseClassBody(parser, false);
 				parser->instanceStack.pop_back();
 				reportUnusedMods(parser, string(), "the model", parser->coord.line);
+				finishConnections(parser, string());
 			}
 
 			// A function inside a model is read where it stands; inside a class used as a component it is not supported

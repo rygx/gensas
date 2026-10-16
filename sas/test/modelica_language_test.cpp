@@ -470,6 +470,52 @@ static void testArrays() {
 	CHECK_NEAR(lastValue(e.result(), "x[1]"), -2.0 + (std::exp(-1.0) + 2.0) * std::exp(-(t - 1.0)), 1e-3);
 }
 
+// The series of exp is exact to high order: with a loose error tolerance the result is still accurate,
+// which it is not when the higher-order coefficients are wrong (the step is then limited by the tolerance).
+static void testExpSeriesAccuracy() {
+	const char *src = "model M\n  Real u(start = 0);\n  Real z;\nequation\n  der(u) = 1;\n  z = exp(u);\nend M;\n";
+	ModelicaJob j = job(src, 2.0);
+	j.options.errorTol = 1e-3;
+	Simulation sim(j);
+	CHECK(sim.run());
+	CHECK_NEAR(lastValue(sim.result(), "z"), std::exp(2.0), 1e-6);
+}
+
+// x^y: small integer powers become products, other powers go through exp and log.
+static void testPowerOperator() {
+	// der(x) = -x^2 has the solution x = 1/(1 + t).
+	Simulation a(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -x^2;\nend M;\n", 2.0));
+	CHECK(a.run());
+	CHECK_NEAR(lastValue(a.result(), "x"), 1.0 / 3.0, 1e-4);
+	const char *src =
+		"model M\n  parameter Real q = 2;\n  Real u(start = 0.5);\n  Real c, r, n, h, b, v, e, p;\nequation\n"
+		"  der(u) = 0.7;\n  c = u^3;\n  r = u^q;\n  n = u^(-2);\n  h = u^0.5;\n  b = 2^u;\n  v = u^u;\n  e = (u + 1)^2;\n  p = u^2.5;\nend M;\n";
+	Simulation sim(job(src, 3.0));
+	CHECK(sim.run());
+	const double u = 0.5 + 0.7 * sim.result().time.back();
+	CHECK_NEAR(lastValue(sim.result(), "c"), std::pow(u, 3), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "r"), std::pow(u, 2), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "n"), std::pow(u, -2), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "h"), std::sqrt(u), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "b"), std::pow(2.0, u), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "v"), std::pow(u, u), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "e"), std::pow(u + 1, 2), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "p"), std::pow(u, 2.5), 1e-4);
+}
+
+// A function of constants in an equation is a constant.
+static void testConstantCalls() {
+	const char *src =
+		"model M\n  parameter Real q = 2;\n  Real u(start = 0.5);\n  Real a, b, c;\nequation\n"
+		"  der(u) = 0.7;\n  a = exp(1)*u;\n  b = sin(0.5) + u + exp(q);\n  c = atan2(1, 2) + sqrt(2);\nend M;\n";
+	Simulation sim(job(src, 3.0));
+	CHECK(sim.run());
+	const double u = 0.5 + 0.7 * sim.result().time.back();
+	CHECK_NEAR(lastValue(sim.result(), "a"), std::exp(1.0) * u, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "b"), std::sin(0.5) + u + std::exp(2.0), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "c"), std::atan2(1.0, 2.0) + std::sqrt(2.0), 1e-4);
+}
+
 // A run ends exactly at the requested end time, also when the last steps are short (exp grows fast).
 static void testEndTimeIsReached() {
 	const char *src = "model M\n  Real u(start = -1);\n  Real z;\nequation\n  der(u) = 1;\n  z = exp(u);\nend M;\n";
@@ -525,6 +571,9 @@ static void testDomainChecks() {
 }
 
 int main() {
+	testExpSeriesAccuracy();
+	testPowerOperator();
+	testConstantCalls();
 	testEndTimeIsReached();
 	testDomainChecks();
 	testAtan2();

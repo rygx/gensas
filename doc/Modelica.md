@@ -17,7 +17,7 @@ end Name;
 ```
 
 * A file can hold several `model`s, `function`s and `package`s. The last model is simulated; `model.className` in a job (see [Job format](JobFormat.md)) picks another. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
-* Not supported: `extends`, nested models, `record`, `connector`/`connect` and `initial algorithm` sections (they give an error).
+* Not supported: `extends`, nested models, `connector`/`connect` and `initial algorithm` sections (they give an error). See [Components](#components) for models used inside models.
 
 ## Declarations
 
@@ -56,6 +56,34 @@ end Fall;
 ```
 
 A `package` holds `constant`s and `function`s (and packages nested in it), used with qualified names such as `Phys.g` and `Phys.drag(v)`. A constant is a number or a constant expression of earlier constants of the same package. Functions of a package can call each other without the prefix. A package can also hold types (see Declarations). Not supported: models and `import` in a package.
+
+## Components
+
+```modelica
+model Tank
+  parameter Real k = 0.5;
+  Real h(start = 1);
+  input Real qin;
+  Real qout;
+equation
+  der(h) = qin - qout;
+  qout = k*h;
+end Tank;
+
+model TwoTanks
+  Tank a(h(start = 2), k = 0.4), b(h(start = 0), k = 0.2);
+equation
+  a.qin = 0;
+  b.qin = a.qout;
+end TwoTanks;
+```
+
+A `model`, `block` or `record` of the source can be used as a component of the simulated model. Its variables, parameters and equations are added to the model once for each component, with the component's name in front: `a.h`, `b.h`, `a.k` (that is also how they are named in the results, and how a job names them in `model.parameters` and `model.start`). Components can contain components. In expressions `a.h` is the variable, and `a.h[2]` an element of an array in the component.
+
+* Modifications: `Tank a(k = 0.4)` sets a parameter (a constant expression, which may use parameters declared earlier), `a(h(start = 2))` sets a start value, `a(inner(k = 1))` or `a(inner.k = 1)` reach into a component of the component. A modification of a variable that is not a parameter (`Tank a(qout = 1)`) adds the equation `a.qout = 1`. The job's values win over the modifications, and a name the class does not have is an error.
+* `parameter Pt c(x = 2, y = 3);` makes every variable of the record `Pt` a parameter, so records are the way to group parameters. `input` variables of a component can stay without a binding: the model around it must give them an equation (`b.qin = a.qout;`).
+* Names of packages, functions, types and classes, and `time`, are not renamed inside a component. A class that contains itself is an error.
+* Not supported: arrays of components (`Tank t[3];`), functions defined inside a class that is used as a component (define them before the class), `connector`s and `connect` equations, `extends`, redeclarations and `inner`/`outer`.
 
 ## Algorithm sections
 

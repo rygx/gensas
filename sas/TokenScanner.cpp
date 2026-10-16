@@ -426,15 +426,22 @@ namespace che {
 			}
 			if (tok == TK_ID) {
 				tok = findDefaultFunctions((char *)start, (int)(parser->reader.cursur - start));
-				parser->currentId = lookupIdentifier(parser, (char *)start, (int)(parser->reader.cursur - start));
 				if (tok != TK_ID) {
+					parser->currentId = lookupIdentifier(parser, (char *)start, (int)(parser->reader.cursur - start));
 					parser->currentId->idTy = ID_FUNC;
+					parser->value.p = (char *)parser->currentId->str;
 				}
-				parser->value.p = (char *)parser->currentId->str;
 			}
 			if (tok == TK_ID) {
-				// record ID value
-				parser->currentId = lookupIdentifier(parser, (char *)start, (int)(parser->reader.cursur - start));
+				// record ID value; inside a component the name gets the name of the component in front, except after a dot
+				// (a member such as the g of Phys.g) and for the names of the source as a whole
+				const int len = (int)(parser->reader.cursur - start);
+				if (!parser->idPrefix.empty() && parser->currentToken != TK_DOT && !parser->isGlobalName(string((char *)start, len))) {
+					const string full = parser->idPrefix + string((char *)start, len);
+					parser->currentId = lookupIdentifier(parser, full.c_str(), (int)full.size());
+				} else {
+					parser->currentId = lookupIdentifier(parser, (char *)start, len);
+				}
 				parser->value.p = (char *)parser->currentId->str;
 			}
 			return tok;

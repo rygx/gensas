@@ -106,6 +106,35 @@ namespace che {
 				ParserState mods;
 			};
 			std::map<std::string, TypeAlias> typeAliases;
+			// Classes of the source that can be instantiated as components (model, block, record), by name.
+			struct ClassRef {
+				int kind = 0;
+				int line = 0;
+				ParserState at;
+			};
+			std::map<std::string, ClassRef> classes;
+			// While the body of a component is read (`Inner a;`), the name of the component and a dot ("a."): every name
+			// declared or used in the body gets it in front, which makes the variables of the component ordinary variables
+			// of the model named "a.x". Names that belong to the source as a whole (packages, functions, classes, types and
+			// built-ins) are not changed.
+			std::string idPrefix;
+			// The first parts of the names of packages, functions, types and classes.
+			std::set<std::string> globalRoots;
+			// When set, `a.x` in an expression is the variable "a.x" unless `a` is a global root.
+			bool collapseMembers = false;
+			// Values the components ask for (Inner a(k = 2, x(start = 1))), by full name ("a.k", "a.x"); the job's own
+			// values win over them.
+			std::map<std::string, double> instanceParams, instanceStarts;
+			std::set<std::string> usedInstanceMods;
+			// Classes whose bodies are being read, to stop a class that contains itself.
+			std::vector<std::string> instanceStack;
+			// Names of the components declared so far ("a", "a.b"), and whether the component being read was declared
+			// `parameter` or `constant`, which makes every variable in it one.
+			std::set<std::string> components;
+			bool forceParam = false, forceConstant = false;
+			bool isGlobalName(const std::string &name) const {
+				return name == "time" || name == "size" || name == "sum" || name == "prod" || name == "AssertionLevel" || globalRoots.count(name) > 0 || functions.count(name) > 0;
+			}
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
 			// Every error and warning, also when `diag` is null.

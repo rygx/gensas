@@ -28,6 +28,7 @@
 #include "sas/MathFunctions.h"
 #include "sas/SasExpr.h"
 #include "sas/SasLexico.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -188,6 +189,14 @@ namespace che {
 			}
 
 			AstNode *mkIntConst(long v);
+			AstNode *mkRealConst(double v) {
+				AstNode *n = new AstNode();
+				n->op = OP_CONST;
+				n->ty = TY_REAL;
+				n->nodeKind = NK_Expression;
+				n->value.d = v;
+				return n;
+			}
 			void freeAst(AstNode *p);
 
 			// "a" for an identifier, "A.B.c" for a member chain; empty for anything else.
@@ -1033,14 +1042,19 @@ namespace che {
 			// One variable (or array) of a declaration: name, dimensions, modification, binding and description.
 			// Replaces values by those the job asks for (SasModelParser::parameterOverrides/startOverrides).
 			void applyOverrides(SasModelParser *parser, const vector<shared_ptr<IdPearl>> &elems, const string &name, bool isParam, bool isConstant, int line) {
-				if (parser->parameterOverrides.empty() && parser->startOverrides.empty()) {
+				if (parser->parameterOverrides.empty() && parser->startOverrides.empty() && parser->instanceParams.empty() && parser->instanceStarts.empty()) {
 					return;
 				}
 				for (const shared_ptr<IdPearl> &el : elems) {
 					const string elemName = (const char *)el->str;
-					for (int pass = 0; pass < 2; pass++) {
-						const map<string, double> &table = pass == 0 ? parser->parameterOverrides : parser->startOverrides;
-						const char *what = pass == 0 ? "parameters" : "start";
+					// the values asked for by components first, then the job's, which win
+					for (int pass = 0; pass < 4; pass++) {
+						const bool fromComponent = pass < 2;
+						const bool startPass = pass == 1 || pass == 3;
+						const map<string, double> &table = pass == 0 ? parser->instanceParams : pass == 1 ? parser->instanceStarts
+																							: pass == 2	  ? parser->parameterOverrides
+																										  : parser->startOverrides;
+						const char *what = fromComponent ? "modification" : (startPass ? "start" : "parameters");
 						auto hit = table.find(elemName);
 						if (hit == table.end()) {
 							hit = table.find(name);
@@ -1049,18 +1063,39 @@ namespace che {
 							continue;
 						}
 						parser->usedOverrides.insert(string(what) + "." + hit->first);
+						if (fromComponent) {
+							parser->usedInstanceMods.insert(string(startPass ? "start:" : "value:") + hit->first);
+						}
 						const double v = hit->second;
 						bool bad = true;
-						if (isConstant) {
+						if (isConstant && !fromComponent) {
 							parser->error("Line %d: %s.%s: '%s' is a constant and cannot be changed.", line, what, hit->first.c_str(), name.c_str());
-						} else if (pass == 0 && !isParam) {
+						} else if (!startPass && !isParam && !fromComponent) {
 							parser->error("Line %d: %s.%s: '%s' is not a parameter; use start to change a start value.", line, what, hit->first.c_str(), name.c_str());
-						} else if (pass == 1 && isParam) {
+						} else if (startPass && isParam && !fromComponent) {
 							parser->error("Line %d: %s.%s: '%s' is a parameter; give its value under parameters.", line, what, hit->first.c_str(), name.c_str());
 						} else if (el->ty == TY_BOOL && v != 0.0 && v != 1.0) {
 							parser->error("Line %d: %s.%s: '%s' is a Boolean and must be 0 or 1 (false or true).", line, what, hit->first.c_str(), name.c_str());
 						} else if (el->ty == TY_INT && v != std::floor(v)) {
 							parser->error("Line %d: %s.%s: '%s' is an Integer and needs a whole number.", line, what, hit->first.c_str(), name.c_str());
+						} else if (fromComponent && !startPass && !isParam) {
+							// Inner a(x = 3) with x a variable: the equation a.x = 3
+							if (el->idTy != ID_VAR) {
+								parser->error("Line %d: modification %s: '%s' is a discrete variable; it cannot be given a value this way.", line, hit->first.c_str(), name.c_str());
+							} else {
+								AstNode *lhs = new AstNode();
+								lhs->op = OP_ID;
+								lhs->value.p = (decltype(lhs->value.p))el->str;
+								AstNode *eqn = new AstNode();
+								eqn->op = OP_EQN;
+								eqn->subs[0] = lhs;
+								eqn->subs[1] = mkRealConst(v);
+								shared_ptr<AstTree> tree = make_shared<AstTree>();
+								tree->pHead = eqn;
+								tree->line = line;
+								parser->currentModel->modelTrees.push_back(tree);
+								bad = false;
+							}
 						} else {
 							setValue(el.get(), v);
 							bad = false;
@@ -1164,17 +1199,18 @@ namespace che {
 					freeAst(value);
 				} else if (isParam) {
 					// a parameter without a binding needs a value from the job, for every element
-					bool missing = parser->parameterOverrides.count(name) == 0;
+					auto given = [&](const string &key) { return parser->parameterOverrides.count(key) > 0 || parser->instanceParams.count(key) > 0; };
+					bool missing = !given(name);
 					if (missing) {
 						missing = elems.empty();
 						for (const shared_ptr<IdPearl> &el : elems) {
-							missing = missing || parser->parameterOverrides.count((const char *)el->str) == 0;
+							missing = missing || !given((const char *)el->str);
 						}
 					}
 					if (missing) {
 						parser->error("Parameter '%s' has no value.", name.c_str());
 					}
-				} else if (isInput) {
+				} else if (isInput && parser->idPrefix.empty()) { // an input of a component is driven by an equation of the model around it
 					parser->error("Input '%s' has no value; give it a binding, for example `input Real u = 1;`.", name.c_str());
 				}
 
@@ -1191,6 +1227,8 @@ namespace che {
 				}
 			}
 
+			void parseComponents(SasModelParser *parser, const SasModelParser::ClassRef &cls, const string &className, bool isParam, bool isConstant);
+
 			// One declaration statement: prefixes, a type and one or more declarators separated by commas.
 			void parseDeclaration(SasModelParser *parser) {
 				bool isParam = false, isConstant = false, isDiscrete = false, isInput = false;
@@ -1205,6 +1243,10 @@ namespace che {
 						isConstant = isConstant || parser->currentToken == TK_K_CONSTANT;
 					}
 					getNextToken(parser);
+				}
+				if (parser->forceParam) { // in a component declared `parameter`
+					isParam = true;
+					isConstant = isConstant || parser->forceConstant;
 				}
 				Type ty = TY_REAL;
 				vector<const ParserState *> aliasMods; // from the innermost type to the outermost
@@ -1229,6 +1271,14 @@ namespace che {
 						getNextToken(parser);
 					}
 					const SasModelParser::TypeAlias *alias = findTypeAlias(parser, string(), typeName);
+					const auto cls = parser->classes.find(typeName);
+					if (alias == NULL && cls != parser->classes.end()) {
+						if (isDiscrete || isInput) {
+							parser->error("Line %d: a component of the class '%s' cannot be declared discrete or input.", typeLine, typeName.c_str());
+						}
+						parseComponents(parser, cls->second, typeName, isParam, isConstant);
+						return;
+					}
 					if (alias == NULL) {
 						parser->error("Line %d: unknown type '%s'.", typeLine, typeName.c_str());
 						skipStatement(parser);
@@ -1260,6 +1310,183 @@ namespace che {
 						return;
 					}
 					parseDeclarator(parser, ty, isParam, isConstant, isDiscrete, isInput, typeDims, aliasMods);
+					if (parser->currentToken != TK_COMMA) {
+						break;
+					}
+					getNextToken(parser);
+				}
+				expect(parser, TK_SEMICOLON);
+			}
+
+			// ---------------------------------------------------------------------
+			// Components: `Inner a(k = 2), b;` declares the variables of the class Inner once for each name, as
+			// "a.x", "b.x", ... The body of the class is read again for each component, with the name in front of
+			// every name that is declared or used (see SasModelParser::idPrefix).
+			// ---------------------------------------------------------------------
+
+			bool isAttributeName(const string &name) {
+				static const char *const names[] = {"start", "fixed", "unit", "nominal", "min", "max", "stateSelect", "quantity", "displayUnit", NULL};
+				for (int k = 0; names[k] != NULL; k++) {
+					if (name == names[k]) {
+						return true;
+					}
+				}
+				return false;
+			}
+
+			// ( [each] name = value, name(attr = value, ...), a.b = value )  after a component name. `scope` is the
+			// name of the component and a dot ("a."); `var` is the variable whose attributes are listed ("a.x"), or empty
+			// for the modifications of the component itself.
+			void parseComponentMods(SasModelParser *parser, const string &scope, const string &var) {
+				parser->noInject = true;
+				getNextToken(parser); // consume '('
+				parser->noInject = false;
+				while (true) {
+					if (parser->currentToken == TK_K_EACH) {
+						parser->noInject = true;
+						getNextToken(parser);
+						parser->noInject = false;
+					}
+					string path;
+					if (parser->currentToken == TK_K_UNIT) {
+						path = "unit";
+					} else if (parser->currentToken == TK_ID && parser->value.p != NULL) {
+						path = (const char *)parser->value.p;
+					} else {
+						parser->error("Expect a name in the modification.");
+						break;
+					}
+					const int line = parser->coord.line;
+					getNextToken(parser);
+					while (parser->currentToken == TK_DOT) { // inner.k = 2
+						parser->noInject = true;
+						getNextToken(parser);
+						parser->noInject = false;
+						if (parser->currentToken != TK_ID) {
+							parser->error("Expect a name after '.'.");
+							break;
+						}
+						path += string(".") + (const char *)parser->value.p;
+						getNextToken(parser);
+					}
+					const bool attribute = !var.empty() && path.find('.') == string::npos && isAttributeName(path);
+					if (parser->currentToken == TK_EQN) {
+						getNextToken(parser);
+						if (attribute && path == "unit") {
+							if (parser->currentToken == TK_STRING) {
+								getNextToken(parser);
+							} else {
+								parser->error("Expect a string for the unit.");
+							}
+						} else {
+							AstNode *value = parseDeclValue(parser);
+							double v = 0.0;
+							if (!evalConst(value, parser->currentModel.get(), v)) {
+								parser->error("Line %d: the modification of '%s%s' must be a constant expression.", line, attribute ? (var + ".").c_str() : scope.c_str(), path.c_str());
+							} else if (attribute && path == "start") {
+								parser->instanceStarts.insert(make_pair(var, v)); // the outermost modification wins
+							} else if (attribute) {
+								if (path != "fixed") {
+									parser->warn("Attribute '%s' of '%s' is ignored.", path.c_str(), var.c_str());
+								}
+							} else {
+								parser->instanceParams.insert(make_pair(scope + path, v));
+							}
+							freeAst(value);
+						}
+					} else if (parser->currentToken == TK_LPAREN) {
+						parseComponentMods(parser, scope + path + ".", scope + path);
+					} else {
+						parser->error("Line %d: expect '=' or '(' after '%s' in the modification.", line, path.c_str());
+						break;
+					}
+					if (parser->currentToken != TK_COMMA) {
+						break;
+					}
+					parser->noInject = true;
+					getNextToken(parser);
+					parser->noInject = false;
+				}
+				expect(parser, TK_RPAREN);
+			}
+
+			void parseClassBody(SasModelParser *parser, bool component);
+			bool isClassPrefix(int tok);
+
+			// Reads the body of the class once more with the name of the component in front of its names.
+			void instantiate(SasModelParser *parser, const SasModelParser::ClassRef &cls, const string &className, const string &flat, bool isParam, bool isConstant, int line) {
+				const size_t depth = parser->instanceStack.size();
+				if (depth >= 16 || std::find(parser->instanceStack.begin(), parser->instanceStack.end(), className) != parser->instanceStack.end()) {
+					parser->error("Line %d: the class '%s' contains itself.", line, className.c_str());
+					return;
+				}
+				const ParserState outer = saveState(parser);
+				const string savedPrefix = parser->idPrefix;
+				const bool savedForce = parser->forceParam, savedConstant = parser->forceConstant;
+				parser->instanceStack.push_back(className);
+				restoreState(parser, cls.at);
+				while (isClassPrefix(parser->currentToken)) {
+					if (parser->currentToken == TK_K_PARTIAL) {
+						parser->error("Line %d: the partial class '%s' cannot be used as a component.", line, className.c_str());
+					}
+					getNextToken(parser);
+				}
+				parser->noInject = true; // the name of the class is not a symbol of the model
+				getNextToken(parser);	 // consume the keyword
+				parser->noInject = false;
+				parser->idPrefix = flat + ".";
+				parser->forceParam = savedForce || isParam;
+				parser->forceConstant = savedConstant || isConstant;
+				getNextToken(parser); // consume the name
+				if (parser->currentToken == TK_STRING) {
+					getNextToken(parser);
+				}
+				parseClassBody(parser, true);
+				// a modification of something the class does not have
+				const string scope = flat + ".";
+				for (int pass = 0; pass < 2; pass++) {
+					const map<string, double> &table = pass == 0 ? parser->instanceParams : parser->instanceStarts;
+					for (map<string, double>::const_iterator it = table.lower_bound(scope); it != table.end() && it->first.compare(0, scope.size(), scope) == 0; ++it) {
+						if (parser->usedInstanceMods.count(string(pass == 0 ? "value:" : "start:") + it->first) == 0) {
+							parser->error("Line %d: '%s' has no variable or parameter '%s' to modify.", line, flat.c_str(), it->first.substr(scope.size()).c_str());
+						}
+					}
+				}
+				parser->instanceStack.pop_back();
+				parser->idPrefix = savedPrefix;
+				parser->forceParam = savedForce;
+				parser->forceConstant = savedConstant;
+				restoreState(parser, outer);
+			}
+
+			void parseComponents(SasModelParser *parser, const SasModelParser::ClassRef &cls, const string &className, bool isParam, bool isConstant) {
+				while (true) {
+					if (parser->currentToken != TK_ID) {
+						parser->error("actual token %s: expect the name of a component.", Lexer::getInstance().tokenStrings[parser->currentToken]);
+						skipStatement(parser);
+						return;
+					}
+					const string flat = (const char *)parser->currentId->str;
+					const int line = parser->coord.line;
+					if (parser->currentId->idTy != ID_NONE || parser->arrayDims.count(flat) > 0 || !parser->components.insert(flat).second) {
+						parser->error("Redeclaration of '%s'.", flat.c_str());
+					}
+					getNextToken(parser);
+					if (parser->currentToken == TK_LBRACKET) {
+						parser->error("Line %d: arrays of components are not supported ('%s').", line, flat.c_str());
+						skipStatement(parser);
+						return;
+					}
+					if (parser->currentToken == TK_LPAREN) {
+						parseComponentMods(parser, flat + ".", string());
+					}
+					if (parser->currentToken == TK_STRING) {
+						getNextToken(parser);
+					}
+					if (parser->currentToken == TK_K_ANNOTATION) {
+						skipAnnotation(parser);
+					}
+					instantiate(parser, cls, className, flat, isParam, isConstant, line);
 					if (parser->currentToken != TK_COMMA) {
 						break;
 					}
@@ -1873,7 +2100,16 @@ namespace che {
 				} while (depth > 0 && parser->currentToken != TK_EOF);
 			}
 
+			// Sets a flag for the length of a scope.
+			struct FlagGuard {
+				bool &ref;
+				const bool saved;
+				FlagGuard(bool &r, bool v) : ref(r), saved(r) { ref = v; }
+				~FlagGuard() { ref = saved; }
+			};
+
 			void parseFunction(SasModelParser *parser, const string &prefix = string()) {
+				FlagGuard noCollapse(parser->collapseMembers, false); // P.g in a function body stays a package constant
 				const int line = parser->coord.line;
 				getNextToken(parser); // consume `function`
 				if (parser->currentToken != TK_ID) {
@@ -2529,9 +2765,21 @@ namespace che {
 				parser->error("The source has no model named '%s'.", parser->className.c_str());
 				return;
 			}
+			// Models, blocks and records can be used as components of the model.
+			for (const ClassSpan &c : spans) {
+				if (c.kind == TK_K_MDL || c.kind == TK_K_BLOCK || c.kind == TK_K_RECORD) {
+					SasModelParser::ClassRef ref;
+					ref.kind = c.kind;
+					ref.line = c.line;
+					ref.at = c.at;
+					if (!parser->classes.insert(make_pair(c.name, ref)).second) {
+						parser->error("Line %d: the class '%s' is defined twice.", c.line, c.name.c_str());
+					}
+				}
+			}
 			// Functions and packages first, so that the model can use them wherever they stand in the source.
 			for (const ClassSpan &c : spans) {
-				if (c.kind == TK_K_MDL) {
+				if (c.kind == TK_K_MDL || c.kind == TK_K_BLOCK || c.kind == TK_K_RECORD) {
 					continue;
 				}
 				restoreState(parser, c.at);
@@ -2555,6 +2803,20 @@ namespace che {
 				restoreState(parser, first);
 				parser->error("actual token %s: expect \"model\".", Lexer::getInstance().tokenStrings[parser->currentToken]);
 				return;
+			}
+			// names that belong to the source as a whole: they are not changed inside components
+			auto addRoot = [&](const string &name) { parser->globalRoots.insert(name.substr(0, name.find('.'))); };
+			for (const auto &f : parser->functions) {
+				addRoot(f.first);
+			}
+			for (const auto &c : parser->packageConstants) {
+				addRoot(c.first);
+			}
+			for (const auto &t : parser->typeAliases) {
+				addRoot(t.first);
+			}
+			for (const ClassSpan &c : spans) {
+				addRoot(c.name);
 			}
 			restoreState(parser, chosen->at);
 			while (isClassPrefix(parser->currentToken)) {
@@ -2587,12 +2849,29 @@ namespace che {
 					getNextToken(parser);
 				}
 
+				parser->collapseMembers = true; // a.x is a variable of the component a
+				parseClassBody(parser, false);
+			}
+
+			// A function inside a model is read where it stands; inside a class used as a component it is not supported
+			// (it would be defined once for each component).
+			void functionInClass(SasModelParser *parser, bool component) {
+				if (component) {
+					parser->error("Line %d: a function inside a class used as a component is not supported; define it before the class.", parser->coord.line);
+					skipClass(parser);
+				} else {
+					parseFunction(parser);
+				}
+			}
+
+			// The declarations, sections and `end Name;` of a model or of a class used as a component.
+			void parseClassBody(SasModelParser *parser, bool component) {
 				while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_ID || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
 					if (parser->currentToken == TK_K_ANNOTATION) {
 						skipAnnotation(parser);
 						expect(parser, TK_SEMICOLON);
 					} else if (parser->currentToken == TK_K_FUNCTION) {
-						parseFunction(parser);
+						functionInClass(parser, component);
 					} else {
 						parseDeclaration(parser);
 					}
@@ -2616,7 +2895,7 @@ namespace che {
 						getNextToken(parser);
 						parseAlgorithmSection(parser);
 					} else if (parser->currentToken == TK_K_FUNCTION) {
-						parseFunction(parser);
+						functionInClass(parser, component);
 					} else if (parser->currentToken == TK_K_EQN) {
 						getNextToken(parser);
 						parseEquationSection(parser, CTX_TOP);
@@ -2636,14 +2915,16 @@ namespace che {
 
 				if (parser->currentToken == TK_K_END) {
 					getNextToken(parser);
-					if (parser->currentToken == TK_ID && parser->currentId != parser->currentModel->modelInfo) {
+					if (!component && parser->currentToken == TK_ID && parser->currentId != parser->currentModel->modelInfo) {
 						parser->warn("End name does not match the model name.");
 					}
 					getNextToken(parser);
 					expect(parser, TK_SEMICOLON);
-					inlineUserFunctions(parser);
+					if (!component) {
+						inlineUserFunctions(parser);
+					}
 				} else {
-					parser->error("Missing end statement of model.");
+					parser->error("Missing end statement of %s.", component ? "a class" : "model");
 				}
 			}
 

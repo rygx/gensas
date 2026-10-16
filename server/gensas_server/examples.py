@@ -98,4 +98,27 @@ equation
 end StepInput;
 """,
     },
+    {
+        "id": "two_tanks",
+        "title": "Two tanks (components)",
+        "description": "A class used twice as a component; the second tank is fed by the first.",
+        "endTime": 15.0,
+        "source": """model Tank "A tank that drains through a valve"
+  parameter Real k = 0.5 "outflow coefficient";
+  Real h(start = 1) "level";
+  input Real qin "inflow";
+  Real qout "outflow";
+equation
+  der(h) = qin - qout;
+  qout = k * h;
+end Tank;
+
+model TwoTanks "Two tanks in a row"
+  Tank a(h(start = 2), k = 0.4), b(h(start = 0), k = 0.2);
+equation
+  a.qin = 0;
+  b.qin = a.qout;
+end TwoTanks;
+""",
+    },
 ]

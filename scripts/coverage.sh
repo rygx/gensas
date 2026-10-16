@@ -34,7 +34,13 @@ mkdir -p "${OUT}"
 
 export BUILD_DIR="${OUT}/build"
 # -fPIC: the same objects also go into the shared library for the Python tests.
-export EXTRA_CXXFLAGS="--coverage -fprofile-update=atomic -O0 -fPIC ${EXTRA_CXXFLAGS:-}"
+# Counters are updated atomically so that the multi-threaded tests do not corrupt them (GCC 11 and later;
+# Clang does not know the option).
+ATOMIC=""
+if ${CXX:-g++} --version 2>/dev/null | grep -qi 'gcc\|g++' && ! ${CXX:-g++} --version 2>/dev/null | grep -qi clang; then
+	ATOMIC="-fprofile-update=atomic"
+fi
+export EXTRA_CXXFLAGS="--coverage ${ATOMIC} -O0 -fPIC ${EXTRA_CXXFLAGS:-}"
 export EXTRA_LDFLAGS="--coverage"
 
 echo "== C++ tests"

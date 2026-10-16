@@ -29,6 +29,8 @@ def cpp_table(path):
 
 
 def main():
+    if len(sys.argv) != 2:
+        sys.exit("usage: coverage_summary.py DIR   (DIR is the output directory of scripts/coverage.sh)")
     out = sys.argv[1]
     print("## Test coverage\n")
     rows, total = cpp_table(os.path.join(out, "cpp.json"))

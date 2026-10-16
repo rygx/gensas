@@ -893,16 +893,23 @@ namespace che {
 						}
 						parser->usedOverrides.insert(string(what) + "." + hit->first);
 						const double v = hit->second;
-						if (pass == 0 && !isParam) {
-							parser->error("Line %d: %s.%s: '%s' is not a parameter; use start to change a start value.", line, what, hit->first.c_str(), name.c_str());
-						} else if (pass == 0 && isConstant) {
+						bool bad = true;
+						if (isConstant) {
 							parser->error("Line %d: %s.%s: '%s' is a constant and cannot be changed.", line, what, hit->first.c_str(), name.c_str());
+						} else if (pass == 0 && !isParam) {
+							parser->error("Line %d: %s.%s: '%s' is not a parameter; use start to change a start value.", line, what, hit->first.c_str(), name.c_str());
 						} else if (pass == 1 && isParam) {
 							parser->error("Line %d: %s.%s: '%s' is a parameter; give its value under parameters.", line, what, hit->first.c_str(), name.c_str());
-						} else if ((el->ty == TY_INT || el->ty == TY_BOOL) && v != std::floor(v)) {
-							parser->error("Line %d: %s.%s: '%s' is an Integer or Boolean and needs a whole number.", line, what, hit->first.c_str(), name.c_str());
+						} else if (el->ty == TY_BOOL && v != 0.0 && v != 1.0) {
+							parser->error("Line %d: %s.%s: '%s' is a Boolean and must be 0 or 1 (false or true).", line, what, hit->first.c_str(), name.c_str());
+						} else if (el->ty == TY_INT && v != std::floor(v)) {
+							parser->error("Line %d: %s.%s: '%s' is an Integer and needs a whole number.", line, what, hit->first.c_str(), name.c_str());
 						} else {
 							setValue(el.get(), v);
+							bad = false;
+						}
+						if (bad) {
+							return; // one message per declaration, not one per array element
 						}
 					}
 				}

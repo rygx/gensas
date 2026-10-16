@@ -349,6 +349,7 @@ static void testOverrides() {
 		{"start", "nope", 1.0, "start.nope: the model has no such variable"},
 		{"parameters", "x", 1.0, "'x' is not a parameter"},
 		{"parameters", "c", 1.0, "'c' is a constant"},
+		{"start", "c", 1.0, "'c' is a constant"},
 		{"start", "k", 1.0, "'k' is a parameter"},
 		{"parameters", "n", 2.5, "needs a whole number"},
 	};
@@ -363,6 +364,23 @@ static void testOverrides() {
 			found = found || d.message.find(b.expect) != std::string::npos;
 		}
 		CHECK(found);
+	}
+	// a Boolean is 0 or 1; a wrong array override gives one message, not one per element
+	{
+		ModelicaJob job = sourceJob("model B\n  parameter Boolean on = true;\n  Real v[50](each start = 1);\nequation\n  for i in 1:50 loop\n    der(v[i]) = if on then -v[i] else 0;\n  end for;\nend B;\n", 1.0);
+		job.parameters["on"] = 2.0;
+		Simulation sim(job);
+		CHECK(!sim.check());
+		CHECK(sim.error().find("Boolean and must be 0 or 1") != std::string::npos);
+		job.parameters.clear();
+		job.parameters["v"] = 1.0;
+		Simulation arr(job);
+		CHECK(!arr.check());
+		size_t messages = 0;
+		for (const Diagnostic &d : arr.diagnostics()) {
+			messages += d.message.find("'v' is not a parameter") != std::string::npos ? 1 : 0;
+		}
+		CHECK_EQ(messages, (size_t)1);
 	}
 	// a parameter without a value in the text can be given one by the job
 	{

@@ -2,6 +2,10 @@ build -c opt
 
 # https://github.com/bazelbuild/rules_foreign_cc/issues/1129#issuecomment-1863628259
 build --noincompatible_sandbox_hermetic_tmp
+
+# The code is C++17 (the default of every compiler in CI); say so, so that the build does not depend on the
+# default of the compiler that happens to be installed. scripts/*.sh use the same standard.
+build --cxxopt=-std=c++17
 test --test_output=all
 
 # ---------------------------------------------------------------------------

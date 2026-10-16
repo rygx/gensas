@@ -25,7 +25,7 @@ JOBS="${JOBS:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null) || echo 4)
 EXT="so"
 if [ "$(uname)" = "Darwin" ]; then EXT="dylib"; fi
 
-CXXFLAGS="-std=c++14 -O1 -w -fPIC -DARMA_DONT_USE_WRAPPER -I. -I${ARMADILLO_INCLUDE} -I${SUPERLU_INCLUDE} -I${JSONCPP_INCLUDE}"
+CXXFLAGS="-std=c++17 -O1 -w -fPIC -DARMA_DONT_USE_WRAPPER -I. -I${ARMADILLO_INCLUDE} -I${SUPERLU_INCLUDE} -I${JSONCPP_INCLUDE}"
 mkdir -p "${OUT}/obj"
 
 compile() {

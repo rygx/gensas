@@ -21,6 +21,8 @@
 #   JSONCPP_INCLUDE    directory containing json/json.h (/usr/include/jsoncpp)
 #   LINK_LIBS          libraries to link (-ljsoncpp -lsuperlu -llapack -lblas -lpthread -lm)
 #   JOBS               parallel compile jobs (number of CPUs)
+#   EXTRA_CXXFLAGS     added to every compile (scripts/coverage.sh passes --coverage -O0)
+#   EXTRA_LDFLAGS      added to every link
 #
 
 set -euo pipefail
@@ -37,7 +39,7 @@ LINK_LIBS="${LINK_LIBS:--ljsoncpp -lsuperlu -llapack -lblas -lpthread -lm}"
 JOBS="${JOBS:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null) || echo 4)}"
 
 CXXFLAGS="-std=c++14 -O1 -w -DARMA_DONT_USE_WRAPPER -I. \
--I${ARMADILLO_INCLUDE} -I${SUPERLU_INCLUDE} -I${JSONCPP_INCLUDE}"
+-I${ARMADILLO_INCLUDE} -I${SUPERLU_INCLUDE} -I${JSONCPP_INCLUDE} ${EXTRA_CXXFLAGS:-}"
 
 # Library sources the solver tests depend on (no power flow, no PSAT/MAT input).
 SOURCES="sas/SasModel sas/SasConfig sas/SasInput sas/SasLexico sas/TokenScanner sas/ExprParser \
@@ -81,10 +83,10 @@ for t in ${TESTS}; do
   case "${src}" in
     *.c)
       ${CC:-gcc} -std=c99 -Wall -I. -c "${src}" -o "${BUILD_DIR}/${t}.o"
-      ${CXX} "${BUILD_DIR}/${t}.o" "${BUILD_DIR}"/obj/*.o ${LINK_LIBS} -o "${BUILD_DIR}/bin/${t}"
+      ${CXX} "${BUILD_DIR}/${t}.o" "${BUILD_DIR}"/obj/*.o ${LINK_LIBS} ${EXTRA_LDFLAGS:-} -o "${BUILD_DIR}/bin/${t}"
       ;;
     *)
-      ${CXX} ${CXXFLAGS} "${src}" "${BUILD_DIR}"/obj/*.o ${LINK_LIBS} -o "${BUILD_DIR}/bin/${t}"
+      ${CXX} ${CXXFLAGS} "${src}" "${BUILD_DIR}"/obj/*.o ${LINK_LIBS} ${EXTRA_LDFLAGS:-} -o "${BUILD_DIR}/bin/${t}"
       ;;
   esac
   # Run in the build directory: some tests write result files into the working directory.

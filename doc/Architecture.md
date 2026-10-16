@@ -135,6 +135,12 @@ A single model, parser or simulator is not thread safe and must stay on one thre
   SuperLU, jsoncpp and BLAS/LAPACK (on Debian/Ubuntu:
   `sudo apt install g++ libarmadillo-dev libsuperlu-dev libjsoncpp-dev libblas-dev liblapack-dev`)
   A full run takes seconds after the first compile.
+* Coverage: `bash scripts/coverage.sh` (needs `pip install gcovr coverage`) runs the same tests and the
+  Python tests with `--coverage` and writes line and branch coverage of `sas/`, `io/`, `util/` and
+  `capi/` plus line coverage of `python/gensas` to `/tmp/gensas-coverage` (`summary.md`, HTML reports).
+  The Coverage workflow does this on every pull request, shows the numbers in the job summary, comments
+  them on the pull request and keeps the HTML reports as an artifact. Power flow and the PSAT reader are
+  built and tested through Bazel only, so the script does not see them.
 * `scripts/run_integration_test.sh` runs the command line on a power-flow case and on the bouncing
   ball example (used by the Integration workflow on pushes to `main`).
 * Formatting: `bash scripts/format.sh` (clang-format 22.1.2, as in the lint check).

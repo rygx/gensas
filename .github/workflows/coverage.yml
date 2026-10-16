@@ -1,0 +1,55 @@
+name: Coverage
+run-name: ${{ github.actor }} coverage
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libarmadillo-dev libsuperlu-dev libjsoncpp-dev libblas-dev liblapack-dev
+          pip install gcovr coverage numpy
+
+      - name: Run the tests with coverage
+        run: bash scripts/coverage.sh
+
+      - name: Show the summary
+        run: cat /tmp/gensas-coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            /tmp/gensas-coverage/summary.md
+            /tmp/gensas-coverage/cpp/
+            /tmp/gensas-coverage/python/
+
+      - name: Comment the summary on the pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          marker='<!-- gensas-coverage -->'
+          { echo "${marker}"; cat /tmp/gensas-coverage/summary.md; } > /tmp/comment.md
+          id=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select((.body // \"\") | startswith(\"${marker}\")) | .id" | head -n 1)
+          if [ -n "${id}" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" -F body=@/tmp/comment.md
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" -F body=@/tmp/comment.md
+          fi

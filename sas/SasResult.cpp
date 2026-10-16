@@ -27,6 +27,7 @@
 #include "sas/SasResult.h"
 #include "sas/SasComputation.h"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -96,9 +97,39 @@ namespace che {
 			vector<vec> samples;
 			vector<SasComputationModel *> sampleModel;
 			vector<double> segStart; // start time of the solution segment each sample was taken from
-			double t = res.startTime;
 			// The grid starts at the start time and always ends with a sample at the end time.
-			for (;;) {
+			vector<double> times;
+			{
+				double t = res.startTime;
+				for (;;) {
+					times.push_back(t);
+					if (t >= maxAlpha) {
+						break;
+					}
+					double next = t + interval;
+					// Also end the grid when the spacing is below the resolution of the time values.
+					t = (next > maxAlpha - interval / 100 || !(next > t)) ? maxAlpha : next;
+				}
+			}
+			// Every event time is sampled as well, so that the jump of a variable is drawn at the event and not
+			// slanted between two grid points. A sample at an event time is taken from both solution segments
+			// that meet there: the first shows the values before the event, the second the values after it.
+			{
+				vector<double> extra;
+				for (const SasEventRecord &ev : set.events) {
+					if (ev.time > res.startTime && ev.time < maxAlpha) {
+						extra.push_back(ev.time);
+					}
+				}
+				sort(extra.begin(), extra.end());
+				for (double et : extra) {
+					vector<double>::iterator pos = lower_bound(times.begin(), times.end(), et - 1e-12 * (1.0 + fabs(et)));
+					if (pos == times.end() || *pos > et + 1e-12 * (1.0 + fabs(et))) {
+						times.insert(pos, et); // not on the grid yet
+					}
+				}
+			}
+			for (double t : times) {
 				list<shared_ptr<SasSolution>> found = set.findSasSolution(t);
 				for (const shared_ptr<SasSolution> &sol : found) {
 					samples.push_back(sol->solution->getSolValue(t - sol->absStart));
@@ -106,12 +137,6 @@ namespace che {
 					res.time.push_back(t);
 					segStart.push_back(sol->absStart);
 				}
-				if (t >= maxAlpha) {
-					break;
-				}
-				double next = t + interval;
-				// Also end the grid when the spacing is below the resolution of the time values.
-				t = (next > maxAlpha - interval / 100 || !(next > t)) ? maxAlpha : next;
 			}
 			res.values.assign(res.names.size(), vector<double>(samples.size(), 0.0));
 			for (size_t j = 0; j < samples.size(); j++) {

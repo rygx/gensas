@@ -74,6 +74,41 @@ static void testHybridRun() {
 	CHECK_NEAR(sim.result().events[0].time, 1.0, 1e-9);
 }
 
+// An event time is sampled twice even when it is not on the output grid: before and after the event.
+static void testEventTimesAreSampled() {
+	const char *ball =
+		"model B\n  parameter Real g = 9.81;\n  Real h(start = 1);\n  Real v(start = 0);\nequation\n  der(h) = v;\n  der(v) = -g;\n"
+		"  when h < 0 then\n    reinit(v, -0.5 * pre(v));\n  end when;\nend B;\n";
+	ModelicaJob job = sourceJob(ball, 0.7);
+	job.outputStep = 0.3; // 0.45 is not a multiple
+	Simulation sim(job);
+	CHECK(sim.run());
+	const SasResult &r = sim.result();
+	CHECK_EQ(sim.result().events.size(), (size_t)1);
+	const double te = std::sqrt(2.0 / 9.81);
+	CHECK_NEAR(r.events[0].time, te, 1e-6);
+	size_t first = r.time.size();
+	for (size_t j = 0; j + 1 < r.time.size(); j++) {
+		if (r.time[j] == r.time[j + 1] && std::fabs(r.time[j] - te) < 1e-6) {
+			first = j;
+		}
+	}
+	CHECK(first + 1 < r.time.size());
+	if (first + 1 < r.time.size()) {
+		size_t iv = 0;
+		for (size_t i = 0; i < r.names.size(); i++) {
+			if (r.names[i] == "v") {
+				iv = i;
+			}
+		}
+		CHECK_NEAR(r.values[iv][first], -9.81 * te, 1e-4);			// before the bounce
+		CHECK_NEAR(r.values[iv][first + 1], 0.5 * 9.81 * te, 1e-4); // after it
+	}
+	for (size_t j = 0; j + 1 < r.time.size(); j++) {
+		CHECK(r.time[j] <= r.time[j + 1]);
+	}
+}
+
 static void testBadModels() {
 	{
 		Simulation sim(sourceJob("model M\n  Real x;\nequation\n  der(x) = \n", 1.0));
@@ -489,6 +524,7 @@ int main() {
 	testPlainRun();
 	testRunTwice();
 	testHybridRun();
+	testEventTimesAreSampled();
 	testBadModels();
 	testSolverFailureIsReported();
 	testProgressAndCancel();

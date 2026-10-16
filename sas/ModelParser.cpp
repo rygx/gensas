@@ -214,6 +214,27 @@ namespace che {
 				}
 			}
 
+			AstNode *cloneAstChain(const AstNode *p);
+
+			AstNode *cloneAst(const AstNode *p) {
+				AstNode *c = new AstNode(*p);
+				c->next = NULL;
+				c->index = -1;
+				c->subs[0] = cloneAstChain(p->subs[0]);
+				c->subs[1] = cloneAstChain(p->subs[1]);
+				return c;
+			}
+
+			AstNode *cloneAstChain(const AstNode *p) {
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				for (; p != NULL; p = p->next) {
+					*tail = cloneAst(p);
+					tail = &(*tail)->next;
+				}
+				return head;
+			}
+
 			struct LoopVar {
 				string name;
 				long value;
@@ -381,6 +402,220 @@ namespace che {
 				return acc != NULL ? acc : mkIntConst(fn == "sum" ? 0 : 1);
 			}
 
+			// ---------------------------------------------------------------------
+			// Whole-array expressions: an equation or assignment with arrays used without subscripts is
+			// expanded into one equation per element (x = y + 2*z, der(x) = -x, x = {1, 2, 3}).
+			// Scalars are broadcast; sums, differences, scalar products and quotients, unary minus and
+			// functions of one array (or of arrays and scalars) are elementwise; the product of two arrays
+			// is not (it would be a matrix product).
+			// ---------------------------------------------------------------------
+
+			bool isLoopVariable(const Elab &ctx, const string &name) {
+				for (size_t k = ctx.env.size(); k > 0; k--) {
+					if (ctx.env[k - 1].name == name) {
+						return true;
+					}
+				}
+				return false;
+			}
+
+			// Merges the shape of an operand into the shape of the result; false if they differ.
+			bool combineShapes(vector<int> &result, const vector<int> &other) {
+				if (other.empty()) {
+					return true;
+				}
+				if (result.empty()) {
+					result = other;
+					return true;
+				}
+				return result == other;
+			}
+
+			// The dimensions of an expression (empty for a scalar); false after an error was reported.
+			bool arrayShape(Elab &ctx, const AstNode *p, vector<int> &dims) {
+				dims.clear();
+				if (p == NULL) {
+					return true;
+				}
+				SasModelParser *parser = ctx.parser;
+				if (p->op == OP_ID && p->ty != TY_FUNCTION && p->value.p != NULL) {
+					const string name = (const char *)p->value.p;
+					map<string, vector<int>>::const_iterator it = parser->arrayDims.find(name);
+					if (it != parser->arrayDims.end() && !isLoopVariable(ctx, name)) {
+						dims = it->second;
+					}
+					return true;
+				}
+				if (p->op == OP_CONST || p->op == OP_STR || p->op == OP_INDEX) {
+					return true;
+				}
+				if (p->op == OP_ARRAY) {
+					vector<int> elem;
+					int n = 0;
+					for (const AstNode *e = p->subs[0]; e != NULL; e = e->next) {
+						vector<int> d;
+						if (!arrayShape(ctx, e, d)) {
+							return false;
+						}
+						if (n > 0 && d != elem) {
+							parser->error("Line %d: the elements of an array literal must have the same size.", ctx.line);
+							return false;
+						}
+						elem = d;
+						n++;
+					}
+					dims.push_back(n);
+					dims.insert(dims.end(), elem.begin(), elem.end());
+					return true;
+				}
+				if (p->op == OP_CALL) {
+					const string fn = calleeName(p);
+					if (fn == "size" || fn == "sum" || fn == "prod") {
+						return true;
+					}
+					for (const AstNode *a = p->subs[1]; a != NULL; a = a->next) {
+						vector<int> d;
+						if (!arrayShape(ctx, a, d)) {
+							return false;
+						}
+						if (!combineShapes(dims, d)) {
+							parser->error("Line %d: the array arguments of %s() have different sizes.", ctx.line, fn.c_str());
+							return false;
+						}
+					}
+					return true;
+				}
+				vector<int> a, b;
+				if (!arrayShape(ctx, p->subs[0], a) || !arrayShape(ctx, p->subs[1], b)) {
+					return false;
+				}
+				if (p->op == OP_MUL && !a.empty() && !b.empty()) {
+					parser->error("Line %d: the product of two arrays is not supported (it would be a matrix product); write a for-loop or use sum().", ctx.line);
+					return false;
+				}
+				if ((p->op == OP_DIV && !b.empty()) || (p->op == OP_POW && (!a.empty() || !b.empty()))) {
+					parser->error("Line %d: %s is not supported on arrays.", ctx.line, p->op == OP_DIV ? "division by an array" : "the power operator");
+					return false;
+				}
+				if (p->op == OP_IFEXPR) {
+					if (!a.empty()) {
+						parser->error("Line %d: the condition of an if-expression must be a scalar.", ctx.line);
+						return false;
+					}
+					dims = b; // b: the branches
+					return true;
+				}
+				dims = a;
+				if (!combineShapes(dims, b)) {
+					parser->error("Line %d: the array operands have different sizes.", ctx.line);
+					return false;
+				}
+				return true;
+			}
+
+			// The element idx of an array-valued expression (scalars are copied).
+			AstNode *elementOf(Elab &ctx, const AstNode *p, const vector<int> &idx) {
+				vector<int> dims;
+				if (!arrayShape(ctx, p, dims) || dims.empty()) {
+					return cloneAst(p);
+				}
+				if (p->op == OP_ID) {
+					const string full = elementName((const char *)p->value.p, idx);
+					shared_ptr<IdPearl> id = ctx.parser->currentModel->lookupIdFromModel(full.c_str(), (int)full.size());
+					if (id == nullptr) {
+						ctx.parser->error("Line %d: '%s' is not declared.", ctx.line, full.c_str());
+						return mkIntConst(0);
+					}
+					AstNode *n = new AstNode();
+					n->op = OP_ID;
+					n->nodeKind = p->nodeKind;
+					n->line = p->line;
+					n->value.p = (decltype(n->value.p))id->str;
+					return n;
+				}
+				if (p->op == OP_ARRAY) {
+					const AstNode *e = p->subs[0];
+					for (int k = 1; k < idx[0] && e != NULL; k++) {
+						e = e->next;
+					}
+					if (e == NULL) {
+						return mkIntConst(0);
+					}
+					vector<int> rest(idx.begin() + 1, idx.end());
+					return rest.empty() ? cloneAst(e) : elementOf(ctx, e, rest);
+				}
+				AstNode *c = new AstNode(*p);
+				c->next = NULL;
+				c->index = -1;
+				for (int k = 0; k < 2; k++) {
+					if (k == 0 && p->op == OP_CALL) {
+						c->subs[0] = cloneAstChain(p->subs[0]); // the function name
+						continue;
+					}
+					AstNode *head = NULL;
+					AstNode **tail = &head;
+					for (const AstNode *a = p->subs[k]; a != NULL; a = a->next) {
+						*tail = elementOf(ctx, a, idx);
+						tail = &(*tail)->next;
+					}
+					c->subs[k] = head;
+				}
+				return c;
+			}
+
+			// An equation, assignment or reinit() with array operands, expanded to one statement per
+			// element. `handled` is set when the statement had array operands (or an error was reported);
+			// otherwise the caller elaborates it as usual.
+			AstNode *expandArrayStatement(Elab &ctx, const AstNode *p, bool &handled) {
+				handled = false;
+				vector<int> a, b;
+				const bool isReinit = p->op == OP_CALL && calleeName(p) == "reinit";
+				if (!(p->op == OP_EQN || p->op == OP_ASSIGN || isReinit)) {
+					return NULL;
+				}
+				if (isReinit) {
+					if (p->subs[1] == NULL || p->subs[1]->next == NULL) {
+						return NULL;
+					}
+					if (!arrayShape(ctx, p->subs[1], a) || !arrayShape(ctx, p->subs[1]->next, b)) {
+						handled = true;
+						return NULL;
+					}
+				} else if (!arrayShape(ctx, p->subs[0], a) || !arrayShape(ctx, p->subs[1], b)) {
+					handled = true;
+					return NULL;
+				}
+				if (a.empty() && b.empty()) {
+					return NULL;
+				}
+				handled = true;
+				if (a != b) {
+					ctx.parser->error("Line %d: the sizes of the two sides do not match (an array and a scalar, or arrays of different sizes).", ctx.line);
+					return NULL;
+				}
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				for (const vector<int> &idx : allIndices(a)) {
+					AstNode *st = new AstNode(*p);
+					st->next = NULL;
+					st->index = -1;
+					if (isReinit) {
+						st->subs[0] = cloneAstChain(p->subs[0]);
+						AstNode *target = elementOf(ctx, p->subs[1], idx);
+						target->next = elementOf(ctx, p->subs[1]->next, idx);
+						st->subs[1] = target;
+					} else {
+						st->subs[0] = elementOf(ctx, p->subs[0], idx);
+						st->subs[1] = elementOf(ctx, p->subs[1], idx);
+					}
+					AstNode *done = elabNode(ctx, st);
+					freeAst(st);
+					*tail = done;
+					tail = &done->next;
+				}
+				return head;
+			}
+
 			// Unrolls a for-equation: the body once per value of the iterator.
 			AstNode *expandFor(Elab &ctx, const AstNode *p) {
 				SasModelParser *parser = ctx.parser;
@@ -446,7 +681,7 @@ namespace che {
 						}
 					}
 					if (ctx.parser->arrayDims.count(name) > 0) {
-						ctx.parser->error("Line %d: array '%s' is used without subscripts; whole-array expressions are not supported, use a for-equation.", ctx.line, name.c_str());
+						ctx.parser->error("Line %d: array '%s' is used without subscripts where a scalar is expected (whole arrays are supported in equations and assignments only).", ctx.line, name.c_str());
 					}
 				}
 				if (p->op == OP_CALL) {
@@ -468,7 +703,11 @@ namespace che {
 				AstNode *head = NULL;
 				AstNode **tail = &head;
 				for (; p != NULL; p = p->next) {
-					AstNode *r = p->nodeKind == NK_ForEquation ? expandFor(ctx, p) : elabNode(ctx, p);
+					bool handled = false;
+					AstNode *r = p->nodeKind == NK_ForEquation ? expandFor(ctx, p) : expandArrayStatement(ctx, p, handled);
+					if (r == NULL && !handled && p->nodeKind != NK_ForEquation) {
+						r = elabNode(ctx, p);
+					}
 					*tail = r;
 					while (*tail != NULL) {
 						tail = &(*tail)->next;
@@ -1084,27 +1323,6 @@ namespace che {
 
 			AlgValue ownAst(AstNode *p) {
 				return AlgValue(p, [](AstNode *q) { freeAst(q); });
-			}
-
-			AstNode *cloneAstChain(const AstNode *p);
-
-			AstNode *cloneAst(const AstNode *p) {
-				AstNode *c = new AstNode(*p);
-				c->next = NULL;
-				c->index = -1;
-				c->subs[0] = cloneAstChain(p->subs[0]);
-				c->subs[1] = cloneAstChain(p->subs[1]);
-				return c;
-			}
-
-			AstNode *cloneAstChain(const AstNode *p) {
-				AstNode *head = NULL;
-				AstNode **tail = &head;
-				for (; p != NULL; p = p->next) {
-					*tail = cloneAst(p);
-					tail = &(*tail)->next;
-				}
-				return head;
 			}
 
 			struct AlgLowering {

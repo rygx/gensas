@@ -32,7 +32,7 @@ bazel-bin/app/app -p -f d_70k_070.case -s 0.5 -l 28 -d 1e-5 -o res.mat
 ```
 
 ### ModelicaSAS
-ModelicaSAS simulates a single flat Modelica .mo model: continuous equations, implicit algebraic equations, `algorithm` sections, user-defined functions, arrays and `for` loops, and hybrid models with discrete variables, `if` and `when` equations, time and state events, `reinit`, `terminate` and `assert`. [Supported Modelica](Modelica.md) lists exactly what is accepted and what the solver checks. The simulation can be called as follows:
+ModelicaSAS simulates a single flat Modelica .mo model: continuous equations, implicit algebraic equations, `algorithm` sections, user-defined functions, arrays with whole-array equations and `for` loops, and hybrid models with discrete variables, `if` and `when` equations, time and state events, `reinit`, `terminate` and `assert`. [Supported Modelica](Modelica.md) lists exactly what is accepted and what the solver checks. The simulation can be called as follows:
 
 ```bash
 bazel-bin/app/app -g \

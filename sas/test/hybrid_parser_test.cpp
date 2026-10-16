@@ -321,17 +321,23 @@ static void testArraySyntax() {
 	const string head = "model M\n  parameter Integer n = 3;\n  Real x[n](each start = 1);\n  Real y[2,2](each start = 0);\nequation\n";
 	CHECK_EQ(parseErrors(head + "  for i in 1:n loop der(x[i]) = -x[i]; end for;\n  for i in 1:2, j in 1:2 loop der(y[i,j]) = -y[i,j]; end for;\nend M;\n"), 0);
 	CHECK_EQ(parseErrors(head + "  der(x[1]) = -x[2]; der(x[2]) = 0; der(x[3]) = 0;\n  for i in 1:2 loop der(y[i,1]) = x[i+1]; der(y[i,2]) = 0; end for;\nend M;\n"), 0);
-	CHECK(parseErrors(head + "  der(x) = -x;\nend M;\n") > 0);																		   // array without subscripts
-	CHECK(parseErrors(head + "  der(x[4]) = -1;\nend M;\n") > 0);																	   // out of range
-	CHECK(parseErrors(head + "  der(y[1]) = -1;\nend M;\n") > 0);																	   // too few subscripts
-	CHECK(parseErrors(head + "  der(n[1]) = -1;\nend M;\n") > 0);																	   // not an array
-	CHECK(parseErrors(head + "  for i in 1:n loop der(x[i+3]) = 1; end for;\nend M;\n") > 0);										   // out of range in a loop
-	CHECK(parseErrors(head + "  for i in 1:q loop der(x[1]) = 1; end for;\nend M;\n") > 0);											   // range not constant
-	CHECK(parseErrors(head + "  for i in 1:0 loop der(x[1]) = 1; end for;\n  der(x[1])=1; der(x[2])=1; der(x[3])=1;\nend M;\n") == 0); // empty loop
-	CHECK(parseErrors("model M\n  Real x[0];\nequation\nend M;\n") > 0);															   // empty array
-	CHECK(parseErrors("model M\n  Real x[2](start = {1, 2, 3});\nequation\n  der(x[1]) = 1;\nend M;\n") > 0);						   // wrong number of values
-	CHECK(parseErrors("model M\n  Real x[2];\n  Real x[3];\nequation\nend M;\n") > 0);												   // redeclaration
-	CHECK(parseErrors("model M\n  Real x[2];\nequation\n  for i in 1:2 loop\n    der(x[i]) = 1;\nend M;\n") > 0);					   // missing end for
+	// Whole-array equations are expanded elementwise.
+	CHECK_EQ(parseErrors(head + "  der(x) = -x;\n  der(y) = {{1, 2}, {3, 4}} - 2*y;\nend M;\n"), 0);
+	CHECK(parseErrors(head + "  der(x) = -y;\nend M;\n") > 0);																			 // different sizes
+	CHECK(parseErrors(head + "  der(x) = -1;\n  der(y) = 0;\nend M;\n") > 0);															 // an array and a scalar
+	CHECK(parseErrors(head + "  der(x) = x*x;\n  der(y) = 0;\nend M;\n") > 0);															 // the product of two arrays
+	CHECK(parseErrors(head + "  der(x) = {1, 2};\n  der(y) = 0;\nend M;\n") > 0);														 // wrong literal size
+	CHECK(parseErrors(head + "  der(x) = -x;\n  der(y) = 0;\n  when x > 0 then\n    reinit(x, {1, 1, 1});\n  end when;\nend M;\n") > 0); // an array as a condition
+	CHECK(parseErrors(head + "  der(x[4]) = -1;\nend M;\n") > 0);																		 // out of range
+	CHECK(parseErrors(head + "  der(y[1]) = -1;\nend M;\n") > 0);																		 // too few subscripts
+	CHECK(parseErrors(head + "  der(n[1]) = -1;\nend M;\n") > 0);																		 // not an array
+	CHECK(parseErrors(head + "  for i in 1:n loop der(x[i+3]) = 1; end for;\nend M;\n") > 0);											 // out of range in a loop
+	CHECK(parseErrors(head + "  for i in 1:q loop der(x[1]) = 1; end for;\nend M;\n") > 0);												 // range not constant
+	CHECK(parseErrors(head + "  for i in 1:0 loop der(x[1]) = 1; end for;\n  der(x[1])=1; der(x[2])=1; der(x[3])=1;\nend M;\n") == 0);	 // empty loop
+	CHECK(parseErrors("model M\n  Real x[0];\nequation\nend M;\n") > 0);																 // empty array
+	CHECK(parseErrors("model M\n  Real x[2](start = {1, 2, 3});\nequation\n  der(x[1]) = 1;\nend M;\n") > 0);							 // wrong number of values
+	CHECK(parseErrors("model M\n  Real x[2];\n  Real x[3];\nequation\nend M;\n") > 0);													 // redeclaration
+	CHECK(parseErrors("model M\n  Real x[2];\nequation\n  for i in 1:2 loop\n    der(x[i]) = 1;\nend M;\n") > 0);						 // missing end for
 }
 
 static void testCheckerSemantics() {

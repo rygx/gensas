@@ -239,16 +239,16 @@ static void testWriteResult() {
 // Errors and warnings about the model text come with line numbers, without running the model.
 static void testModelInfo() {
 	const char *src =
-	    "model Tank \"a tank\"\n"
-	    "  parameter Real k(unit = \"1/s\") = 2 \"rate\";\n"
-	    "  constant Real c = 3;\n"
-	    "  Real x(start = 1, unit = \"m\") \"level\";\n"
-	    "  Real y;\n"
-	    "  input Real u = 0.5;\n"
-	    "equation\n"
-	    "  der(x) = -k * x + u;\n"
-	    "  y = x * c;\n"
-	    "end Tank;\n";
+		"model Tank \"a tank\"\n"
+		"  parameter Real k(unit = \"1/s\") = 2 \"rate\";\n"
+		"  constant Real c = 3;\n"
+		"  Real x(start = 1, unit = \"m\") \"level\";\n"
+		"  Real y;\n"
+		"  input Real u = 0.5;\n"
+		"equation\n"
+		"  der(x) = -k * x + u;\n"
+		"  y = x * c;\n"
+		"end Tank;\n";
 	Simulation sim(sourceJob(src, 1.0));
 	CHECK(sim.check());
 	CHECK(sim.hasModelInfo());

@@ -335,7 +335,8 @@ namespace che {
 			}
 
 			string typeName(Type ty) {
-				return ty == TY_INT ? "Integer" : ty == TY_BOOL ? "Boolean" : "Real";
+				return ty == TY_INT ? "Integer" : ty == TY_BOOL ? "Boolean"
+																: "Real";
 			}
 
 			string textOf(const unsigned char *s) {
@@ -375,7 +376,8 @@ namespace che {
 					} else if (id->idTy == ID_VAR || id->idTy == ID_DISC) {
 						ModelVariable v;
 						v.name = name;
-						v.kind = id->idTy == ID_DISC ? "discrete" : derived.count(name) > 0 ? "state" : "algebraic";
+						v.kind = id->idTy == ID_DISC ? "discrete" : derived.count(name) > 0 ? "state"
+																							: "algebraic";
 						v.type = typeName(id->ty);
 						v.unit = textOf(id->unit);
 						v.description = textOf(id->annotation);

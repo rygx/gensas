@@ -195,7 +195,7 @@ namespace che {
 			bool initVal = false;
 			bool initDer = false;
 			int index = -1;
-			int line = 0; // source line of the declaration (for diagnostics)
+			int line = 0;			 // source line of the declaration (for diagnostics)
 			bool isConstant = false; // declared `constant` (a parameter that cannot be changed)
 			bool isInput = false;	 // declared `input`
 

@@ -378,6 +378,7 @@ namespace che {
 					SasComputationOptions opts = options;
 					opts.startTime = t;
 					opts.endTime = segEnd;
+					opts.tolerateNonFinite = true; // the part after an event is cut off; the rest is validated below
 					if (options.progress) {
 						// Report against the end of the whole run, not of this inter-event segment.
 						opts.progress = [&](double tm, double) { return options.progress(tm, options.endTime); };
@@ -524,6 +525,13 @@ namespace che {
 					} else {
 						shared_ptr<SasSolution> last = sols->solutionLink.back();
 						last->absEnd = max(last->absEnd, segEnd); // close the sub-tolerance gap
+					}
+					for (const shared_ptr<SasSolution> &kept : sols->solutionLink) {
+						string why;
+						if (!comp->validateDomain(*kept, &why)) {
+							fail("the solution leaves the domain of a function: " + why);
+							return NULL;
+						}
 					}
 					if (!sols->solutionLink.empty()) {
 						shared_ptr<SasSolution> last = sols->solutionLink.back();

@@ -39,6 +39,8 @@ using namespace che::io;
 namespace che {
 	namespace core {
 
+		struct UserFunction;
+
 		class SasModelParser {
 		public:
 			BufferedFileReader reader;
@@ -62,6 +64,8 @@ namespace che {
 			bool noInject = false;
 			// Declared arrays: name -> dimension sizes. Each element is an ordinary variable named like "x[2,3]".
 			std::map<std::string, std::vector<int>> arrayDims;
+			// Functions defined in the source, inlined at their calls once the model has been read.
+			std::map<std::string, std::shared_ptr<UserFunction>> functions;
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
 

@@ -57,6 +57,10 @@ namespace che {
 			double alphaTol = 1e-4;
 			double errorTol = 1e-6;
 			int nLvl = 15;
+			// Hybrid simulations: do not reject a step because an equation is undefined at its end (a
+			// function outside its domain). The part of the step after an event is discarded by the caller,
+			// who checks the part that is kept with SasComputationModel::validateDomain().
+			bool tolerateNonFinite = false;
 			// Called with each solution segment right after it was computed. If it returns true, solve()
 			// stops after this segment (used to cut the simulation at a detected event).
 			std::function<bool(const std::shared_ptr<SasSolution> &)> onSolution;
@@ -154,6 +158,11 @@ namespace che {
 
 			SasSolutionSet *solve(const SasComputationOptions &options);
 
+			// Checks the part of a computed solution that is kept (up to a little before its end, where an
+			// event may have put the solution exactly on the edge of a domain). The reason, with the time,
+			// goes to *why.
+			bool validateDomain(const SasSolution &sol, std::string *why);
+
 			virtual ~SasComputationModel();
 
 		private:
@@ -186,7 +195,8 @@ namespace che {
 
 			// True if the operands with restricted ranges stay in their range along [0, alpha] of a
 			// solution; otherwise the reason goes to *why.
-			bool domainOk(CheSolution *solution, double alpha, std::string *why);
+			bool domainOk(CheSolution *solution, double alpha, std::string *why, double *at = nullptr);
+
 			std::vector<DomainCheck> domainChecks;
 
 			// Messages of the last solve() about steps that were accepted with a relaxed tolerance.

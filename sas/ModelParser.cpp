@@ -61,6 +61,18 @@ using namespace std;
 namespace che {
 	namespace core {
 
+		// A user-defined function: its body is a chain of statements (see AlgLowering) that is inlined at
+		// the call sites once the whole model has been read.
+		struct UserFunction {
+			std::string name;
+			int line = 0;
+			std::vector<std::string> inputs;
+			std::vector<std::shared_ptr<AstNode>> defaults; // per input, null without a default
+			std::string output;
+			std::set<std::string> locals; // inputs, the output and the protected variables
+			std::shared_ptr<AstNode> body;
+		};
+
 		namespace {
 
 			// ---------------------------------------------------------------------
@@ -466,11 +478,16 @@ namespace che {
 			}
 
 			// A value in a declaration (parameter value, start value, binding) with subscripts resolved.
+			AstNode *inlineCalls(SasModelParser *parser, AstNode *p, int line, int depth);
+
 			AstNode *parseDeclValue(SasModelParser *parser) {
 				Elab ctx(parser, parser->coord.line);
 				AstNode *raw = parseValueExpr(parser);
 				AstNode *value = elabChain(ctx, raw);
 				freeAst(raw);
+				if (!parser->functions.empty()) { // calls of functions defined earlier, e.g. parameter Real p = f(2);
+					value = inlineCalls(parser, value, ctx.line, 0);
+				}
 				return value;
 			}
 
@@ -1098,6 +1115,9 @@ namespace che {
 				map<string, AlgValue> lhsProto;
 				AlgEnv env;
 				bool ok = true;
+				// Function mode (inlining a user function): names declared in the function must be assigned
+				// before they are read, and any other name must be a parameter of the model.
+				const UserFunction *func = NULL;
 
 				AlgLowering(SasModelParser *p, int l) : parser(p), line(l) {}
 
@@ -1157,7 +1177,14 @@ namespace che {
 						if (pre != NULL && pre->count(name) > 0) {
 							return mkPre(cloneAst(p));
 						}
-						if (allAssigned.count(name) > 0 && !(pre != NULL)) {
+						if (func != NULL) {
+							shared_ptr<IdPearl> id = parser->currentModel->lookupIdFromModel(name.c_str(), (int)name.size());
+							if (func->locals.count(name) > 0) {
+								fail("'" + name + "' is read before it is assigned in function '" + func->name + "'.");
+							} else if (id == nullptr || id->idTy != ID_PARAM) {
+								fail("'" + name + "' is used in function '" + func->name + "' but is neither declared there nor a parameter of the model.");
+							}
+						} else if (allAssigned.count(name) > 0 && !(pre != NULL)) {
 							fail("'" + name + "' is read before it is assigned in the algorithm section; its previous value cannot be used.");
 						}
 						return cloneAst(p);
@@ -1168,7 +1195,8 @@ namespace che {
 					AstNode *c = new AstNode(*p);
 					c->next = NULL;
 					c->index = -1;
-					c->subs[0] = substChain(p->subs[0], e, pre);
+					// the callee of a call is a function name, not a variable
+					c->subs[0] = p->op == OP_CALL ? cloneAstChain(p->subs[0]) : substChain(p->subs[0], e, pre);
 					c->subs[1] = substChain(p->subs[1], e, pre);
 					return c;
 				}
@@ -1352,6 +1380,277 @@ namespace che {
 				}
 			};
 
+			// ---------------------------------------------------------------------
+			// User-defined functions
+			//
+			//   function f
+			//     input Real a; input Real b = 2; output Real y; protected Real t;
+			//   algorithm
+			//     t := a*a; y := t + b;
+			//   end f;
+			//
+			// One output, scalar Real/Integer/Boolean variables, an algorithm section (no external code).
+			// A call is replaced by the output expression with the arguments substituted (see AlgLowering).
+			// ---------------------------------------------------------------------
+
+			void skipParenthesized(SasModelParser *parser) {
+				int depth = 0;
+				do {
+					if (parser->currentToken == TK_LPAREN) {
+						depth++;
+					} else if (parser->currentToken == TK_RPAREN) {
+						depth--;
+					}
+					getNextToken(parser);
+				} while (depth > 0 && parser->currentToken != TK_EOF);
+			}
+
+			void parseFunction(SasModelParser *parser) {
+				const int line = parser->coord.line;
+				getNextToken(parser); // consume `function`
+				if (parser->currentToken != TK_ID) {
+					parser->error("Line %d: expect a function name.", line);
+					skipStatement(parser);
+					return;
+				}
+				shared_ptr<UserFunction> fn = make_shared<UserFunction>();
+				fn->name = (const char *)parser->currentId->str;
+				fn->line = line;
+				getNextToken(parser);
+				if (parser->currentToken == TK_STRING) {
+					getNextToken(parser);
+				}
+				if (parser->functions.count(fn->name) > 0) {
+					parser->error("Line %d: function '%s' is defined twice.", line, fn->name.c_str());
+				}
+				AstNode *prologue = NULL, **ptail = &prologue; // local variables with a binding
+				int outputs = 0;
+				while (true) {
+					const int tok = parser->currentToken;
+					if (tok == TK_K_PROTECTED || tok == TK_K_PUBLIC) {
+						getNextToken(parser);
+						continue;
+					}
+					if (tok == TK_K_ANNOTATION) {
+						skipAnnotation(parser);
+						expect(parser, TK_SEMICOLON);
+						continue;
+					}
+					if (!(tok == TK_K_INPUT || tok == TK_K_OUTPUT || tok == TK_K_REAL || tok == TK_K_INTEGER || tok == TK_K_BOOLEAN)) {
+						break;
+					}
+					bool isInput = false, isOutput = false;
+					if (tok == TK_K_INPUT || tok == TK_K_OUTPUT) {
+						isInput = tok == TK_K_INPUT;
+						isOutput = !isInput;
+						getNextToken(parser);
+					}
+					if (parser->currentToken != TK_K_REAL && parser->currentToken != TK_K_INTEGER && parser->currentToken != TK_K_BOOLEAN) {
+						parser->error("Line %d: expect a type (Real, Integer or Boolean) in function '%s'.", parser->coord.line, fn->name.c_str());
+						skipStatement(parser);
+						continue;
+					}
+					getNextToken(parser);
+					while (true) {
+						if (parser->currentToken != TK_ID) {
+							parser->error("Line %d: expect a variable name in function '%s'.", parser->coord.line, fn->name.c_str());
+							break;
+						}
+						const string name = (const char *)parser->currentId->str;
+						uchar *namePtr = parser->currentId->str;
+						const int declLine = parser->coord.line;
+						getNextToken(parser);
+						if (parser->currentToken == TK_LBRACKET) {
+							parser->error("Line %d: array variables in functions are not supported ('%s').", declLine, name.c_str());
+							skipStatement(parser);
+							break;
+						}
+						if (fn->locals.count(name) > 0) {
+							parser->error("Line %d: '%s' is declared twice in function '%s'.", declLine, name.c_str(), fn->name.c_str());
+						}
+						fn->locals.insert(name);
+						if (parser->currentToken == TK_LPAREN) {
+							skipParenthesized(parser);
+						}
+						AstNode *value = NULL;
+						if (parser->currentToken == TK_EQN) {
+							getNextToken(parser);
+							value = parseDeclValue(parser);
+						}
+						if (isInput) {
+							fn->inputs.push_back(name);
+							fn->defaults.push_back(value != NULL ? ownAst(value) : AlgValue());
+						} else {
+							if (isOutput) {
+								outputs++;
+								fn->output = name;
+							}
+							if (value != NULL) { // a binding is an assignment before the body
+								AstNode *lhs = new AstNode();
+								lhs->op = OP_ID;
+								lhs->value.p = (decltype(lhs->value.p))namePtr;
+								AstNode *as = new AstNode();
+								as->op = OP_ASSIGN;
+								as->subs[0] = lhs;
+								as->subs[1] = value;
+								*ptail = as;
+								ptail = &as->next;
+							}
+						}
+						if (parser->currentToken == TK_STRING) {
+							getNextToken(parser);
+						}
+						if (parser->currentToken != TK_COMMA) {
+							break;
+						}
+						getNextToken(parser);
+					}
+					expect(parser, TK_SEMICOLON);
+				}
+				if (outputs != 1) {
+					parser->error("Line %d: function '%s' must have exactly one output (it has %d).", line, fn->name.c_str(), outputs);
+				}
+				if (parser->currentToken == TK_K_EXTERNAL) {
+					parser->error("Line %d: external functions are not supported.", line);
+				}
+				AstNode *body = prologue;
+				ptail = &body;
+				while (*ptail != NULL) {
+					ptail = &(*ptail)->next;
+				}
+				if (parser->currentToken == TK_K_ALGORITHM) {
+					getNextToken(parser);
+					while (!endsStatementList(parser->currentToken)) {
+						uchar *before = parser->reader.cursur;
+						const int sline = parser->coord.line;
+						AstNode *st = parseStatement(parser, CTX_ALG);
+						if (st != NULL) {
+							Elab elab(parser, sline);
+							AstNode *chain = elabChain(elab, st);
+							freeAst(st);
+							*ptail = chain;
+							while (*ptail != NULL) {
+								ptail = &(*ptail)->next;
+							}
+						}
+						if (parser->reader.cursur == before) {
+							getNextToken(parser);
+						}
+					}
+				}
+				if (parser->currentToken == TK_K_ANNOTATION) {
+					skipAnnotation(parser);
+					expect(parser, TK_SEMICOLON);
+				}
+				fn->body = ownAst(body);
+				expect(parser, TK_K_END);
+				if (parser->currentToken == TK_ID) {
+					if (string((const char *)parser->currentId->str) != fn->name) {
+						parser->warn("End name does not match the function name '%s'.", fn->name.c_str());
+					}
+					getNextToken(parser);
+				}
+				expect(parser, TK_SEMICOLON);
+				parser->functions[fn->name] = fn;
+			}
+
+			// Replaces the calls of user functions in a chain of nodes (and everything below) by the
+			// function bodies; returns the new head (declared above).
+			AstNode *inlineOne(SasModelParser *parser, AstNode *p, int line, int depth) {
+				if (p->nodeKind == NK_IfEquation || p->nodeKind == NK_WhenEquation) {
+					line = p->line > 0 ? p->line : line;
+				}
+				p->subs[0] = inlineCalls(parser, p->subs[0], line, depth);
+				p->subs[1] = inlineCalls(parser, p->subs[1], line, depth);
+				if (p->op != OP_CALL) {
+					return p;
+				}
+				const string name = calleeName(p);
+				map<string, shared_ptr<UserFunction>>::const_iterator it = parser->functions.find(name);
+				if (it == parser->functions.end()) {
+					return p;
+				}
+				const UserFunction &fn = *it->second;
+				if (depth > 32) {
+					parser->error("Line %d: function '%s' calls itself (recursive functions are not supported).", line, name.c_str());
+					return p;
+				}
+				AlgLowering low(parser, line);
+				low.func = &fn;
+				size_t nArgs = 0;
+				for (const AstNode *a = p->subs[1]; a != NULL; a = a->next) {
+					if (a->op == OP_EQN) {
+						parser->error("Line %d: named arguments are not supported in the call of '%s'.", line, name.c_str());
+						return p;
+					}
+					nArgs++;
+				}
+				if (nArgs > fn.inputs.size()) {
+					parser->error("Line %d: function '%s' takes %d argument(s) but is called with %d.", line, name.c_str(), (int)fn.inputs.size(), (int)nArgs);
+					return p;
+				}
+				const AstNode *a = p->subs[1];
+				for (size_t k = 0; k < fn.inputs.size(); k++) {
+					if (a != NULL) {
+						low.env[fn.inputs[k]] = ownAst(cloneAst(a));
+						a = a->next;
+					} else if (fn.defaults[k] != nullptr) {
+						low.env[fn.inputs[k]] = ownAst(cloneAst(fn.defaults[k].get()));
+					} else {
+						parser->error("Line %d: the call of '%s' has no value for input '%s'.", line, name.c_str(), fn.inputs[k].c_str());
+						return p;
+					}
+				}
+				low.collectAssigned(fn.body.get());
+				vector<AstNode *> out;
+				low.lowerList(fn.body.get(), low.env, out, true);
+				for (AstNode *o : out) {
+					freeAst(o);
+				}
+				if (!out.empty()) {
+					low.fail("when-statements and assert are not supported in function '" + name + "'.");
+				}
+				AlgEnv::const_iterator res = low.env.find(fn.output);
+				if (res == low.env.end()) {
+					low.fail("the output '" + fn.output + "' of function '" + name + "' is not assigned.");
+				}
+				if (!low.ok) {
+					return p;
+				}
+				AstNode *repl = inlineCalls(parser, cloneAst(res->second.get()), line, depth + 1);
+				repl->next = p->next;
+				p->next = NULL;
+				freeAst(p);
+				return repl;
+			}
+
+			AstNode *inlineCalls(SasModelParser *parser, AstNode *p, int line, int depth) {
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				while (p != NULL) {
+					AstNode *nxt = p->next;
+					p->next = NULL;
+					AstNode *r = inlineOne(parser, p, line, depth);
+					*tail = r;
+					AstNode *last = r;
+					while (last->next != NULL) {
+						last = last->next;
+					}
+					tail = &last->next;
+					p = nxt;
+				}
+				return head;
+			}
+
+			void inlineUserFunctions(SasModelParser *parser) {
+				if (parser->functions.empty() || parser->errCount > 0) {
+					return;
+				}
+				for (const shared_ptr<AstTree> &tree : parser->currentModel->modelTrees) {
+					tree->pHead = inlineCalls(parser, tree->pHead, tree->line, 0);
+				}
+			}
+
 			void parseAlgorithmSection(SasModelParser *parser) {
 				const int sectionLine = parser->coord.line;
 				AstNode *all = NULL;
@@ -1392,6 +1691,9 @@ namespace che {
 
 		void parseSingleSasModel(SasModelParser *parser) {
 			getNextToken(parser);
+			while (parser->currentToken == TK_K_FUNCTION) { // functions defined before the model
+				parseFunction(parser);
+			}
 			if (parser->currentToken != TK_K_MDL) {
 				parser->error("actual token %s: expect \"model\".", Lexer::getInstance().tokenStrings[parser->currentToken]);
 			}
@@ -1409,10 +1711,12 @@ namespace che {
 				getNextToken(parser);
 			}
 
-			while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_K_ANNOTATION) {
+			while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
 				if (parser->currentToken == TK_K_ANNOTATION) {
 					skipAnnotation(parser);
 					expect(parser, TK_SEMICOLON);
+				} else if (parser->currentToken == TK_K_FUNCTION) {
+					parseFunction(parser);
 				} else {
 					parseDeclaration(parser);
 				}
@@ -1435,6 +1739,8 @@ namespace che {
 				} else if (parser->currentToken == TK_K_ALGORITHM) {
 					getNextToken(parser);
 					parseAlgorithmSection(parser);
+				} else if (parser->currentToken == TK_K_FUNCTION) {
+					parseFunction(parser);
 				} else if (parser->currentToken == TK_K_EQN) {
 					getNextToken(parser);
 					parseEquationSection(parser, CTX_TOP);
@@ -1443,8 +1749,8 @@ namespace che {
 						parser->error("Declarations must come before the equation sections.");
 					} else if (parser->currentToken == TK_K_EXTENDS) {
 						parser->error("Inheritance (extends) is not supported; flatten the model first.");
-					} else if (parser->currentToken == TK_K_FUNCTION || parser->currentToken == TK_K_PACKAGE || parser->currentToken == TK_K_CLASS) {
-						parser->error("Nested classes and user-defined functions are not supported.");
+					} else if (parser->currentToken == TK_K_PACKAGE || parser->currentToken == TK_K_CLASS) {
+						parser->error("Nested classes are not supported.");
 					} else {
 						parser->error("actual token %s: expect `initial equation`, `equation` or `end`.", Lexer::getInstance().tokenStrings[parser->currentToken]);
 					}
@@ -1459,6 +1765,7 @@ namespace che {
 				}
 				getNextToken(parser);
 				expect(parser, TK_SEMICOLON);
+				inlineUserFunctions(parser);
 			} else {
 				parser->error("Missing end statement of model.");
 			}

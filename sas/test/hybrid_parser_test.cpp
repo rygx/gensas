@@ -301,6 +301,19 @@ static void testSourceSyntax() {
 	CHECK(parseErrors("model M\n  Real x;\nalgorithm\n  x := x + 1;\nend M;\n") > 0); // read before assigned
 	CHECK(parseErrors("model M\n  Real x;\ninitial algorithm\n  x := 1;\nend M;\n") > 0);
 	CHECK(parseErrors("model M\n  Real x, y;\nalgorithm\n  if x > 0 then\n    y := 1;\n  end if;\nend M;\n") > 0); // no value in the else path
+	// User-defined functions.
+	auto fn = [](const string &body, const string &use) {
+		return "model M\n  function f\n    input Real a;\n    output Real y;\n  algorithm\n    y := " + body + ";\n  end f;\n  Real x(start = 1), z;\nequation\n  der(x) = -x;\n  z = " + use + ";\nend M;\n";
+	};
+	CHECK_EQ(parseErrors(fn("a*a", "f(x)").c_str()), 0);
+	CHECK(parseErrors(fn("f(a)", "f(x)").c_str()) > 0);																																									   // recursion
+	CHECK(parseErrors(fn("a + q", "f(x)").c_str()) > 0);																																								   // a name that is neither local nor a parameter
+	CHECK(parseErrors(fn("a", "f(x, 1)").c_str()) > 0);																																									   // too many arguments
+	CHECK(parseErrors(fn("a", "f()").c_str()) > 0);																																										   // missing argument
+	CHECK(parseErrors(fn("a", "f(a = x)").c_str()) > 0);																																								   // named argument
+	CHECK(parseErrors("model M\n  function f\n    input Real a;\n    output Real y;\n    output Real w;\n  algorithm\n    y := a;\n    w := a;\n  end f;\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n") > 0); // two outputs
+	CHECK(parseErrors("model M\n  function f\n    input Real a;\n    output Real y;\n    external \"C\";\n  end f;\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n") > 0);
+	CHECK(parseErrors("model M\n  function f\n    input Real a;\n    output Real y;\n  algorithm\n    y := y + a;\n  end f;\n  Real x(start = 1), z;\nequation\n  der(x) = -x;\n  z = f(x);\nend M;\n") > 0); // y read before assigned
 }
 
 // Arrays and for-equations: what is accepted and what is rejected with an error.

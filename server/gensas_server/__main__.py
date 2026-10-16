@@ -21,8 +21,10 @@ def main(argv=None):
     p.add_argument("--run-timeout", type=float, default=cfg.run_timeout, help="seconds before a run is stopped")
     p.add_argument("--max-source-bytes", type=int, default=cfg.max_source_bytes)
     p.add_argument("--work-dir", default=cfg.work_dir, help="where results are stored (default: a temporary directory)")
+    p.add_argument("--rate-limit", type=int, default=cfg.rate_limit, help="checks and runs a client address may start per minute (0: no limit; also GENSAS_RATE_LIMIT)")
+    p.add_argument("--trust-proxy", action="store_true", default=cfg.trust_proxy, help="take the client address from X-Forwarded-For (also GENSAS_TRUST_PROXY=1)")
     args = p.parse_args(argv)
-    for name in ("host", "port", "token", "static_dir", "max_concurrent_runs", "max_queued_runs", "run_timeout", "max_source_bytes", "work_dir"):
+    for name in ("host", "port", "token", "static_dir", "max_concurrent_runs", "max_queued_runs", "run_timeout", "max_source_bytes", "work_dir", "rate_limit", "trust_proxy"):
         setattr(cfg, name, getattr(args, name))
     if args.cors_origin:
         cfg.cors_origins = args.cors_origin

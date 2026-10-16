@@ -21,6 +21,8 @@ class Config:
     max_kept_runs: int = 50  # finished runs kept (oldest are removed first)
     retention: float = 3600.0  # seconds a finished run is kept
     work_dir: Optional[str] = None  # where run results are stored (default: a temporary directory)
+    rate_limit: int = 0  # POST /check and POST /runs allowed per minute for each client address; 0 = no limit
+    trust_proxy: bool = False  # take the client address from X-Forwarded-For (only behind a proxy you control)
 
     @property
     def loopback(self) -> bool:
@@ -41,6 +43,7 @@ _ENV = {
     "max_kept_runs": ("GENSAS_MAX_KEPT_RUNS", int),
     "retention": ("GENSAS_RETENTION", float),
     "work_dir": ("GENSAS_WORK_DIR", str),
+    "rate_limit": ("GENSAS_RATE_LIMIT", int),
 }
 
 
@@ -52,6 +55,10 @@ def from_env(environ=None) -> Config:
             name, kind = _ENV[f.name]
             if env.get(name):
                 setattr(cfg, f.name, kind(env[name]))
+    if not env.get("GENSAS_PORT") and env.get("PORT"):  # Cloud Run and similar platforms name the port this way
+        cfg.port = int(env["PORT"])
+    if env.get("GENSAS_TRUST_PROXY", "").lower() in ("1", "true", "yes"):
+        cfg.trust_proxy = True
     if env.get("GENSAS_CORS_ORIGINS"):
         cfg.cors_origins = [o.strip() for o in env["GENSAS_CORS_ORIGINS"].split(",") if o.strip()]
     return cfg

@@ -1,0 +1,13 @@
+.git
+.github
+private
+bazel-*
+**/node_modules
+web/dist
+web/e2e
+**/__pycache__
+**/.pytest_cache
+*.o
+*.so
+*.log
+.gh_token

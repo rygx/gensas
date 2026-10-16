@@ -62,7 +62,7 @@ echo "== C++ coverage"
 mkdir -p "${OUT}/cpp"
 GCOVR_ARGS=(--root . --object-directory "${BUILD_DIR}" --filter '(sas|io|util|capi)/' --exclude '.*/test/.*'
 	--exclude-throw-branches --exclude-unreachable-branches --gcov-ignore-parse-errors=negative_hits.warn_once_per_file)
-gcovr "${GCOVR_ARGS[@]}" --json "${OUT}/cpp.json" --html-details "${OUT}/cpp/index.html" --txt "${OUT}/cpp.txt"
+python3 -m gcovr "${GCOVR_ARGS[@]}" --json "${OUT}/cpp.json" --html-details "${OUT}/cpp/index.html" --txt "${OUT}/cpp.txt"
 cat "${OUT}/cpp.txt"
 
 python3 scripts/coverage_summary.py "${OUT}" > "${OUT}/summary.md"

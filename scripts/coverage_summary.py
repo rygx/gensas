@@ -20,7 +20,7 @@ def cpp_table(path):
     for entry in sorted(data["files"], key=lambda e: e["file"]):
         lines = [ln for ln in entry["lines"] if not ln.get("gcovr/noncode")]
         covered = sum(1 for ln in lines if ln["count"] > 0)
-        branches = [b for ln in lines for b in ln.get("branches", [])]
+        branches = [b for ln in lines for b in (ln.get("branches") or [])]
         branch_covered = sum(1 for b in branches if b["count"] > 0)
         rows.append((entry["file"], covered, len(lines), branch_covered, len(branches)))
         for k, v in enumerate((covered, len(lines), branch_covered, len(branches))):

@@ -585,6 +585,29 @@ static void testUserFunctions() {
 	CHECK_NEAR(lastValue(g.result(), "z"), -10.0, 1e-9);
 }
 
+// Whole-array equations are expanded elementwise.
+static void testArrayExpressions() {
+	const char *src =
+		"model M\n  Real x[3](start = {1, 2, 3});\n  Real y[3], z[3], w[3], c[2,2];\n  Real s;\nequation\n"
+		"  der(x) = -x;\n  y = 2*x + {1, 1, 1};\n  z = sin(x) - x/2;\n  w = if s > 4 then x else -x;\n  s = sum(x);\n  c = {{1, 2}, {3, 4}}*s;\nend M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	const double e = std::exp(-1.0);
+	CHECK_NEAR(lastValue(sim.result(), "x[2]"), 2 * e, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "y[3]"), 6 * e + 1, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "z[1]"), std::sin(e) - e / 2, 1e-4);
+	const double s = 6 * e;
+	CHECK_NEAR(lastValue(sim.result(), "w[1]"), s > 4 ? e : -e, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "c[2,1]"), 3 * s, 1e-4);
+	// Assignments in an algorithm section and reinit() of an array work the same way.
+	const char *alg =
+		"model M\n  Real x[2](each start = 1);\n  Real y[2];\n  discrete Real k(start = 0);\nequation\n  der(x) = -x;\n"
+		"  when time >= 0.5 then\n    reinit(x, {5, 6});\n  end when;\nalgorithm\n  y := 2*x;\nend M;\n";
+	Simulation b(job(alg, 1.0));
+	CHECK(b.run());
+	CHECK_NEAR(lastValue(b.result(), "y[2]"), 12 * std::exp(-0.5), 1e-3);
+}
+
 // A run ends exactly at the requested end time, also when the last steps are short (exp grows fast).
 static void testEndTimeIsReached() {
 	const char *src = "model M\n  Real u(start = -1);\n  Real z;\nequation\n  der(u) = 1;\n  z = exp(u);\nend M;\n";
@@ -648,6 +671,7 @@ static void testDomainChecks() {
 int main() {
 	testAlgorithmSections();
 	testUserFunctions();
+	testArrayExpressions();
 	testExpSeriesAccuracy();
 	testPowerOperator();
 	testConstantCalls();

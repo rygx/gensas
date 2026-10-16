@@ -4,7 +4,7 @@ ModelicaSAS (`-g`) writes the simulation result sampled every `--step` seconds. 
 
 The samples start at the start time, are `step` apart, and the last one is at the end time (closer to the previous one if the end time is not a multiple of `step`).
 
-A hybrid model produces two samples at each event time: the first shows the values before the event, the second the values after it. Times are non-decreasing.
+A hybrid model produces two samples at each event time, also when the event is not on the sample grid: the first shows the values before the event, the second the values after it. Times are non-decreasing.
 
 ## JSON (`-j`)
 

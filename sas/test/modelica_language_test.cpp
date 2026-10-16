@@ -586,6 +586,69 @@ static void testUserFunctions() {
 }
 
 // Packages with constants and functions, several models in one source, and which one is simulated.
+// Types made with `type T = Real(...)`: unit and start values come with the type, the variable can change them.
+static void testTypeAliases() {
+	const char *src =
+		"type Volt = Real(unit = \"V\", start = 5);\n"
+		"type Level = Volt(start = 2) \"a level\";\n"
+		"type Count = Integer;\n"
+		"package Phys\n  type Rate = Real(unit = \"1/s\");\n  type Slow = Rate(start = 3);\nend Phys;\n"
+		"model M\n"
+		"  parameter Phys.Rate k = 2;\n"
+		"  Volt a;\n  Level b;\n  Level c(start = 7);\n  Phys.Slow d, e;\n  Volt arr[2](each start = 1);\n  discrete Count n(start = 4);\n"
+		"equation\n  der(a) = -k*a;\n  der(b) = -b;\n  der(c) = -c;\n  der(d) = -d;\n  der(e) = -e;\n  der(arr) = -arr;\n  when time > 0.5 then\n    n = pre(n) + 1;\n  end when;\nend M;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	const ModelInfo &info = sim.modelInfo();
+	auto var = [&](const string &name) {
+		for (const ModelVariable &v : info.variables) {
+			if (v.name == name) {
+				return v;
+			}
+		}
+		CHECK(false);
+		return ModelVariable();
+	};
+	CHECK_EQ(var("a").unit, string("V"));
+	CHECK_NEAR(var("a").start, 5.0, 0);
+	CHECK_NEAR(var("b").start, 2.0, 0); // the outer type changes the start of the inner one
+	CHECK_EQ(var("b").unit, string("V"));
+	CHECK_NEAR(var("c").start, 7.0, 0); // the variable has the last word
+	CHECK_EQ(var("d").unit, string("1/s"));
+	CHECK_NEAR(var("d").start, 3.0, 0);
+	CHECK_NEAR(var("e").start, 3.0, 0);
+	CHECK_NEAR(var("arr[2]").start, 1.0, 0);
+	CHECK_EQ(info.parameters[0].unit, string("1/s"));
+	CHECK_NEAR(lastValue(sim.result(), "a"), 5.0 * std::exp(-2.0), 1e-5);
+	bool sawCount = false;
+	for (size_t k = 0; k < sim.result().discreteNames.size(); k++) {
+		if (sim.result().discreteNames[k] == "n") {
+			CHECK_NEAR(sim.result().discrete[k].back(), 5.0, 1e-12);
+			sawCount = true;
+		}
+	}
+	CHECK(sawCount);
+	// errors
+	Simulation unknown(job("model M\n  Nope x;\nequation\n  der(x) = 1;\nend M;\n", 1.0));
+	CHECK(!unknown.check());
+	CHECK(unknown.error().find("unknown type 'Nope'") != string::npos);
+	Simulation twice(job("type T = Real;\ntype T = Real;\nmodel M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!twice.check());
+	CHECK(twice.error().find("defined twice") != string::npos);
+	Simulation later(job("type A = B;\ntype B = Real;\nmodel M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!later.check());
+	CHECK(later.error().find("unknown type 'B'") != string::npos);
+	Simulation arrays(job("type V3 = Real[3];\nmodel M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!arrays.check());
+	CHECK(arrays.error().find("array types") != string::npos);
+	Simulation record(job("type R = Foo.Bar(x = 1);\nmodel M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!record.check());
+	// a type after the model
+	Simulation after(job("model M\n  U x(start = 1);\nequation\n  der(x) = -x;\nend M;\ntype U = Real(unit = \"m\");\n", 1.0));
+	CHECK(after.run());
+	CHECK_EQ(after.modelInfo().variables[0].unit, string("m"));
+}
+
 static void testClassesAndPackages() {
 	const char *src =
 		"package Phys\n"
@@ -725,6 +788,7 @@ int main() {
 	testAlgorithmSections();
 	testUserFunctions();
 	testClassesAndPackages();
+	testTypeAliases();
 	testArrayExpressions();
 	testExpSeriesAccuracy();
 	testPowerOperator();

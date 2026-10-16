@@ -42,6 +42,17 @@ namespace che {
 
 		struct UserFunction;
 
+		// Where the scanner is, to come back to it later.
+		struct ParserState {
+			unsigned char *cursur = NULL;
+			unsigned char *lineHead = NULL;
+			int line = 0;
+			TokenValue value;
+			Coord coord, prevCoord;
+			int token = 0;
+			std::shared_ptr<IdPearl> id;
+		};
+
 		class SasModelParser {
 		public:
 			BufferedFileReader reader;
@@ -86,6 +97,15 @@ namespace che {
 				double value = 0.0;
 			};
 			std::map<std::string, PackageConstant> packageConstants;
+			// Types made with `type T = Real(unit = "V");`, by qualified name. The modification is read again for each
+			// variable declared with the type, from the place stored here (the `(`).
+			struct TypeAlias {
+				Type ty = TY_REAL;
+				std::string base; // the alias this one is made from, if any
+				bool hasMods = false;
+				ParserState mods;
+			};
+			std::map<std::string, TypeAlias> typeAliases;
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
 			// Every error and warning, also when `diag` is null.

@@ -456,7 +456,7 @@ namespace che {
 					}
 					const char *n = (const char *)p->value.p;
 					shared_ptr<IdPearl> id = ctx.model->lookupIdFromModel((char *)n, (int)strlen(n));
-					if (id == nullptr || id->idTy != ID_PARAM) {
+					if (id == nullptr || id->idTy != ID_PARAM || (id->ty != TY_INT && id->ty != TY_REAL)) {
 						return false;
 					}
 					out = id->ty == TY_INT ? (double)id->value.i : id->value.d;
@@ -477,9 +477,18 @@ namespace che {
 					if (!constantNumber(p->subs[0], ctx, a) || !constantNumber(p->subs[1], ctx, b)) {
 						return false;
 					}
-					out = p->op == OP_ADD ? a + b : p->op == OP_SUB ? a - b
-												: p->op == OP_MUL	? a * b
-																	: a / b;
+					if (p->op == OP_DIV && b == 0.0) {
+						return false;
+					}
+					if (p->op == OP_ADD) {
+						out = a + b;
+					} else if (p->op == OP_SUB) {
+						out = a - b;
+					} else if (p->op == OP_MUL) {
+						out = a * b;
+					} else {
+						out = a / b;
+					}
 					return true;
 				default:
 					return false;
@@ -491,7 +500,10 @@ namespace che {
 			// exp(y*log(x)), which needs x > 0.
 			AstNode *rewritePow(const AstNode *x, const AstNode *y, RewriteCtx &ctx) {
 				const int maxIntPower = 16;
-				double n;
+				double cx, n;
+				if (constantNumber(x, ctx, cx) && constantNumber(y, ctx, n) && std::isfinite(std::pow(cx, n))) {
+					return mkConst(std::pow(cx, n));
+				}
 				if (constantNumber(y, ctx, n)) {
 					if (n == std::floor(n) && std::fabs(n) <= maxIntPower) {
 						if (n == 0.0) {

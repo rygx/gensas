@@ -507,13 +507,13 @@ static void testPowerOperator() {
 static void testConstantCalls() {
 	const char *src =
 		"model M\n  parameter Real q = 2;\n  Real u(start = 0.5);\n  Real a, b, c;\nequation\n"
-		"  der(u) = 0.7;\n  a = exp(1)*u;\n  b = sin(0.5) + u + exp(q);\n  c = atan2(1, 2) + sqrt(2);\nend M;\n";
+		"  der(u) = 0.7;\n  a = exp(1)*u;\n  b = sin(0.5) + u + exp(q);\n  c = atan2(1, 2) + sqrt(2) + 2^2.5 + 1/(q - 2 + 1);\nend M;\n";
 	Simulation sim(job(src, 3.0));
 	CHECK(sim.run());
 	const double u = 0.5 + 0.7 * sim.result().time.back();
 	CHECK_NEAR(lastValue(sim.result(), "a"), std::exp(1.0) * u, 1e-4);
 	CHECK_NEAR(lastValue(sim.result(), "b"), std::sin(0.5) + u + std::exp(2.0), 1e-4);
-	CHECK_NEAR(lastValue(sim.result(), "c"), std::atan2(1.0, 2.0) + std::sqrt(2.0), 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "c"), std::atan2(1.0, 2.0) + std::sqrt(2.0) + std::pow(2.0, 2.5) + 1.0, 1e-4);
 }
 
 // A run ends exactly at the requested end time, also when the last steps are short (exp grows fast).

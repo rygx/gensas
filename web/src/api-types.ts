@@ -151,7 +151,7 @@ export interface components {
     schemas: {
         Error: {
             error: {
-                /** @description machine-readable, for example invalid_request, unauthorized, not_found, too_large, busy, no_result */
+                /** @description machine-readable, for example invalid_request, unauthorized, not_found, too_large, busy, rate_limited, no_result */
                 code: string;
                 message: string;
             };
@@ -378,6 +378,17 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description this address has started too many checks and runs in the last minute */
+        RateLimited: {
+            headers: {
+                /** @description seconds to wait */
+                "Retry-After"?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description no worker is available for the check within the time limit */
         Busy: {
             headers: {
@@ -463,6 +474,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             413: components["responses"]["TooLarge"];
+            429: components["responses"]["RateLimited"];
             503: components["responses"]["Busy"];
         };
     };
@@ -514,7 +526,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             413: components["responses"]["TooLarge"];
-            /** @description too many runs are waiting or running */
+            /** @description too many runs are waiting or running (code too_many_runs), or this address has started too many checks and runs in the last minute (code rate_limited, with Retry-After) */
             429: {
                 headers: {
                     [name: string]: unknown;

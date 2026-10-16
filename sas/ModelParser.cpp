@@ -899,7 +899,7 @@ namespace che {
 							parser->error("Line %d: %s.%s: '%s' is a constant and cannot be changed.", line, what, hit->first.c_str(), name.c_str());
 						} else if (pass == 1 && isParam) {
 							parser->error("Line %d: %s.%s: '%s' is a parameter; give its value under parameters.", line, what, hit->first.c_str(), name.c_str());
-						} else if ((el->ty == TY_INT || el->ty == TY_BOOL) && v != floor(v)) {
+						} else if ((el->ty == TY_INT || el->ty == TY_BOOL) && v != std::floor(v)) {
 							parser->error("Line %d: %s.%s: '%s' is an Integer or Boolean and needs a whole number.", line, what, hit->first.c_str(), name.c_str());
 						} else {
 							setValue(el.get(), v);
@@ -991,8 +991,18 @@ namespace che {
 						}
 					}
 					freeAst(value);
-				} else if (isParam && parser->parameterOverrides.count(name) == 0 && parser->parameterOverrides.count((const char *)elems[0]->str) == 0) {
-					parser->error("Parameter '%s' has no value.", name.c_str());
+				} else if (isParam) {
+					// a parameter without a binding needs a value from the job, for every element
+					bool missing = parser->parameterOverrides.count(name) == 0;
+					if (missing) {
+						missing = elems.empty();
+						for (const shared_ptr<IdPearl> &el : elems) {
+							missing = missing || parser->parameterOverrides.count((const char *)el->str) == 0;
+						}
+					}
+					if (missing) {
+						parser->error("Parameter '%s' has no value.", name.c_str());
+					}
 				} else if (isInput) {
 					parser->error("Input '%s' has no value; give it a binding, for example `input Real u = 1;`.", name.c_str());
 				}

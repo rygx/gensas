@@ -501,10 +501,11 @@ namespace che {
 			parseSingleSasModel(&parser);
 			if (parser.errCount == 0) {
 				// every replacement must have found its declaration
-				for (const char *what : {"parameters", "start"}) {
-					for (const auto &kv : string(what) == "parameters" ? jobData.parameters : jobData.start) {
-						if (parser.usedOverrides.count(string(what) + "." + kv.first) == 0) {
-							const string msg = string(what) + "." + kv.first + ": the model has no such " + (string(what) == "parameters" ? "parameter" : "variable");
+				for (int pass = 0; pass < 2; pass++) {
+					const string what = pass == 0 ? "parameters" : "start";
+					for (const auto &kv : pass == 0 ? jobData.parameters : jobData.start) {
+						if (parser.usedOverrides.count(what + "." + kv.first) == 0) {
+							const string msg = what + "." + kv.first + ": the model has no such " + (pass == 0 ? "parameter" : "variable");
 							Diagnostic d;
 							d.message = msg;
 							d.source = "job";

@@ -374,6 +374,17 @@ static void testOverrides() {
 		CHECK(with.run());
 		CHECK_NEAR(lastValue(with.result(), "x"), std::exp(-1.0), 1e-4);
 	}
+	// an array parameter without values needs every element
+	{
+		ModelicaJob job = sourceJob("model R\n  parameter Real p[2];\n  Real x(start = 1);\nequation\n  der(x) = -(p[1] + p[2]) * x;\nend R;\n", 1.0);
+		job.parameters["p[2]"] = 1.0;
+		Simulation partial(job);
+		CHECK(!partial.check());
+		job.parameters["p[1]"] = 0.5;
+		Simulation all(job);
+		CHECK(all.run());
+		CHECK_NEAR(lastValue(all.result(), "x"), std::exp(-1.5), 1e-4);
+	}
 }
 
 static void testParseJobOverrides() {

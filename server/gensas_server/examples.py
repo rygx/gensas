@@ -121,4 +121,56 @@ equation
 end TwoTanks;
 """,
     },
+    {
+        "id": "rc_circuit",
+        "title": "RC circuit (connectors)",
+        "description": "A source, a resistor and a capacitor joined with connect(); the capacitor charges with time constant R*C.",
+        "endTime": 5.0,
+        "source": """connector Pin
+  Real v;
+  flow Real i;
+end Pin;
+model Resistor
+  parameter Real R = 1;
+  Pin p, n;
+  Real u;
+equation
+  u = p.v - n.v;
+  0 = p.i + n.i;
+  p.i = u / R;
+end Resistor;
+model Capacitor
+  parameter Real C = 1;
+  Pin p, n;
+  Real u(start = 0);
+equation
+  u = p.v - n.v;
+  0 = p.i + n.i;
+  C * der(u) = p.i;
+end Capacitor;
+model Source
+  parameter Real V = 1;
+  Pin p, n;
+equation
+  V = p.v - n.v;
+  0 = p.i + n.i;
+end Source;
+model Ground
+  Pin p;
+equation
+  p.v = 0;
+end Ground;
+model RC "RC circuit"
+  Source s(V = 5);
+  Resistor r(R = 2);
+  Capacitor c(C = 0.5);
+  Ground g;
+equation
+  connect(s.p, r.p);
+  connect(r.n, c.p);
+  connect(c.n, s.n);
+  connect(s.n, g.p);
+end RC;
+""",
+    },
 ]

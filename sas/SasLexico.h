@@ -131,9 +131,18 @@ namespace che {
 			// Names of the components declared so far ("a", "a.b"), and whether the component being read was declared
 			// `parameter` or `constant`, which makes every variable in it one.
 			std::set<std::string> components;
+			// connect(a, b) statements of each class level (the key is the prefix of the level: "" for the model,
+			// "x." for the component x), turned into equations when the level has been read, and the names of the
+			// connectors declared so far.
+			struct Connect {
+				std::string a, b;
+				int line = 0;
+			};
+			std::map<std::string, std::vector<Connect>> connects;
+			std::set<std::string> connectors;
 			bool forceParam = false, forceConstant = false;
 			bool isGlobalName(const std::string &name) const {
-				return name == "time" || name == "size" || name == "sum" || name == "prod" || name == "AssertionLevel" || globalRoots.count(name) > 0 || functions.count(name) > 0;
+				return name == "time" || name == "size" || name == "sum" || name == "prod" || name == "AssertionLevel" || name == "connect" || globalRoots.count(name) > 0 || functions.count(name) > 0;
 			}
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;

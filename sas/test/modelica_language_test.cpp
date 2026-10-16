@@ -800,6 +800,29 @@ static void testConnectors() {
 	fails("connector S\n  Real v;\n  stream Real h;\nend S;\nmodel Top\n  S a;\nend Top;\n", "stream variables are not supported");
 }
 
+// Bindings of arrays can be array expressions, not only literals.
+static void testArrayBindings() {
+	Simulation sim(job("model M\n  parameter Real a[3] = {1, 2, 3};\n  parameter Real b[3] = 2*a;\n  parameter Real c[2, 2] = {{1, 2}, {3, 4}};\n  parameter Real d[2, 2] = c + 1;\n"
+					   "  Real x[3](each start = 1);\n  Real y[3] = 2*x + b;\n  Real z[3] = {x[1], 5, b[3]};\nequation\n  der(x) = -x;\nend M;\n",
+					   1.0));
+	CHECK(sim.run());
+	CHECK_NEAR(lastValue(sim.result(), "y[2]"), 2 * std::exp(-1.0) + 4.0, 1e-5);
+	CHECK_NEAR(lastValue(sim.result(), "z[1]"), std::exp(-1.0), 1e-5);
+	CHECK_NEAR(lastValue(sim.result(), "z[3]"), 6.0, 1e-9);
+	bool seen = false;
+	for (const ModelParameter &p : sim.modelInfo().parameters) {
+		if (p.name == "d[2,1]") {
+			CHECK_NEAR(p.value, 4.0, 0);
+			seen = true;
+		}
+	}
+	CHECK(seen);
+	Simulation size(job("model M\n  Real x[3](each start = 1);\n  Real y[2] = x;\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!size.check());
+	Simulation scalar(job("model M\n  Real x[3](each start = 1);\n  Real y[3] = 1;\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+	CHECK(!scalar.check());
+}
+
 // Types made with `type T = Real(...)`: unit and start values come with the type, the variable can change them.
 static void testTypeAliases() {
 	const char *src =
@@ -1006,6 +1029,7 @@ int main() {
 	testComponents();
 	testExtends();
 	testConnectors();
+	testArrayBindings();
 	testArrayExpressions();
 	testExpSeriesAccuracy();
 	testPowerOperator();

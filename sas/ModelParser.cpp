@@ -1164,9 +1164,36 @@ namespace che {
 
 				if (parser->currentToken == TK_EQN) {
 					getNextToken(parser);
-					AstNode *value = parseDeclValue(parser);
+					AstNode *value = NULL;
+					vector<AstNode *> built; // the elements of an array expression, one for each element of the array
 					vector<const AstNode *> vals;
-					flattenValues(value, vals);
+					if (!dims.empty()) {
+						Elab ctx(parser, line);
+						AstNode *raw = parseValueExpr(parser);
+						vector<int> shape;
+						if (arrayShape(ctx, raw, shape) && shape == dims) { // {1, 2, 3}, 2*x, or any other array expression of the size
+							for (const vector<int> &idx : allIndices(dims)) {
+								AstNode *e = elementOf(ctx, raw, idx);
+								AstNode *el = elabChain(ctx, e);
+								freeAst(e);
+								if (!parser->functions.empty()) {
+									el = inlineCalls(parser, el, line, 0);
+								}
+								built.push_back(el);
+								vals.push_back(el);
+							}
+						} else {
+							value = elabChain(ctx, raw);
+							if (!parser->functions.empty()) {
+								value = inlineCalls(parser, value, ctx.line, 0);
+							}
+							flattenValues(value, vals);
+						}
+						freeAst(raw);
+					} else {
+						value = parseDeclValue(parser);
+						flattenValues(value, vals);
+					}
 					if (vals.size() != elems.size()) {
 						parser->error("Line %d: the binding of '%s' has %d value(s) but it has %d element(s).", line, name.c_str(), (int)vals.size(), (int)elems.size());
 					} else if (!isParam && idTy != ID_VAR) {
@@ -1199,6 +1226,9 @@ namespace che {
 						}
 					}
 					freeAst(value);
+					for (AstNode *e : built) {
+						freeAst(e);
+					}
 				} else if (isParam) {
 					// a parameter without a binding needs a value from the job, for every element
 					auto given = [&](const string &key) { return parser->parameterOverrides.count(key) > 0 || parser->instanceParams.count(key) > 0; };

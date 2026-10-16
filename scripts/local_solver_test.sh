@@ -38,7 +38,7 @@ JSONCPP_INCLUDE="${JSONCPP_INCLUDE:-/usr/include/jsoncpp}"
 LINK_LIBS="${LINK_LIBS:--ljsoncpp -lsuperlu -llapack -lblas -lpthread -lm}"
 JOBS="${JOBS:-$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null) || echo 4)}"
 
-CXXFLAGS="-std=c++14 -O1 -w -DARMA_DONT_USE_WRAPPER -I. \
+CXXFLAGS="-std=c++17 -O1 -w -DARMA_DONT_USE_WRAPPER -I. \
 -I${ARMADILLO_INCLUDE} -I${SUPERLU_INCLUDE} -I${JSONCPP_INCLUDE} ${EXTRA_CXXFLAGS:-}"
 
 # Library sources the solver tests depend on (no power flow, no PSAT/MAT input); the list is shared with

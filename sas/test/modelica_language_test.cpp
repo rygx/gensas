@@ -586,6 +586,79 @@ static void testUserFunctions() {
 }
 
 // Packages with constants and functions, several models in one source, and which one is simulated.
+// Components: instances of models, blocks and records, flattened to variables named "a.x".
+static void testComponents() {
+	const char *src =
+		"model Decay\n  parameter Real k = 1;\n  Real x(start = 1);\n  Real y;\nequation\n  der(x) = -k*x;\n  y = 2*x;\nend Decay;\n"
+		"model Pair\n  Decay a(k = 2), b;\n  Real s;\nequation\n  s = a.y + b.y;\nend Pair;\n"
+		"model Top\n  parameter Real q = 3;\n  Pair p(a(k = q), b(x(start = 4)));\n  Real total;\nequation\n  total = p.s;\nend Top;\n";
+	Simulation sim(job(src, 1.0));
+	CHECK(sim.run());
+	CHECK_NEAR(lastValue(sim.result(), "p.a.x"), std::exp(-3.0), 1e-5);
+	CHECK_NEAR(lastValue(sim.result(), "p.b.x"), 4.0 * std::exp(-1.0), 1e-5);
+	CHECK_NEAR(lastValue(sim.result(), "total"), 2 * std::exp(-3.0) + 8 * std::exp(-1.0), 1e-4);
+	CHECK_EQ(sim.modelInfo().name, string("Top"));
+	// the job can change the parameters of a component, and wins over the modification in the source
+	ModelicaJob changed = job(src, 1.0);
+	changed.parameters["p.b.k"] = 0.5;
+	changed.parameters["p.a.k"] = 1.0;
+	Simulation other(changed);
+	CHECK(other.run());
+	CHECK_NEAR(lastValue(other.result(), "p.b.x"), 4.0 * std::exp(-0.5), 1e-5);
+	CHECK_NEAR(lastValue(other.result(), "p.a.x"), std::exp(-1.0), 1e-5);
+	// a record as a parameter, a component used in the declaration of another value
+	Simulation rec(job("record Pt\n  Real x;\n  Real y;\nend Pt;\n"
+					   "model M\n  parameter Pt c(x = 2, y = 3);\n  parameter Real r = c.x*c.y;\n  Real v(start = 0);\nequation\n  der(v) = r;\nend M;\n",
+					   1.0));
+	CHECK(rec.run());
+	CHECK_NEAR(lastValue(rec.result(), "v"), 6.0, 1e-6);
+	// a block whose input is driven by an equation of the model around it; arrays and loops inside a component
+	Simulation blk(job("block Gain\n  parameter Real k = 1;\n  input Real u;\n  output Real y;\nequation\n  y = k*u;\nend Gain;\n"
+					   "model Vec\n  parameter Integer n = 3;\n  Real w[n](each start = 1);\n  Real tot;\nequation\n  for i in 1:n loop\n    der(w[i]) = -i*w[i];\n  end for;\n  tot = sum(w);\nend Vec;\n"
+					   "model M\n  Gain g(k = 3);\n  Vec v;\n  Real t(start = 0), z;\nequation\n  g.u = 2 + t;\n  der(t) = g.y*0.1;\n  z = v.w[2] + g.k;\nend M;\n",
+					   1.0));
+	CHECK(blk.run());
+	CHECK_NEAR(lastValue(blk.result(), "v.w[2]"), std::exp(-2.0), 1e-6);
+	CHECK_NEAR(lastValue(blk.result(), "v.tot"), std::exp(-1.0) + std::exp(-2.0) + std::exp(-3.0), 1e-5);
+	CHECK_NEAR(lastValue(blk.result(), "g.y"), 3 * (2 + lastValue(blk.result(), "t")), 1e-9);
+	CHECK_NEAR(lastValue(blk.result(), "z"), std::exp(-2.0) + 3.0, 1e-5);
+	// packages and functions inside a component keep their meaning
+	Simulation glob(job("package P\n  constant Real c = 2;\n  function f\n    input Real a;\n    output Real r;\n  algorithm\n    r := a*c;\n  end f;\nend P;\n"
+						"model Sub\n  Real x(start = 0);\nequation\n  der(x) = P.f(1) + P.c;\nend Sub;\n"
+						"model M\n  Sub s;\nend M;\n",
+						1.0));
+	CHECK(glob.run());
+	CHECK_NEAR(lastValue(glob.result(), "s.x"), 4.0, 1e-6);
+	// when and discrete variables inside a component
+	Simulation ev(job("model Cnt\n  discrete Integer n(start = 0);\nequation\n  when time > 0.5 then\n    n = pre(n) + 1;\n  end when;\nend Cnt;\n"
+					  "model M\n  Cnt c;\nend M;\n",
+					  1.0));
+	CHECK(ev.run());
+	bool sawN = false;
+	for (size_t k = 0; k < ev.result().discreteNames.size(); k++) {
+		if (ev.result().discreteNames[k] == "c.n") {
+			CHECK_NEAR(ev.result().discrete[k].back(), 1.0, 1e-12);
+			sawN = true;
+		}
+	}
+	CHECK(sawN);
+	// errors
+	auto fails = [&](const char *text, const char *needle) {
+		Simulation bad(job(text, 1.0));
+		CHECK(!bad.check());
+		CHECK(bad.error().find(needle) != string::npos);
+	};
+	const char *decay = "model Decay\n  parameter Real k = 1;\n  Real x(start = 1);\nequation\n  der(x) = -k*x;\nend Decay;\n";
+	fails((string(decay) + "model M\n  Decay a(zz = 2);\nend M;\n").c_str(), "no variable or parameter 'zz'");
+	fails((string(decay) + "model M\n  Decay a, a;\nend M;\n").c_str(), "Redeclaration of 'a'");
+	fails((string(decay) + "model M\n  Decay a[2];\nend M;\n").c_str(), "arrays of components");
+	fails("model A\n  A a;\nend A;\nmodel M\n  A a;\nend M;\n", "contains itself");
+	fails((string(decay) + "model M\n  Decay a(x = 3);\nend M;\n").c_str(), "not well defined"); // x = 3 is an equation, and x already has one
+	fails((string(decay) + "model M\n  Decay a;\nequation\n  a.nope = 1;\nend M;\n").c_str(), "'a.nope'");
+	fails("model C\n  parameter Real k;\n  Real x(start = 1);\nequation\n  der(x) = -k*x;\nend C;\nmodel M\n  C c;\nend M;\n", "Parameter 'c.k' has no value");
+	fails("model C\n  Real x(start = 1);\n  function f\n    input Real a;\n    output Real b;\n  algorithm\n    b := a;\n  end f;\nequation\n  der(x) = -x;\nend C;\nmodel M\n  C c;\nend M;\n", "function inside a class used as a component");
+}
+
 // Types made with `type T = Real(...)`: unit and start values come with the type, the variable can change them.
 static void testTypeAliases() {
 	const char *src =
@@ -696,7 +769,7 @@ static void testClassesAndPackages() {
 	CHECK(bad.error().find("defined twice") != string::npos);
 	Simulation unknown(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -Q.k*x;\nend M;\n", 1.0));
 	CHECK(!unknown.check());
-	CHECK(unknown.error().find("'Q'") != string::npos);
+	CHECK(unknown.error().find("'Q.k'") != string::npos);
 	Simulation nonConstant(job("package P\n  constant Real a = b;\nend P;\nmodel M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
 	CHECK(!nonConstant.check());
 }
@@ -789,6 +862,7 @@ int main() {
 	testUserFunctions();
 	testClassesAndPackages();
 	testTypeAliases();
+	testComponents();
 	testArrayExpressions();
 	testExpSeriesAccuracy();
 	testPowerOperator();

@@ -211,6 +211,20 @@ namespace che {
 					expr = p;
 					break;
 				case TK_DOT:
+					if (parser->collapseMembers && expr->op == OP_ID && expr->ty != TY_FUNCTION && expr->value.p != NULL && !parser->isGlobalName((const char *)expr->value.p)) {
+						// a.x, a variable of the component a: one name
+						const string root = (const char *)expr->value.p;
+						getNextToken(parser);
+						if (parser->currentToken != TK_ID) {
+							parser->error("Expect identifier as member.");
+							break;
+						}
+						const string full = root + "." + (const char *)parser->value.p;
+						shared_ptr<IdPearl> id = parser->currentModel->lookupIdentifier(full.c_str(), (int)full.size());
+						expr->value.p = (decltype(expr->value.p))id->str;
+						getNextToken(parser);
+						break;
+					}
 					p = new AstNode();
 					p->op = OP_MEMBER;
 					p->subs[0] = expr;

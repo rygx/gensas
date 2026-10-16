@@ -41,7 +41,8 @@ namespace che {
 
 			class Checker {
 			public:
-				Checker(SasModel &model, const SolverFeatures &features, const string &filename, ostream &err) : model(model), features(features), filename(filename), err(err) {}
+				Checker(SasModel &model, const SolverFeatures &features, const string &filename, ostream &err, vector<Diagnostic> *diagnostics)
+					: model(model), features(features), filename(filename), err(err), diagnostics(diagnostics) {}
 
 				int run() {
 					for (const shared_ptr<IdPearl> &id : model.idTable) {
@@ -65,6 +66,7 @@ namespace che {
 				const SolverFeatures &features;
 				const string &filename;
 				ostream &err;
+				vector<Diagnostic> *diagnostics;
 				int errors = 0;
 				set<pair<int, string>> reported;
 
@@ -77,6 +79,14 @@ namespace che {
 						return;
 					}
 					err << filename << ":" << line << ": error: " << msg << endl;
+					if (diagnostics != NULL) {
+						Diagnostic d;
+						d.severity = Diagnostic::Error;
+						d.line = line;
+						d.message = msg;
+						d.source = "checker";
+						diagnostics->push_back(d);
+					}
 					errors++;
 				}
 
@@ -385,8 +395,8 @@ namespace che {
 
 		} // namespace
 
-		int checkModel(SasModel &model, const SolverFeatures &features, const string &filename, ostream &err) {
-			return Checker(model, features, filename, err).run();
+		int checkModel(SasModel &model, const SolverFeatures &features, const string &filename, ostream &err, vector<Diagnostic> *diagnostics) {
+			return Checker(model, features, filename, err, diagnostics).run();
 		}
 	} // namespace core
 } // namespace che

@@ -68,6 +68,8 @@ namespace che {
 			std::map<std::string, std::shared_ptr<UserFunction>> functions;
 			// Where error and warning messages go (default: std::cerr; null discards them).
 			std::ostream *diag = &std::cerr;
+			// Every error and warning, also when `diag` is null.
+			std::vector<Diagnostic> diagnostics;
 
 			SasModelParser();
 

@@ -129,6 +129,58 @@ int gensas_run(gensas_simulation *sim, gensas_progress_fn progress, void *user) 
 	return GENSAS_ERROR;
 }
 
+int gensas_check(gensas_simulation *sim) {
+	if (sim == nullptr) {
+		return GENSAS_ERROR;
+	}
+	try {
+		sim->hasResult = false;
+		sim->error.clear();
+		if (sim->sim->check()) {
+			return GENSAS_OK;
+		}
+		sim->error = sim->sim->error();
+	} catch (const std::exception &e) {
+		sim->error = e.what();
+	} catch (...) {
+		sim->error = "unknown error";
+	}
+	return GENSAS_ERROR;
+}
+
+static const Diagnostic *diagnosticOf(const gensas_simulation *sim, size_t index) {
+	return (sim != nullptr && index < sim->sim->diagnostics().size()) ? &sim->sim->diagnostics()[index] : nullptr;
+}
+
+size_t gensas_diagnostic_count(const gensas_simulation *sim) {
+	return sim != nullptr ? sim->sim->diagnostics().size() : 0;
+}
+
+int gensas_diagnostic_severity(const gensas_simulation *sim, size_t index) {
+	const Diagnostic *d = diagnosticOf(sim, index);
+	return d != nullptr && d->severity == Diagnostic::Warning ? GENSAS_DIAG_WARNING : GENSAS_DIAG_ERROR;
+}
+
+int gensas_diagnostic_line(const gensas_simulation *sim, size_t index) {
+	const Diagnostic *d = diagnosticOf(sim, index);
+	return d != nullptr ? d->line : 0;
+}
+
+int gensas_diagnostic_column(const gensas_simulation *sim, size_t index) {
+	const Diagnostic *d = diagnosticOf(sim, index);
+	return d != nullptr ? d->column : 0;
+}
+
+const char *gensas_diagnostic_message(const gensas_simulation *sim, size_t index) {
+	const Diagnostic *d = diagnosticOf(sim, index);
+	return d != nullptr ? d->message.c_str() : nullptr;
+}
+
+const char *gensas_diagnostic_source(const gensas_simulation *sim, size_t index) {
+	const Diagnostic *d = diagnosticOf(sim, index);
+	return d != nullptr ? d->source.c_str() : nullptr;
+}
+
 const char *gensas_error(const gensas_simulation *sim) {
 	return sim != nullptr ? sim->error.c_str() : "";
 }

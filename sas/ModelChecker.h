@@ -31,6 +31,7 @@
 #include "sas/SasModel.h"
 #include <iosfwd>
 #include <string>
+#include <vector>
 
 namespace che {
 	namespace core {
@@ -61,7 +62,9 @@ namespace che {
 		// Checks a parsed model: undeclared identifiers, unknown functions, and use of
 		// features that `features` does not enable. Diagnostics are written to `err` as
 		// "<filename>:<line>: error: <message>". Returns the number of errors.
-		int checkModel(SasModel &model, const SolverFeatures &features, const std::string &filename, std::ostream &err);
+		// With `diagnostics` the errors are also appended there (line numbers, source "checker").
+		int checkModel(SasModel &model, const SolverFeatures &features, const std::string &filename, std::ostream &err,
+					   std::vector<Diagnostic> *diagnostics = nullptr);
 
 	} // namespace core
 } // namespace che

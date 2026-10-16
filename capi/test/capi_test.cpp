@@ -171,7 +171,39 @@ static void testConcurrentHandles() {
 	}
 }
 
+static void testCheckAndDiagnostics() {
+	char err[256];
+	gensas_simulation *sim = gensas_create(jobFor("model M\n  Real x(start = 1);\nequation\n  der(x) = -y;\nend M;\n", 1.0).c_str(), nullptr, err, sizeof err);
+	CHECK(sim != nullptr);
+	if (sim == nullptr) {
+		return;
+	}
+	CHECK_EQ(gensas_check(sim), GENSAS_ERROR);
+	CHECK(std::string(gensas_error(sim)).find("undeclared identifier 'y'") != std::string::npos);
+	CHECK_EQ(gensas_diagnostic_count(sim), (size_t)1);
+	CHECK_EQ(gensas_diagnostic_severity(sim, 0), GENSAS_DIAG_ERROR);
+	CHECK_EQ(gensas_diagnostic_line(sim, 0), 4);
+	CHECK(std::string(gensas_diagnostic_message(sim, 0)).find("undeclared identifier 'y'") != std::string::npos);
+	CHECK_EQ(std::string(gensas_diagnostic_source(sim, 0)), std::string("checker"));
+	CHECK(gensas_diagnostic_message(sim, 1) == nullptr);
+	CHECK_EQ(gensas_diagnostic_line(sim, 1), 0);
+	gensas_destroy(sim);
+
+	sim = gensas_create(jobFor(kGain, 2.0).c_str(), nullptr, err, sizeof err);
+	CHECK(sim != nullptr);
+	if (sim != nullptr) {
+		CHECK_EQ(gensas_check(sim), GENSAS_OK);
+		CHECK_EQ(gensas_diagnostic_count(sim), (size_t)0);
+		CHECK_EQ(gensas_sample_count(sim), (size_t)0); // checking does not run
+		CHECK_EQ(gensas_run(sim, nullptr, nullptr), GENSAS_OK);
+		gensas_destroy(sim);
+	}
+	CHECK_EQ(gensas_check(nullptr), GENSAS_ERROR);
+	CHECK_EQ(gensas_diagnostic_count(nullptr), (size_t)0);
+}
+
 int main() {
+	testCheckAndDiagnostics();
 	testHybridResult();
 	testErrorsAndWarnings();
 	testConcurrentHandles();

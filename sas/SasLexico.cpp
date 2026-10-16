@@ -227,6 +227,24 @@ namespace che {
 
 		SasModelParser::SasModelParser() : reader() {}
 
+		// Many messages start with "Line N: " naming the statement they are about, which is more exact than
+		// the position of the scanner (it is already at the end of the statement).
+		static Diagnostic makeDiagnostic(Diagnostic::Severity severity, const Coord &coord, const char *text) {
+			Diagnostic d;
+			d.severity = severity;
+			d.source = "parser";
+			d.line = coord.line;
+			d.column = coord.col;
+			d.message = text;
+			int line = 0, used = 0;
+			if (sscanf(text, "Line %d: %n", &line, &used) == 1 && used > 0) {
+				d.line = line;
+				d.column = 0;
+				d.message = text + used;
+			}
+			return d;
+		}
+
 		void SasModelParser::error(const char *formatMsg, ...) {
 			va_list ap;
 			char buffer[MAX_PRINT_LEN + 1];
@@ -235,6 +253,7 @@ namespace che {
 			if (diag != nullptr) {
 				*diag << "(" << coord.filename << "," << coord.line << ") error: " << buffer << endl;
 			}
+			diagnostics.push_back(makeDiagnostic(Diagnostic::Error, coord, buffer));
 			errCount++;
 			va_end(ap);
 		}
@@ -247,6 +266,7 @@ namespace che {
 			if (diag != nullptr) {
 				*diag << "(" << coord.filename << "," << coord.line << ") warn: " << buffer << endl;
 			}
+			diagnostics.push_back(makeDiagnostic(Diagnostic::Warning, coord, buffer));
 			warnCount++;
 			va_end(ap);
 		}

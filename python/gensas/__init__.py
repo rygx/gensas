@@ -27,14 +27,35 @@ try:
 except ImportError:  # NumPy is optional
     _np = None
 
-__all__ = ["Simulation", "Result", "run", "GenSASError", "Cancelled", "library_path"]
+__all__ = ["Simulation", "Result", "Diagnostic", "run", "GenSASError", "Cancelled", "library_path"]
 
 _OK, _ERROR, _CANCELLED = 0, 1, 2
 _ERR_LEN = 1024
 
 
 class GenSASError(Exception):
-    """A job, model or solver error reported by the library."""
+    """A job, model or solver error reported by the library. For errors in the model text,
+    `diagnostics` lists them with line numbers (empty otherwise)."""
+
+    diagnostics = ()
+
+
+class Diagnostic:
+    """An error or warning about the model text: `severity` ("error" or "warning"), 1-based `line` and
+    `column` (0 if unknown), `message`, and `source` ("parser" or "checker")."""
+
+    def __init__(self, severity, line, column, message, source):
+        self.severity = severity
+        self.line = line
+        self.column = column
+        self.message = message
+        self.source = source
+
+    def as_dict(self):
+        return {"severity": self.severity, "line": self.line, "column": self.column, "message": self.message, "source": self.source}
+
+    def __repr__(self):
+        return "Diagnostic(%s, line %d, %r)" % (self.severity, self.line, self.message)
 
 
 class Cancelled(GenSASError):
@@ -90,6 +111,13 @@ def _load_locked():
         "gensas_destroy": (None, [sim]),
         "gensas_run": (ctypes.c_int, [sim, progress, ctypes.c_void_p]),
         "gensas_error": (ctypes.c_char_p, [sim]),
+        "gensas_check": (ctypes.c_int, [sim]),
+        "gensas_diagnostic_count": (ctypes.c_size_t, [sim]),
+        "gensas_diagnostic_severity": (ctypes.c_int, [sim, ctypes.c_size_t]),
+        "gensas_diagnostic_line": (ctypes.c_int, [sim, ctypes.c_size_t]),
+        "gensas_diagnostic_column": (ctypes.c_int, [sim, ctypes.c_size_t]),
+        "gensas_diagnostic_message": (ctypes.c_char_p, [sim, ctypes.c_size_t]),
+        "gensas_diagnostic_source": (ctypes.c_char_p, [sim, ctypes.c_size_t]),
         "gensas_warning_count": (ctypes.c_size_t, [sim]),
         "gensas_warning": (ctypes.c_char_p, [sim, ctypes.c_size_t]),
         "gensas_sample_count": (ctypes.c_size_t, [sim]),
@@ -116,8 +144,8 @@ def _load_locked():
         fn.restype = restype
         fn.argtypes = argtypes
     lib._progress_type = progress
-    if lib.gensas_api_version() != 1:
-        raise GenSASError("the GenSAS library has API version %d, this module expects 1" % lib.gensas_api_version())
+    if lib.gensas_api_version() < 2:
+        raise GenSASError("the GenSAS library has API version %d, this module needs 2 or later" % lib.gensas_api_version())
     _lib = lib
     return lib
 
@@ -195,8 +223,36 @@ class Simulation:
         if status == _CANCELLED:
             raise Cancelled("the run was cancelled")
         if status != _OK:
-            raise GenSASError(_text(lib.gensas_error(self._handle)))
+            raise self._failure()
         return self._result()
+
+    def check(self):
+        """Parses and checks the model without running it. Returns the list of Diagnostics (errors and
+        warnings with line numbers); an empty list means the model is fine. Raises GenSASError only if the
+        text could not be examined at all."""
+        self._check_open()
+        status = self._lib.gensas_check(self._handle)
+        found = self.diagnostics
+        if status != _OK and not any(d.severity == "error" for d in found):
+            raise self._failure()
+        return found
+
+    @property
+    def diagnostics(self):
+        """Errors and warnings about the model text from the last run() or check()."""
+        self._check_open()
+        lib, h = self._lib, self._handle
+        out = []
+        for i in range(lib.gensas_diagnostic_count(h)):
+            severity = "warning" if lib.gensas_diagnostic_severity(h, i) == 1 else "error"
+            out.append(Diagnostic(severity, lib.gensas_diagnostic_line(h, i), lib.gensas_diagnostic_column(h, i),
+                                  _text(lib.gensas_diagnostic_message(h, i)), _text(lib.gensas_diagnostic_source(h, i))))
+        return out
+
+    def _failure(self):
+        err = GenSASError(_text(self._lib.gensas_error(self._handle)))
+        err.diagnostics = self.diagnostics
+        return err
 
     def _result(self):
         lib, h = self._lib, self._handle

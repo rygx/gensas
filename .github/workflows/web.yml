@@ -1,0 +1,46 @@
+name: Web client
+run-name: ${{ github.actor }} web client
+on: [push, pull_request]
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install the client's dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: The generated API types match api/openapi.yaml
+        working-directory: web
+        run: |
+          npm run types
+          git diff --exit-code src/api-types.ts
+
+      - name: Type check, unit tests, build
+        working-directory: web
+        run: |
+          npx tsc --noEmit
+          npm test
+          npm run build
+
+      - name: Install the server, the engine and a browser
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libarmadillo-dev libsuperlu-dev libjsoncpp-dev libblas-dev liblapack-dev
+          pip install -r server/requirements.txt pytest playwright
+          python -m playwright install --with-deps chromium
+          bash scripts/build_shared_lib.sh /tmp/gensas-lib
+
+      - name: End-to-end tests (real browser, real server)
+        run: python -m pytest web/e2e -q
+        env:
+          GENSAS_LIBRARY: /tmp/gensas-lib/libgensas.so

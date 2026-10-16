@@ -558,6 +558,33 @@ static void testAlgorithmSections() {
 	CHECK(c.error().find("too large") != string::npos);
 }
 
+// User-defined functions are inlined at their calls.
+static void testUserFunctions() {
+	const char *src =
+		"function sq\n  input Real a;\n  output Real y;\nalgorithm\n  y := a*a;\nend sq;\n"
+		"model M\n"
+		"  function poly\n    input Real a;\n    input Real b = 2;\n    output Real y;\n  protected\n    Real t;\n    Real s = 1;\n  algorithm\n"
+		"    t := sq(a) + s;\n    if t > 3 then\n      y := t - b;\n    else\n      y := t + b;\n    end if;\n  end poly;\n"
+		"  parameter Real k = 3;\n"
+		"  function scale\n    input Real a;\n    output Real y;\n  algorithm\n    y := k*a;\n  end scale;\n"
+		"  parameter Real p = sq(2) + 1;\n"
+		"  Real x(start = 0.5);\n  Real y, z, w;\nequation\n  der(x) = 1;\n  y = poly(x);\n  z = scale(sq(x)) + poly(1, 5);\n  w = p*x;\nend M;\n";
+	Simulation sim(job(src, 2.0));
+	CHECK(sim.run());
+	const double x = 0.5 + sim.result().time.back();
+	const double t = x * x + 1;
+	CHECK_NEAR(lastValue(sim.result(), "y"), t > 3 ? t - 2 : t + 2, 1e-4);
+	CHECK_NEAR(lastValue(sim.result(), "z"), 3 * x * x + 7, 1e-3);
+	CHECK_NEAR(lastValue(sim.result(), "w"), 5 * x, 1e-4);
+	// A branch that is not taken is not evaluated: log is only called where its argument is positive.
+	const char *guarded =
+		"model M\n  function safeLog\n    input Real a;\n    output Real y;\n  algorithm\n    if a > 0 then\n      y := log(a);\n    else\n      y := -10;\n    end if;\n  end safeLog;\n"
+		"  Real x(start = 2);\n  Real z;\nequation\n  der(x) = -1;\n  z = safeLog(x);\nend M;\n";
+	Simulation g(job(guarded, 3.0));
+	CHECK(g.run());
+	CHECK_NEAR(lastValue(g.result(), "z"), -10.0, 1e-9);
+}
+
 // A run ends exactly at the requested end time, also when the last steps are short (exp grows fast).
 static void testEndTimeIsReached() {
 	const char *src = "model M\n  Real u(start = -1);\n  Real z;\nequation\n  der(u) = 1;\n  z = exp(u);\nend M;\n";
@@ -606,6 +633,12 @@ static void testDomainChecks() {
 	Simulation h(job(hyb, 3.0));
 	CHECK(!h.run());
 	CHECK(h.error().find("log") != string::npos);
+	// A guard that keeps the argument inside the domain works: the branch that is not taken is not evaluated.
+	const char *guard = "model M\n  Real x(start = 2);\n  Real z, r;\nequation\n  der(x) = -1;\n  z = if x > 0 then log(x) else -10;\n  r = if x > 0 then 1/x else 0;\nend M;\n";
+	Simulation gd(job(guard, 3.0));
+	CHECK(gd.run());
+	CHECK_NEAR(lastValue(gd.result(), "z"), -10.0, 1e-9);
+	CHECK_NEAR(lastValue(gd.result(), "r"), 0.0, 1e-9);
 	// A function that touches the edge of its domain without leaving it still works.
 	Simulation ok(job("model M\n  Real u(start = 0);\n  Real z;\nequation\n  der(u) = 1;\n  z = sqrt(u + 1);\nend M;\n", 3.0));
 	CHECK(ok.run());
@@ -614,6 +647,7 @@ static void testDomainChecks() {
 
 int main() {
 	testAlgorithmSections();
+	testUserFunctions();
 	testExpSeriesAccuracy();
 	testPowerOperator();
 	testConstantCalls();

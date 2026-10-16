@@ -17,7 +17,7 @@ end Name;
 ```
 
 * One `model` per file. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
-* Not supported: `extends`, nested classes, `package`, `connector`/`connect`, `initial algorithm` sections and `function` definitions (they give an error).
+* Not supported: `extends`, nested classes, `package`, `connector`/`connect` and `initial algorithm` sections (they give an error).
 
 ## Declarations
 
@@ -55,6 +55,31 @@ An `algorithm` section is turned into equations, one for each assigned variable,
 * A variable must not be read before it is assigned in the section: its previous value is not available (`y := y + 1;` is an error). In a `when` body this is allowed for discrete variables: `cnt := cnt + 1;` means `cnt := pre(cnt) + 1;`.
 * Not supported: `while` loops, `break` and `return`, `when` and `assert` inside an `if` statement, `if` inside a `when` body, `initial algorithm`.
 
+## Functions
+
+```modelica
+function poly
+  input Real a;
+  input Real b = 2;
+  output Real y;
+protected
+  Real t = a*a;
+algorithm
+  if t > 3 then
+    y := t - b;
+  else
+    y := t + b;
+  end if;
+end poly;
+```
+
+A function can be defined before the `model` or inside it, and is called as `poly(x)` or `poly(x, 5)`. The body is an `algorithm` section (see above) and the call is replaced by the result expression, so a function costs nothing at run time and its `if` branches are state events like any other.
+
+* One output, scalar `Real`, `Integer` and `Boolean` inputs and protected variables, default values for inputs.
+* A function can call other functions. It can use parameters and constants of the model, but no other model variable.
+* A call can be used in equations, `when` and `if` conditions, parameter values and start values (a function used in a parameter value must be defined before the parameter).
+* Not supported: recursion, several outputs, array inputs and outputs, named arguments (`f(a = 1)`), `external` functions, `when` and `assert` in the body.
+
 ## Expressions
 
 * Operators `+ - * / ^`, unary minus, relations `< <= > >= == <>` and `and`, `or`, `not`.
@@ -84,7 +109,7 @@ An `algorithm` section is turned into equations, one for each assigned variable,
 
 The solver is a semi-analytical series method, so a wrong result would be easy to overlook; these checks turn the common causes into errors or warnings.
 
-* **Function domains.** The arguments of `log`, `sqrt`, `asin`, `acos` and the denominators of divisions are checked along every step. A model that leaves a domain, divides by zero or passes a pole (a denominator that changes sign) stops with an error that names the time and the operand. A pole where the denominator does not change sign, such as `1/u^2`, is not detected.
+* **Function domains.** The arguments of `log`, `sqrt`, `asin`, `acos` and the denominators of divisions are checked along every step. A model that leaves a domain, divides by zero or passes a pole (a denominator that changes sign) stops with an error that names the time and the operand. A guard such as `if x > 0 then log(x) else 0` keeps the argument inside the domain; in hybrid models the check applies to the part of the solution that is kept after an event. A pole where the denominator does not change sign, such as `1/u^2`, is not detected.
 * **No progress.** If the solver cannot advance within the error tolerance, the run fails with the time of the stall instead of returning a shortened result.
 * **End time.** A run that finishes always ends exactly at the requested end time.
 * **Warnings.** A step that starts with a residual above the error tolerance is reported as a warning in the result (at most 10 per run), and so are failed `assert` calls with `AssertionLevel.warning` and out-of-range solver options that were clamped.

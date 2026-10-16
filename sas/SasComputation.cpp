@@ -1128,10 +1128,13 @@ namespace che {
 
 		// Largest absolute entry; infinity when any entry is not finite (arma's "inf" norm skips NaN, which
 		// would let a step with an undefined residual pass the tolerance check).
-		static double maxAbsEntry(const vec &v) {
+		static double maxAbsEntry(const vec &v, bool skipNonFinite = false) {
 			double m = 0.0;
 			for (uword i = 0; i < v.n_elem; i++) {
 				if (!std::isfinite(v(i))) {
+					if (skipNonFinite) {
+						continue;
+					}
 					return std::numeric_limits<double>::infinity();
 				}
 				m = std::max(m, std::fabs(v(i)));
@@ -1188,7 +1191,7 @@ namespace che {
 		// Checks the domain conditions along [0, alpha] of a solution at a few points. A denominator that
 		// changes sign between two points has a pole in between, which a series can pass without any
 		// residual (a rational function is represented exactly).
-		bool SasComputationModel::domainOk(CheSolution *solution, double alpha, string *why) {
+		bool SasComputationModel::domainOk(CheSolution *solution, double alpha, string *why, double *at) {
 			if (domainChecks.empty()) {
 				return true;
 			}
@@ -1207,6 +1210,9 @@ namespace che {
 					bool bad = k > 0 && domainValueBad(c, x);
 					bool crossed = k > 0 && c.kind == DomainCheck::NONZERO && std::isfinite(x) && ((x < 0.0) != (prev[i] < 0.0));
 					if (bad || crossed) {
+						if (at != NULL) {
+							*at = alpha * k / samples;
+						}
 						if (why != NULL) {
 							*why = bad ? domainMessage(c, x) : string(c.label) + ": the denominator changes sign (from " + to_string(prev[i]) + " to " + to_string(x) + "), the solution has a pole";
 						}
@@ -1216,6 +1222,27 @@ namespace che {
 				}
 			}
 			return true;
+		}
+
+		bool SasComputationModel::validateDomain(const SasSolution &sol, string *why) {
+			const double len = sol.absEnd - sol.absStart;
+			if (len <= 0.0) {
+				return true;
+			}
+			if (domainChecks.empty()) {
+				for (const shared_ptr<AstTree> &t : eqnTable) {
+					collectDomainChecks(t->pHead, domainChecks);
+				}
+			}
+			string msg;
+			double at = 0.0;
+			if (domainOk(sol.solution, 0.98 * len, &msg, &at)) {
+				return true;
+			}
+			if (why != NULL) {
+				*why = msg + " at t = " + to_string(sol.absStart + at);
+			}
+			return false;
 		}
 
 		// Describes why the equations cannot be evaluated at the given point of a solution ("" if no
@@ -1322,6 +1349,10 @@ namespace che {
 						resetPade();
 						const double before = maxAbsEntry(calcDiff(sasSol->solution, 0.0).tail(nAE));
 						if (!(before < 1e-4)) {
+							string why = describeDomainViolation(sasSol->solution, 0.0);
+							if (!why.empty()) {
+								throw std::runtime_error("the equations cannot be evaluated at t = " + std::to_string(startAbsAlpha) + ": " + why);
+							}
 							throw std::runtime_error("the algebraic equations cannot be solved consistently at t = " + std::to_string(startAbsAlpha) + " (residual " + std::to_string(before) + "); give the algebraic variables start values that are close to the solution");
 						}
 						if (options.log != nullptr) {
@@ -1378,9 +1409,9 @@ namespace che {
 			while (alphaRight - alphaLeft > resolution) {
 				diff = calcDiff(sasSol->solution, alpha);
 				// diff.print("diff");
-				diffMax = maxAbsEntry(diff);
+				diffMax = maxAbsEntry(diff, options.tolerateNonFinite);
 				string why;
-				if (diffMax < tol && domainOk(sasSol->solution, alpha, &why)) {
+				if (diffMax < tol && (options.tolerateNonFinite || domainOk(sasSol->solution, alpha, &why))) {
 					alphaLeft = alpha;
 					alpha = (alphaLeft + alphaRight) / 2;
 				} else {

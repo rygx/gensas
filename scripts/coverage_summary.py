@@ -14,7 +14,7 @@ import sys
 # this run, empty the list.
 POWER_FLOW_FILES = (
     "io/CheIoUtil.",
-    "io/CheDataFormat.h",
+    "io/CheDataFormat.",
     "io/MatPsatDataRW.",
     "util/CheCompUtil.",
     "util/CheState.",
@@ -85,8 +85,8 @@ def main():
     print("| File | Lines | Line % | Branches | Branch % |")
     print("|---|---:|---:|---:|---:|")
     for name, c, n, bc, bn in sorted(rows, key=lambda r: pct(r[1], r[2])):
-        label = name + (" (power flow)" if is_power_flow(name) else "")
-        print("| `%s` | %d/%d | %.1f%% | %d/%d | %.1f%% |" % (label, c, n, pct(c, n), bc, bn, pct(bc, bn)))
+        tag = " *(power flow)*" if is_power_flow(name) else ""
+        print("| `%s`%s | %d/%d | %.1f%% | %d/%d | %.1f%% |" % (name, tag, c, n, pct(c, n), bc, bn, pct(bc, bn)))
     print("\n</details>")
 
 

@@ -89,10 +89,10 @@ std::string GetCurrentWorkingDir(void) {
 
 static void printUsage() {
 	cout << "Usage:\n"
-			"  gensas run JOB.json [--set key=value ...] [--validate]   run a Modelica job file\n"
-			"  gensas -g -m file|string -i MODEL [options]               Modelica simulation from flags\n"
-			"  gensas -p -f CASE [options]                               AC power flow\n"
-			"See doc/Usage.md and doc/JobFormat.md."
+			"  app run JOB.json [--set key=value ...] [--validate]       run a Modelica job file\n"
+			"  app -g -m file|string -i MODEL [options]                   Modelica simulation from flags\n"
+			"  app -p -f CASE [options]                                   AC power flow\n"
+			"(app is the executable; app.exe on Windows.) See doc/Usage.md and doc/JobFormat.md."
 		 << endl;
 }
 
@@ -124,7 +124,7 @@ static bool stringArg(int argc, char **argv, int &i, const char *flag, string &o
 	return true;
 }
 
-// The flags of `gensas -g`; they build the same job as a job file.
+// The flags of `app -g`; they build the same job as a job file.
 static bool parseGeneralArgs(int argc, char **argv, ModelicaJob &job, bool &verbose) {
 	bool fileMode = false;
 	string input;
@@ -270,7 +270,7 @@ static int runModelica(const ModelicaJob &job, bool validateOnly) {
 	return status;
 }
 
-// gensas run JOB.json [--set key=value ...] [--validate]
+// app run JOB.json [--set key=value ...] [--validate]
 static int runJobFile(int argc, char **argv) {
 	string path;
 	vector<string> sets;
@@ -293,7 +293,7 @@ static int runJobFile(int argc, char **argv) {
 		}
 	}
 	if (path.empty()) {
-		cerr << "Error: gensas run needs a job file." << endl;
+		cerr << "Error: app run needs a job file." << endl;
 		return 1;
 	}
 	ifstream in(path, ios::binary);

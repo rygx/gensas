@@ -1,0 +1,72 @@
+# Supported Modelica
+
+ModelicaSAS simulates one flat Modelica `model`. This page lists what is accepted; anything else is rejected with an error that names the line, so an unsupported construct never gives a silently wrong result. For the command line see [Usage](Usage.md), for job files [Job format](JobFormat.md).
+
+## Model structure
+
+```modelica
+model Name "description"
+  parameter Real k = 2;
+  Real x(start = 1), y;
+initial equation
+  x = 1;
+equation
+  der(x) = -k*x;
+  y = sin(x);
+end Name;
+```
+
+* One `model` per file. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
+* Not supported: `extends`, nested classes, `package`, `connector`/`connect`, `algorithm` sections and `function` definitions (they give an error).
+
+## Declarations
+
+* Types `Real`, `Integer` and `Boolean`, with the prefixes `parameter`, `constant`, `discrete`, `input` and `output`. Several variables can share a declaration (`Real x(start = 1), z;`).
+* Modifications: `start` (a constant expression; it is the initial value of a state or the starting guess of an algebraic variable), `unit` and `fixed`. Other attributes are ignored with a warning.
+* Bindings: `parameter Real p = 2*k;` (a constant expression, which may use parameters declared earlier) and `Real y = expr;` (the equation `y = expr`, which may use variables declared later). `input` needs a binding. Bindings on `discrete`, `Integer` and `Boolean` variables are not supported; assign them in a `when` equation.
+* Arrays are sets of scalar variables: `Real x[3];`, `Real[2,3] A;`, `parameter Real k[3] = {1, 2, 3};`, `Real x[n](each start = 1)` or `start = {1, 2, 3}`. Subscripts are resolved when the model is read, so they must be constants: numbers, parameters declared earlier or loop variables (`x[i+1]`). Elements are named `x[2]` and `A[1,3]` in the results. `size(x, k)`, `sum(x)` and `prod(x)` are available. Whole-array expressions (`x = y`, `x + y`) are not; write a `for` loop instead.
+
+## Equations
+
+* `der(x) = expr;` for states and `lhs = rhs;` for algebraic equations. Algebraic equations may be implicit (`y*y = x`); they are solved with Newton's method from the start values, so give the unknowns start values near the solution. A singular Jacobian is reported as an error.
+* `initial equation` sections set start values with `x = <constant>;` and `der(x) = <constant>;`.
+* `for i in 1:n loop ... end for;` (also `first:step:last`, and several iterators `for i in 1:n, j in 1:m loop`) is unrolled in `equation` and `initial equation` sections and inside `if` and `when` branches.
+* The number of states must equal the number of differential equations, and the number of algebraic variables the number of algebraic equations; otherwise the model is rejected.
+
+## Expressions
+
+* Operators `+ - * / ^`, unary minus, relations `< <= > >= == <>` and `and`, `or`, `not`.
+* A small integer power such as `x^2` or `x^-1` becomes products, `x^0.5` becomes `sqrt`, and any other power becomes `exp(y*log(x))`, which needs `x > 0`.
+* Functions: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `sinh`, `cosh`, `tanh`, `exp`, `log`, `log10`, `sqrt`, and `abs`, `min`, `max`, `sign`. A function of constants (`exp(1)`) is evaluated when the model is read.
+* `abs`, `min`, `max` and `sign` are turned into if-expressions, and their switching points are state events, so the solution is exact. A variable that hovers around a switching point (`sign(v)` friction at `v = 0`) makes the events pile up and stops the run with an error; `--piecewise smooth` replaces the functions by smooth approximations instead (see [Usage](Usage.md)).
+* `atan2` is rewritten into `atan` with if-branches; the switches at `x = 0` and at the branch cut are state events.
+* `noEvent(e)` is accepted and treated like `e`.
+* `if c then a else b` expressions, `time`, and `pre(d)` for discrete variables.
+
+## Hybrid models
+
+* Discrete variables (`discrete Real`, `Integer`, `Boolean`) change only at events.
+* `if` expressions and `if` equations, with conditions on parameters, discrete variables, `time` or continuous variables. An `if` equation may change which equations are active (a variable can be a state in one mode and algebraic in another) as long as every mode involves the same set of variables.
+* `when` equations with `elsewhen`, with conditions
+  * `time >= e` and `sample(start, interval)` (time events),
+  * relations on continuous variables, such as `h < 0` (state events, located along the solution by bisection),
+  * `initial()`, which runs once at the start time,
+  * `edge(b)` and `change(d)` on a single discrete variable.
+
+  The body assigns discrete variables (`d = expr;`) and re-initializes states with `reinit(x, expr);`.
+* `terminate("message");` in a `when` equation ends the run successfully at that event; the result stops there and records the message.
+* `assert(condition, "message");` in the equation section is checked along the solution (a state event when the condition turns false) and in `when` bodies at the event. A violation stops the run with an error naming the time; with `AssertionLevel.warning` as a third argument it is reported once as a warning and the run goes on. `terminate` and `assert` are not supported inside `if` equations.
+* A simulation whose events accumulate in finite time (Zeno behavior, for example a bouncing ball) stops with an error.
+
+## What the solver checks
+
+The solver is a semi-analytical series method, so a wrong result would be easy to overlook; these checks turn the common causes into errors or warnings.
+
+* **Function domains.** The arguments of `log`, `sqrt`, `asin`, `acos` and the denominators of divisions are checked along every step. A model that leaves a domain, divides by zero or passes a pole (a denominator that changes sign) stops with an error that names the time and the operand. A pole where the denominator does not change sign, such as `1/u^2`, is not detected.
+* **No progress.** If the solver cannot advance within the error tolerance, the run fails with the time of the stall instead of returning a shortened result.
+* **End time.** A run that finishes always ends exactly at the requested end time.
+* **Warnings.** A step that starts with a residual above the error tolerance is reported as a warning in the result (at most 10 per run), and so are failed `assert` calls with `AssertionLevel.warning` and out-of-range solver options that were clamped.
+
+## Examples
+
+`resources/mofile/` has runnable models: `test_solve_ode.mo` (an ODE system), `test_hybrid_time_events.mo` (time events), `test_bouncing_ball.mo` (a state event with `reinit`) and `test_array_cascade.mo` (arrays and a `for` loop).

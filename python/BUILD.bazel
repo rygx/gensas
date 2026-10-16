@@ -8,8 +8,8 @@ py_library(
     imports = ["."],
 )
 
-# Runs the Python interface against the shared library. Not built on Windows yet (the test needs a
-# Python interpreter in the Bazel environment there); run it by hand with GENSAS_LIBRARY set.
+# Runs the Python interface against the shared library. Not built on Windows (Bazel has no Python
+# interpreter there); the Windows CI job runs the same test file against gensas.dll instead.
 py_test(
     name = "gensas_python_test",
     srcs = ["tests/test_gensas.py"],

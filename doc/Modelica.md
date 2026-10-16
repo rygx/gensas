@@ -17,7 +17,7 @@ end Name;
 ```
 
 * A file can hold several `model`s, `function`s and `package`s. The last model is simulated; `model.className` in a job (see [Job format](JobFormat.md)) picks another. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
-* Not supported: `extends`, nested models, `connector`/`connect` and `initial algorithm` sections (they give an error). See [Components](#components) for models used inside models.
+* Not supported: nested models, `connector`/`connect` and `initial algorithm` sections (they give an error). See [Components](#components) for models used inside models and [Inheritance](#inheritance) for `extends`.
 
 ## Declarations
 
@@ -83,7 +83,32 @@ A `model`, `block` or `record` of the source can be used as a component of the s
 * Modifications: `Tank a(k = 0.4)` sets a parameter (a constant expression, which may use parameters declared earlier), `a(h(start = 2))` sets a start value, `a(inner(k = 1))` or `a(inner.k = 1)` reach into a component of the component. A modification of a variable that is not a parameter (`Tank a(qout = 1)`) adds the equation `a.qout = 1`. The job's values win over the modifications, and a name the class does not have is an error.
 * `parameter Pt c(x = 2, y = 3);` makes every variable of the record `Pt` a parameter, so records are the way to group parameters. `input` variables of a component can stay without a binding: the model around it must give them an equation (`b.qin = a.qout;`).
 * Names of packages, functions, types and classes, and `time`, are not renamed inside a component. A class that contains itself is an error.
-* Not supported: arrays of components (`Tank t[3];`), functions defined inside a class that is used as a component (define them before the class), `connector`s and `connect` equations, `extends`, redeclarations and `inner`/`outer`.
+* Not supported: arrays of components (`Tank t[3];`), functions defined inside a class that is used as a component (define them before the class), `connector`s and `connect` equations, redeclarations and `inner`/`outer`.
+
+## Inheritance
+
+```modelica
+partial model Base
+  parameter Real k = 1;
+  Real x(start = 1);
+equation
+  der(x) = -k*x;
+end Base;
+
+model Derived
+  extends Base(k = 3);
+  Real y;
+equation
+  y = 2*x;
+end Derived;
+
+model Fast = Derived(k = 10) "a short class definition";
+```
+
+`extends Base(...)` stands before the other declarations and adds the declarations and equations of `Base` to the class, as if they were written there; the modifications set parameters and start values like those of a component. `partial` classes can be extended but not used as components or simulated. The same works inside components, for records (`record Q extends P; Real b; end Q;`) and for classes extended in turn. The short form `model Fast = Derived(k = 10);` is a class that extends one other class, and can be simulated (`model.className`) or used as a component like any model.
+
+* The base class is read where the `extends` stands, so its equations come before the declarations that follow the `extends`; a base class that needs a parameter of the class that extends it (for a `for` range, say) cannot be used. Declaring a name that the base class already has is an error.
+* Not supported: functions defined inside a base class (define them before it), base classes inside packages, `extends` after the first equation section, `redeclare`.
 
 ## Algorithm sections
 

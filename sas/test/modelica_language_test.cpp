@@ -652,11 +652,76 @@ static void testComponents() {
 	fails((string(decay) + "model M\n  Decay a(zz = 2);\nend M;\n").c_str(), "no variable or parameter 'zz'");
 	fails((string(decay) + "model M\n  Decay a, a;\nend M;\n").c_str(), "Redeclaration of 'a'");
 	fails((string(decay) + "model M\n  Decay a[2];\nend M;\n").c_str(), "arrays of components");
-	fails("model A\n  A a;\nend A;\nmodel M\n  A a;\nend M;\n", "contains itself");
+	fails("model A\n  A a;\nend A;\nmodel M\n  A a;\nend M;\n", "contains or extends itself");
 	fails((string(decay) + "model M\n  Decay a(x = 3);\nend M;\n").c_str(), "not well defined"); // x = 3 is an equation, and x already has one
 	fails((string(decay) + "model M\n  Decay a;\nequation\n  a.nope = 1;\nend M;\n").c_str(), "'a.nope'");
 	fails("model C\n  parameter Real k;\n  Real x(start = 1);\nequation\n  der(x) = -k*x;\nend C;\nmodel M\n  C c;\nend M;\n", "Parameter 'c.k' has no value");
 	fails("model C\n  Real x(start = 1);\n  function f\n    input Real a;\n    output Real b;\n  algorithm\n    b := a;\n  end f;\nequation\n  der(x) = -x;\nend C;\nmodel M\n  C c;\nend M;\n", "function inside a class used as a component");
+}
+
+// extends and short class definitions: the base class is read where `extends` stands.
+static void testExtends() {
+	const char *base = "partial model Base\n  parameter Real k = 1;\n  Real x(start = 1);\nequation\n  der(x) = -k*x;\nend Base;\n";
+	Simulation sim(job((string(base) + "model Derived\n  extends Base(k = 3);\n  Real y;\nequation\n  y = 2*x;\nend Derived;\n").c_str(), 1.0));
+	CHECK(sim.run());
+	CHECK_NEAR(lastValue(sim.result(), "x"), std::exp(-3.0), 1e-5);
+	CHECK_NEAR(lastValue(sim.result(), "y"), 2 * std::exp(-3.0), 1e-5);
+	CHECK_EQ(sim.modelInfo().name, string("Derived"));
+	// the job changes the inherited parameter by its own name
+	ModelicaJob changed = job((string(base) + "model Derived\n  extends Base(k = 3);\nend Derived;\n").c_str(), 1.0);
+	changed.parameters["k"] = 2.0;
+	Simulation other(changed);
+	CHECK(other.run());
+	CHECK_NEAR(lastValue(other.result(), "x"), std::exp(-2.0), 1e-5);
+	// a base that extends another one, used as a component; start values and nested modifications
+	const char *chain = "model A\n  parameter Real k = 1;\n  Real x(start = 1);\nequation\n  der(x) = -k*x;\nend A;\n"
+						"model B\n  extends A(k = 2, x(start = 5));\n  Real z;\nequation\n  z = x + 1;\nend B;\n"
+						"model C\n  extends B;\n  parameter Real extra = k + 1;\nend C;\n";
+	Simulation comp(job((string(chain) + "model M\n  C c1, c2(k = 4);\nend M;\n").c_str(), 1.0));
+	CHECK(comp.run());
+	CHECK_NEAR(lastValue(comp.result(), "c1.x"), 5.0 * std::exp(-2.0), 1e-5);
+	CHECK_NEAR(lastValue(comp.result(), "c2.x"), 5.0 * std::exp(-4.0), 1e-5);
+	CHECK_NEAR(lastValue(comp.result(), "c2.z"), 5.0 * std::exp(-4.0) + 1.0, 1e-5);
+	bool sawExtra = false;
+	for (const ModelParameter &p : comp.modelInfo().parameters) {
+		if (p.name == "c2.extra") {
+			CHECK_NEAR(p.value, 5.0, 0); // computed from the modified k
+			sawExtra = true;
+		}
+	}
+	CHECK(sawExtra);
+	// short class definitions, as components and as the model to simulate
+	const char *shortSrc = "model Decay\n  parameter Real k = 1;\n  Real x(start = 1);\nequation\n  der(x) = -k*x;\nend Decay;\n"
+						   "model Fast = Decay(k = 10) \"fast decay\";\n"
+						   "model M\n  Fast f;\nend M;\n";
+	Simulation sh(job(shortSrc, 0.5));
+	CHECK(sh.run());
+	CHECK_NEAR(lastValue(sh.result(), "f.x"), std::exp(-5.0), 1e-5);
+	ModelicaJob top = job(shortSrc, 0.5);
+	top.className = "Fast";
+	Simulation st(top);
+	CHECK(st.run());
+	CHECK_NEAR(lastValue(st.result(), "x"), std::exp(-5.0), 1e-5);
+	CHECK_EQ(st.modelInfo().models.size(), (size_t)3);
+	// a record extended by a record
+	Simulation rec(job("record P\n  Real a;\nend P;\nrecord Q\n  extends P;\n  Real b;\nend Q;\n"
+					   "model M\n  parameter Q q(a = 2, b = 3);\n  Real v(start = 0);\nequation\n  der(v) = q.a*q.b;\nend M;\n",
+					   1.0));
+	CHECK(rec.run());
+	CHECK_NEAR(lastValue(rec.result(), "v"), 6.0, 1e-6);
+	// errors
+	auto fails = [&](const string &text, const char *needle) {
+		Simulation bad(job(text.c_str(), 1.0));
+		CHECK(!bad.check());
+		CHECK(bad.error().find(needle) != string::npos);
+	};
+	fails("model M\n  extends Nope;\nend M;\n", "unknown base class 'Nope'");
+	fails("model M\n  extends M;\nend M;\n", "contains or extends itself");
+	fails("model A\n  extends B;\nend A;\nmodel B\n  extends A;\nend B;\nmodel M\n  extends A;\nend M;\n", "contains or extends itself");
+	fails(string(base) + "model M\n  extends Base(zz = 1);\nend M;\n", "no variable or parameter 'zz'");
+	fails(string(base) + "model M\n  Real y;\nequation\n  y = 1;\n  extends Base;\nend M;\n", "`extends` must come before");
+	fails(string(base) + "model M\n  Base b;\nend M;\n", "partial class 'Base'");
+	fails("model A\n  function f\n    input Real a;\n    output Real b;\n  algorithm\n    b := a;\n  end f;\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend A;\nmodel M\n  extends A;\nend M;\n", "function inside a class used as a component");
 }
 
 // Types made with `type T = Real(...)`: unit and start values come with the type, the variable can change them.
@@ -863,6 +928,7 @@ int main() {
 	testClassesAndPackages();
 	testTypeAliases();
 	testComponents();
+	testExtends();
 	testArrayExpressions();
 	testExpSeriesAccuracy();
 	testPowerOperator();

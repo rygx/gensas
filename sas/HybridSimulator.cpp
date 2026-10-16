@@ -494,6 +494,15 @@ namespace che {
 						fail("cancelled");
 						return NULL;
 					}
+					for (const string &w : sols->warnings) {
+						if (find(warningList.begin(), warningList.end(), w) == warningList.end()) {
+							warningList.push_back(w);
+						}
+					}
+					if (dynT < 0.0 && sols->stalled) {
+						fail(sols->stallMessage);
+						return NULL;
+					}
 					if (dynT >= 0.0) {
 						segEnd = dynT;
 						while (!sols->solutionLink.empty() && sols->solutionLink.back()->absStart >= dynT) {

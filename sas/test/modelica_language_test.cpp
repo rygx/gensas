@@ -470,7 +470,63 @@ static void testArrays() {
 	CHECK_NEAR(lastValue(e.result(), "x[1]"), -2.0 + (std::exp(-1.0) + 2.0) * std::exp(-(t - 1.0)), 1e-3);
 }
 
+// A run ends exactly at the requested end time, also when the last steps are short (exp grows fast).
+static void testEndTimeIsReached() {
+	const char *src = "model M\n  Real u(start = -1);\n  Real z;\nequation\n  der(u) = 1;\n  z = exp(u);\nend M;\n";
+	const double ends[] = {3.0, 2.5, 0.7, 1.2345};
+	for (double e : ends) {
+		Simulation sim(job(src, e));
+		CHECK(sim.run());
+		if (!sim.result().time.empty()) {
+			CHECK_NEAR(sim.result().time.back(), e, 1e-12);
+			CHECK_NEAR(lastValue(sim.result(), "z"), std::exp(-1.0 + e), 1e-4 * std::exp(-1.0 + e));
+		}
+	}
+	// The same holds for a plain ODE and for a hybrid model with events.
+	Simulation ode(job("model M\n  Real x(start = 1);\nequation\n  der(x) = -x;\nend M;\n", 2.0));
+	CHECK(ode.run());
+	CHECK_NEAR(ode.result().time.back(), 2.0, 1e-12);
+	const char *hyb = "model M\n  discrete Real a(start = 1);\n  Real x(start = 1);\nequation\n  der(x) = -a*x;\n  when time >= 0.5 then\n    a = 2;\n  end when;\nend M;\n";
+	Simulation h(job(hyb, 1.0));
+	CHECK(h.run());
+	CHECK_NEAR(h.result().time.back(), 1.0, 1e-12);
+}
+
+// A function evaluated outside its domain stops the run with a message instead of returning garbage.
+static void checkDomainError(const char *name, const char *body, double u0, double rate, const char *expectInMessage) {
+	string src = string("model M\n  Real u(start = ") + to_string(u0) + ");\n  Real z;\nequation\n  der(u) = " + to_string(rate) + ";\n  z = " + body + ";\nend M;\n";
+	Simulation sim(job(src.c_str(), 3.0));
+	if (sim.run()) {
+		cerr << "FAILED " << name << ": the run was accepted" << endl;
+		CHECK(false);
+		return;
+	}
+	if (sim.error().find(expectInMessage) == string::npos || sim.error().find("cannot advance") == string::npos) {
+		cerr << "FAILED " << name << ": message \"" << sim.error() << "\"" << endl;
+		CHECK(false);
+	}
+}
+
+static void testDomainChecks() {
+	checkDomainError("log", "log(u)", 1.0, -1.0, "log");
+	checkDomainError("sqrt", "sqrt(u)", 1.0, -1.0, "sqrt");
+	checkDomainError("asin", "asin(u)", 0.0, 1.0, "asin");
+	checkDomainError("acos", "acos(u)", 0.0, -1.0, "acos");
+	checkDomainError("division", "1/u", 1.0, -1.0, "denominator");
+	// The same inside a hybrid model.
+	const char *hyb = "model M\n  discrete Real a(start = 1);\n  Real u(start = 1);\n  Real z;\nequation\n  der(u) = -a;\n  z = log(u);\n  when time >= 0.2 then\n    a = 2;\n  end when;\nend M;\n";
+	Simulation h(job(hyb, 3.0));
+	CHECK(!h.run());
+	CHECK(h.error().find("log") != string::npos);
+	// A function that touches the edge of its domain without leaving it still works.
+	Simulation ok(job("model M\n  Real u(start = 0);\n  Real z;\nequation\n  der(u) = 1;\n  z = sqrt(u + 1);\nend M;\n", 3.0));
+	CHECK(ok.run());
+	CHECK_NEAR(lastValue(ok.result(), "z"), 2.0, 1e-4);
+}
+
 int main() {
+	testEndTimeIsReached();
+	testDomainChecks();
 	testAtan2();
 	testTerminateAndAssert();
 	testWhenInitial();

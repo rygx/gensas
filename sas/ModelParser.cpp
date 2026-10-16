@@ -1413,20 +1413,34 @@ namespace che {
 			void parseClassBody(SasModelParser *parser, bool component);
 			bool isClassPrefix(int tok);
 
-			// Reads the body of the class once more with the name of the component in front of its names.
-			void instantiate(SasModelParser *parser, const SasModelParser::ClassRef &cls, const string &className, const string &flat, bool isParam, bool isConstant, int line) {
+			// Modifications under `scope` ("a." or empty) that no variable took; each is reported once.
+			void reportUnusedMods(SasModelParser *parser, const string &scope, const string &owner, int line) {
+				for (int pass = 0; pass < 2; pass++) {
+					const map<string, double> &table = pass == 0 ? parser->instanceParams : parser->instanceStarts;
+					for (map<string, double>::const_iterator it = table.lower_bound(scope); it != table.end() && it->first.compare(0, scope.size(), scope) == 0; ++it) {
+						const string key = string(pass == 0 ? "value:" : "start:") + it->first;
+						if (parser->usedInstanceMods.count(key) == 0) {
+							parser->error("Line %d: %s has no variable or parameter '%s' to modify.", line, owner.c_str(), it->first.substr(scope.size()).c_str());
+							parser->usedInstanceMods.insert(key);
+						}
+					}
+				}
+			}
+
+			// Reads the body of the class `cls` at the current place and comes back. With `prefix` the names of the body get
+			// it in front (a component); without, they stay as they are (a base class).
+			void readClassBody(SasModelParser *parser, const SasModelParser::ClassRef &cls, const string &className, int line, const string *prefix) {
 				const size_t depth = parser->instanceStack.size();
 				if (depth >= 16 || std::find(parser->instanceStack.begin(), parser->instanceStack.end(), className) != parser->instanceStack.end()) {
-					parser->error("Line %d: the class '%s' contains itself.", line, className.c_str());
+					parser->error("Line %d: the class '%s' contains or extends itself.", line, className.c_str());
 					return;
 				}
 				const ParserState outer = saveState(parser);
 				const string savedPrefix = parser->idPrefix;
-				const bool savedForce = parser->forceParam, savedConstant = parser->forceConstant;
 				parser->instanceStack.push_back(className);
 				restoreState(parser, cls.at);
 				while (isClassPrefix(parser->currentToken)) {
-					if (parser->currentToken == TK_K_PARTIAL) {
+					if (parser->currentToken == TK_K_PARTIAL && prefix != NULL) {
 						parser->error("Line %d: the partial class '%s' cannot be used as a component.", line, className.c_str());
 					}
 					getNextToken(parser);
@@ -1434,29 +1448,64 @@ namespace che {
 				parser->noInject = true; // the name of the class is not a symbol of the model
 				getNextToken(parser);	 // consume the keyword
 				parser->noInject = false;
-				parser->idPrefix = flat + ".";
-				parser->forceParam = savedForce || isParam;
-				parser->forceConstant = savedConstant || isConstant;
+				if (prefix != NULL) {
+					parser->idPrefix = *prefix;
+				}
 				getNextToken(parser); // consume the name
 				if (parser->currentToken == TK_STRING) {
 					getNextToken(parser);
 				}
 				parseClassBody(parser, true);
-				// a modification of something the class does not have
-				const string scope = flat + ".";
-				for (int pass = 0; pass < 2; pass++) {
-					const map<string, double> &table = pass == 0 ? parser->instanceParams : parser->instanceStarts;
-					for (map<string, double>::const_iterator it = table.lower_bound(scope); it != table.end() && it->first.compare(0, scope.size(), scope) == 0; ++it) {
-						if (parser->usedInstanceMods.count(string(pass == 0 ? "value:" : "start:") + it->first) == 0) {
-							parser->error("Line %d: '%s' has no variable or parameter '%s' to modify.", line, flat.c_str(), it->first.substr(scope.size()).c_str());
-						}
-					}
-				}
 				parser->instanceStack.pop_back();
 				parser->idPrefix = savedPrefix;
+				restoreState(parser, outer);
+			}
+
+			// Reads the body of the class once more with the name of the component in front of its names.
+			void instantiate(SasModelParser *parser, const SasModelParser::ClassRef &cls, const string &className, const string &flat, bool isParam, bool isConstant, int line) {
+				const bool savedForce = parser->forceParam, savedConstant = parser->forceConstant;
+				parser->forceParam = savedForce || isParam;
+				parser->forceConstant = savedConstant || isConstant;
+				const string prefix = flat + ".";
+				readClassBody(parser, cls, className, line, &prefix);
+				reportUnusedMods(parser, prefix, "'" + flat + "'", line); // a modification of something the class does not have
 				parser->forceParam = savedForce;
 				parser->forceConstant = savedConstant;
-				restoreState(parser, outer);
+			}
+
+			// The base class in `extends Base(k = 3);` and in the short class definition `model Fast = Base(k = 3);`, at the
+			// name of the class. The body of the base class is read here, as if its text stood in the class that extends it.
+			void parseBaseReference(SasModelParser *parser) {
+				const int line = parser->coord.line;
+				if (parser->currentToken != TK_ID) {
+					parser->error("Line %d: expect the name of a base class.", line);
+					skipStatement(parser);
+					return;
+				}
+				const string name = (const char *)parser->currentId->str;
+				getNextToken(parser);
+				if (parser->currentToken == TK_DOT) {
+					parser->error("Line %d: base classes in packages are not supported ('%s...').", line, name.c_str());
+					skipStatement(parser);
+					return;
+				}
+				const auto cls = parser->classes.find(name);
+				if (cls == parser->classes.end()) {
+					parser->error("Line %d: unknown base class '%s'.", line, name.c_str());
+					skipStatement(parser);
+					return;
+				}
+				if (parser->currentToken == TK_LPAREN) {
+					parseComponentMods(parser, parser->idPrefix, string());
+				}
+				if (parser->currentToken == TK_STRING) {
+					getNextToken(parser);
+				}
+				if (parser->currentToken == TK_K_ANNOTATION) {
+					skipAnnotation(parser);
+				}
+				expect(parser, TK_SEMICOLON);
+				readClassBody(parser, cls->second, name, line, NULL);
 			}
 
 			void parseComponents(SasModelParser *parser, const SasModelParser::ClassRef &cls, const string &className, bool isParam, bool isConstant) {
@@ -1516,7 +1565,7 @@ namespace che {
 			AstNode *parseStatement(SasModelParser *parser, StmtContext ctx);
 
 			bool endsStatementList(int tok) {
-				return tok == TK_EOF || tok == TK_K_END || tok == TK_K_ELSE || tok == TK_K_ELSEIF || tok == TK_K_ELSEWHEN || tok == TK_K_EQN || tok == TK_K_INIT || tok == TK_K_ALGORITHM || tok == TK_K_ANNOTATION;
+				return tok == TK_EOF || tok == TK_K_END || tok == TK_K_ELSE || tok == TK_K_ELSEIF || tok == TK_K_ELSEWHEN || tok == TK_K_EQN || tok == TK_K_INIT || tok == TK_K_ALGORITHM || tok == TK_K_ANNOTATION || tok == TK_K_EXTENDS;
 			}
 
 			// Statements are linked through AstNode::next.
@@ -2850,7 +2899,10 @@ namespace che {
 				}
 
 				parser->collapseMembers = true; // a.x is a variable of the component a
+				parser->instanceStack.push_back((const char *)parser->currentModel->modelInfo->str);
 				parseClassBody(parser, false);
+				parser->instanceStack.pop_back();
+				reportUnusedMods(parser, string(), "the model", parser->coord.line);
 			}
 
 			// A function inside a model is read where it stands; inside a class used as a component it is not supported
@@ -2866,10 +2918,21 @@ namespace che {
 
 			// The declarations, sections and `end Name;` of a model or of a class used as a component.
 			void parseClassBody(SasModelParser *parser, bool component) {
-				while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_ID || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
+				if (parser->currentToken == TK_EQN) { // model Fast = Decay(k = 10);
+					getNextToken(parser);
+					parseBaseReference(parser);
+					if (!component) {
+						inlineUserFunctions(parser);
+					}
+					return;
+				}
+				while (startsDeclaration(parser->currentToken) || parser->currentToken == TK_ID || parser->currentToken == TK_K_EXTENDS || parser->currentToken == TK_K_ANNOTATION || parser->currentToken == TK_K_FUNCTION) {
 					if (parser->currentToken == TK_K_ANNOTATION) {
 						skipAnnotation(parser);
 						expect(parser, TK_SEMICOLON);
+					} else if (parser->currentToken == TK_K_EXTENDS) {
+						getNextToken(parser);
+						parseBaseReference(parser);
 					} else if (parser->currentToken == TK_K_FUNCTION) {
 						functionInClass(parser, component);
 					} else {
@@ -2903,7 +2966,7 @@ namespace che {
 						if (startsDeclaration(parser->currentToken)) {
 							parser->error("Declarations must come before the equation sections.");
 						} else if (parser->currentToken == TK_K_EXTENDS) {
-							parser->error("Inheritance (extends) is not supported; flatten the model first.");
+							parser->error("`extends` must come before the equation sections.");
 						} else if (parser->currentToken == TK_K_PACKAGE || parser->currentToken == TK_K_CLASS) {
 							parser->error("Nested classes are not supported.");
 						} else {

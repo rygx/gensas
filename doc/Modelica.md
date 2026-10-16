@@ -17,7 +17,7 @@ end Name;
 ```
 
 * One `model` per file. `//` and `/* */` comments, descriptive strings and `annotation(...)` clauses are accepted and ignored.
-* Not supported: `extends`, nested classes, `package`, `connector`/`connect`, `algorithm` sections and `function` definitions (they give an error).
+* Not supported: `extends`, nested classes, `package`, `connector`/`connect`, `initial algorithm` sections and `function` definitions (they give an error).
 
 ## Declarations
 
@@ -32,6 +32,28 @@ end Name;
 * `initial equation` sections set start values with `x = <constant>;` and `der(x) = <constant>;`.
 * `for i in 1:n loop ... end for;` (also `first:step:last`, and several iterators `for i in 1:n, j in 1:m loop`) is unrolled in `equation` and `initial equation` sections and inside `if` and `when` branches.
 * The number of states must equal the number of differential equations, and the number of algebraic variables the number of algebraic equations; otherwise the model is rejected.
+
+## Algorithm sections
+
+```modelica
+algorithm
+  y := 2*x;
+  if x < 1 then
+    z := log(x);
+  else
+    z := 0;
+  end if;
+  for i in 1:n loop
+    w := w + v[i];   // after w := 0;
+  end for;
+```
+
+An `algorithm` section is turned into equations, one for each assigned variable, so everything that works in an `equation` section works on its results. Statements: assignments `v := expr;`, `if`/`elseif`/`else`, `for` loops (unrolled, as in equations), `when` statements, `assert(...)` and `reinit(...)` in a `when` body.
+
+* A variable can be assigned several times; later statements see the latest value (`s := y + 1; s := s*0.5;`).
+* An `if` statement becomes an if-expression, so the branch that is not taken is not evaluated (`log(x)` above is only evaluated where `x < 1`), and a condition on continuous variables is a state event. A variable assigned in only some branches must have a value before the `if`.
+* A variable must not be read before it is assigned in the section: its previous value is not available (`y := y + 1;` is an error). In a `when` body this is allowed for discrete variables: `cnt := cnt + 1;` means `cnt := pre(cnt) + 1;`.
+* Not supported: `while` loops, `break` and `return`, `when` and `assert` inside an `if` statement, `if` inside a `when` body, `initial algorithm`.
 
 ## Expressions
 

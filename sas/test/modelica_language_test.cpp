@@ -516,6 +516,48 @@ static void testConstantCalls() {
 	CHECK_NEAR(lastValue(sim.result(), "c"), std::atan2(1.0, 2.0) + std::sqrt(2.0) + std::pow(2.0, 2.5) + 1.0, 1e-4);
 }
 
+// Algorithm sections are turned into equations.
+static void testAlgorithmSections() {
+	// Sequential assignments, a reassigned variable and for-loops.
+	const char *seq =
+		"model M\n  parameter Integer n = 4;\n  Real x(start = 1);\n  Real y, s, w;\n  Real v[4];\nequation\n  der(x) = -s;\nalgorithm\n"
+		"  y := 2*x;\n  s := y + 1;\n  s := s*0.5;\n  for i in 1:n loop\n    v[i] := i*x;\n  end for;\n  w := 0;\n  for i in 1:n loop\n    w := w + v[i];\n  end for;\nend M;\n";
+	Simulation a(job(seq, 2.0));
+	CHECK(a.run());
+	const double xa = 1.5 * std::exp(-2.0) - 0.5; // x' = -(2x + 1)/2
+	CHECK_NEAR(lastValue(a.result(), "x"), xa, 1e-4);
+	CHECK_NEAR(lastValue(a.result(), "w"), 10.0 * xa, 1e-3);
+	CHECK_NEAR(lastValue(a.result(), "v[3]"), 3.0 * xa, 1e-3);
+
+	// if / elseif / else; the branch that is not taken is not evaluated (log of a positive number only
+	// where x < 1), the switches are state events, and a when-statement assigns discrete variables.
+	const char *br =
+		"model M\n  Real x(start = 0.5);\n  Real y, z;\n  discrete Real cnt(start = 0);\n  discrete Real hit(start = 0);\nequation\n  der(x) = 1;\nalgorithm\n"
+		"  if x < 1 then\n    y := log(x);\n    z := 1;\n  elseif x < 2 then\n    y := 0;\n    z := 2;\n  else\n    y := x;\n    z := 3;\n  end if;\n"
+		"  when x > 1.5 then\n    cnt := cnt + 1;\n    hit := 5;\n  end when;\n  assert(x < 10, \"too large\");\nend M;\n";
+	Simulation b(job(br, 3.0));
+	CHECK(b.run());
+	CHECK_NEAR(lastValue(b.result(), "y"), 3.5, 1e-4);
+	CHECK_NEAR(lastValue(b.result(), "z"), 3.0, 1e-9);
+	CHECK_EQ(b.result().events.size(), (size_t)1); // the when at x = 1.5
+	bool seen = false;
+	for (size_t k = 0; k < b.result().discreteNames.size(); k++) {
+		if (b.result().discreteNames[k] == "cnt") {
+			CHECK_NEAR(b.result().discrete[k].back(), 1.0, 1e-12); // cnt := cnt + 1 reads pre(cnt)
+			seen = true;
+		}
+		if (b.result().discreteNames[k] == "hit") {
+			CHECK_NEAR(b.result().discrete[k].back(), 5.0, 1e-12);
+		}
+	}
+	CHECK(seen);
+
+	// A violated assert stops the run.
+	Simulation c(job(br, 12.0));
+	CHECK(!c.run());
+	CHECK(c.error().find("too large") != string::npos);
+}
+
 // A run ends exactly at the requested end time, also when the last steps are short (exp grows fast).
 static void testEndTimeIsReached() {
 	const char *src = "model M\n  Real u(start = -1);\n  Real z;\nequation\n  der(u) = 1;\n  z = exp(u);\nend M;\n";
@@ -571,6 +613,7 @@ static void testDomainChecks() {
 }
 
 int main() {
+	testAlgorithmSections();
 	testExpSeriesAccuracy();
 	testPowerOperator();
 	testConstantCalls();

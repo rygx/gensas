@@ -293,7 +293,14 @@ static void testSourceSyntax() {
 	CHECK(parseErrors("model M\n  input Real u;\nequation\nend M;\n") > 0);															  // input without a value
 	CHECK(parseErrors("model M\n  Real x;\n  /* open\nequation\n  der(x) = -x;\nend M;\n") > 0);									  // unterminated comment
 	CHECK(parseErrors("model M\n  extends Base;\n  Real x;\nequation\n  der(x) = -x;\nend M;\n") > 0);
-	CHECK(parseErrors("model M\n  Real x;\nalgorithm\n  x := 1;\nend M;\n") > 0);
+	// Algorithm sections: assignments are accepted, other forms are rejected with an error.
+	CHECK_EQ(parseErrors("model M\n  Real x;\nalgorithm\n  x := 1;\nend M;\n"), 0);
+	CHECK(parseErrors("model M\n  Real x;\nalgorithm\n  x = 1;\nend M;\n") > 0); // = in an algorithm
+	CHECK(parseErrors("model M\n  Real x;\nequation\n  x := 1;\nend M;\n") > 0); // := in an equation section
+	CHECK(parseErrors("model M\n  Real x;\nalgorithm\n  while x < 1 loop\n    x := 1;\n  end while;\nend M;\n") > 0);
+	CHECK(parseErrors("model M\n  Real x;\nalgorithm\n  x := x + 1;\nend M;\n") > 0); // read before assigned
+	CHECK(parseErrors("model M\n  Real x;\ninitial algorithm\n  x := 1;\nend M;\n") > 0);
+	CHECK(parseErrors("model M\n  Real x, y;\nalgorithm\n  if x > 0 then\n    y := 1;\n  end if;\nend M;\n") > 0); // no value in the else path
 }
 
 // Arrays and for-equations: what is accepted and what is rejected with an error.

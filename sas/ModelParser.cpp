@@ -32,6 +32,8 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -768,13 +770,20 @@ namespace che {
 				CTX_TOP,	 // equation section
 				CTX_INITIAL, // initial equation section
 				CTX_IF,		 // inside an if-equation (outside any when)
-				CTX_WHEN	 // inside a when-equation
+				CTX_WHEN,	 // inside a when-equation
+				CTX_ALG,	 // algorithm section
+				CTX_ALG_IF,	 // inside an if-statement of an algorithm section
+				CTX_ALG_WHEN // inside a when-statement of an algorithm section
 			};
+
+			bool isAlgorithm(StmtContext ctx) {
+				return ctx == CTX_ALG || ctx == CTX_ALG_IF || ctx == CTX_ALG_WHEN;
+			}
 
 			AstNode *parseStatement(SasModelParser *parser, StmtContext ctx);
 
 			bool endsStatementList(int tok) {
-				return tok == TK_EOF || tok == TK_K_END || tok == TK_K_ELSE || tok == TK_K_ELSEIF || tok == TK_K_ELSEWHEN || tok == TK_K_EQN || tok == TK_K_INIT || tok == TK_K_ANNOTATION;
+				return tok == TK_EOF || tok == TK_K_END || tok == TK_K_ELSE || tok == TK_K_ELSEIF || tok == TK_K_ELSEWHEN || tok == TK_K_EQN || tok == TK_K_INIT || tok == TK_K_ALGORITHM || tok == TK_K_ANNOTATION;
 			}
 
 			// Statements are linked through AstNode::next.
@@ -858,7 +867,7 @@ namespace che {
 			}
 
 			AstNode *parseWhenEquation(SasModelParser *parser, StmtContext ctx, bool isElseWhen) {
-				if (ctx == CTX_WHEN) {
+				if (ctx == CTX_WHEN || ctx == CTX_ALG_WHEN) {
 					parser->error("when-equations cannot be nested.");
 				}
 				AstNode *node = new AstNode();
@@ -870,7 +879,7 @@ namespace che {
 				AstNode *branch = new AstNode();
 				branch->op = OP_BRANCH;
 				branch->nodeKind = NK_Equation;
-				branch->subs[0] = parseStatementList(parser, CTX_WHEN);
+				branch->subs[0] = parseStatementList(parser, isAlgorithm(ctx) ? CTX_ALG_WHEN : CTX_WHEN);
 				if (parser->currentToken == TK_K_ELSEWHEN) {
 					branch->subs[1] = parseWhenEquation(parser, ctx, true);
 				}
@@ -940,7 +949,9 @@ namespace che {
 					if (ctx == CTX_INITIAL) {
 						parser->error("Line %d: if-equations are not supported in initial equation sections.", line);
 					}
-					AstNode *node = parseIfEquation(parser, ctx == CTX_TOP ? CTX_IF : ctx, false);
+					AstNode *node = parseIfEquation(parser, ctx == CTX_TOP ? CTX_IF : ctx == CTX_ALG ? CTX_ALG_IF
+																									 : ctx,
+													false);
 					return node;
 				}
 				if (parser->currentToken == TK_K_WHEN) {
@@ -949,6 +960,28 @@ namespace che {
 					}
 					return parseWhenEquation(parser, ctx, false);
 				}
+				if (isAlgorithm(ctx) && (parser->currentToken == TK_K_WHILE || parser->currentToken == TK_K_BREAK || parser->currentToken == TK_K_RETURN)) {
+					parser->error("Line %d: while, break and return are not supported in algorithm sections.", line);
+					if (parser->currentToken == TK_K_WHILE) { // skip to the end of the loop
+						while (parser->currentToken != TK_EOF) {
+							if (parser->currentToken == TK_K_END) {
+								getNextToken(parser);
+								if (parser->currentToken == TK_K_WHILE) {
+									getNextToken(parser);
+									break;
+								}
+							} else {
+								getNextToken(parser);
+							}
+						}
+						if (parser->currentToken == TK_SEMICOLON) {
+							getNextToken(parser);
+						}
+					} else {
+						skipStatement(parser);
+					}
+					return NULL;
+				}
 				if (parser->currentToken == TK_SEMICOLON) {
 					parser->error("Line %d: empty statement.", line);
 					getNextToken(parser);
@@ -956,13 +989,18 @@ namespace che {
 				}
 				AstNode *expr = parseExpr(parser);
 				bool valid = false;
-				if (expr != NULL && expr->op == OP_EQN) {
+				if (isAlgorithm(ctx) && expr != NULL && expr->op == OP_EQN) {
+					parser->error("Line %d: use `:=` for assignments in an algorithm section.", line);
+					skipStatement(parser);
+					return NULL;
+				}
+				if (expr != NULL && expr->op == (isAlgorithm(ctx) ? OP_ASSIGN : OP_EQN)) {
 					valid = true;
 				} else if (expr != NULL && expr->op == OP_CALL) {
 					const string name = calleeName(expr);
 					if (name == "reinit") {
 						valid = true;
-						if (ctx != CTX_WHEN) {
+						if (ctx != CTX_WHEN && ctx != CTX_ALG_WHEN) {
 							parser->error("Line %d: reinit() is only allowed inside a when-equation.", line);
 						}
 					} else if (name == "terminate" || name == "assert") {
@@ -970,7 +1008,7 @@ namespace che {
 					}
 				}
 				if (!valid) {
-					parser->error("Line %d: expect an equation `lhs = rhs;`.", line);
+					parser->error(isAlgorithm(ctx) ? "Line %d: expect an assignment `lhs := rhs;`." : "Line %d: expect an equation `lhs = rhs;`.", line);
 					skipStatement(parser);
 					return NULL;
 				}
@@ -1013,6 +1051,343 @@ namespace che {
 				}
 			}
 
+			// ---------------------------------------------------------------------
+			// Algorithm sections
+			//
+			// The statements are turned into equations. Each assigned variable gets one equation whose
+			// right side is its final value, found by forward substitution: `y := a; z := y + 1;` gives
+			// y = a and z = a + 1. An if-statement merges the values of its branches into an if-expression
+			// (so the branch that is not taken is never evaluated), `for` loops were unrolled already, and
+			// the assignments in a when-statement become the assignments of a when-equation. A variable
+			// that is read before it is assigned (a loop through its previous value) is not supported.
+			// ---------------------------------------------------------------------
+
+			typedef shared_ptr<AstNode> AlgValue;
+			typedef map<string, AlgValue> AlgEnv;
+
+			AlgValue ownAst(AstNode *p) {
+				return AlgValue(p, [](AstNode *q) { freeAst(q); });
+			}
+
+			AstNode *cloneAstChain(const AstNode *p);
+
+			AstNode *cloneAst(const AstNode *p) {
+				AstNode *c = new AstNode(*p);
+				c->next = NULL;
+				c->index = -1;
+				c->subs[0] = cloneAstChain(p->subs[0]);
+				c->subs[1] = cloneAstChain(p->subs[1]);
+				return c;
+			}
+
+			AstNode *cloneAstChain(const AstNode *p) {
+				AstNode *head = NULL;
+				AstNode **tail = &head;
+				for (; p != NULL; p = p->next) {
+					*tail = cloneAst(p);
+					tail = &(*tail)->next;
+				}
+				return head;
+			}
+
+			struct AlgLowering {
+				SasModelParser *parser;
+				int line;
+				set<string> allAssigned; // assigned outside when-statements, anywhere in the section
+				vector<string> order;	 // in the order of the first assignment
+				map<string, AlgValue> lhsProto;
+				AlgEnv env;
+				bool ok = true;
+
+				AlgLowering(SasModelParser *p, int l) : parser(p), line(l) {}
+
+				void fail(const string &msg) {
+					if (ok) {
+						parser->error("Line %d: %s", line, msg.c_str());
+					}
+					ok = false;
+				}
+
+				static bool isVariable(const AstNode *p) {
+					return p != NULL && p->op == OP_ID && p->ty != TY_FUNCTION && p->value.p != NULL;
+				}
+
+				void collectAssigned(const AstNode *list) {
+					for (const AstNode *s = list; s != NULL; s = s->next) {
+						if (s->op == OP_ASSIGN && isVariable(s->subs[0])) {
+							allAssigned.insert((const char *)s->subs[0]->value.p);
+						} else if (s->nodeKind == NK_IfEquation && s->subs[1] != NULL) {
+							collectAssigned(s->subs[1]->subs[0]);
+							collectAssigned(s->subs[1]->subs[1]);
+						}
+					}
+				}
+
+				AstNode *mkPre(AstNode *arg) {
+					AstNode *callee = new AstNode();
+					callee->op = OP_ID;
+					callee->ty = TY_FUNCTION;
+					callee->value.p = (decltype(callee->value.p))parser->currentModel->lookupIdentifier("pre", 3)->str;
+					AstNode *call = new AstNode();
+					call->op = OP_CALL;
+					call->subs[0] = callee;
+					call->subs[1] = arg;
+					return call;
+				}
+
+				// Copy of an expression chain with the assigned variables replaced by their current values.
+				// Names in `pre` are read before their assignment in a when-statement: they mean pre(name).
+				AstNode *substChain(const AstNode *p, const AlgEnv &e, const set<string> *pre) {
+					AstNode *head = NULL;
+					AstNode **tail = &head;
+					for (; p != NULL; p = p->next) {
+						*tail = subst(p, e, pre);
+						tail = &(*tail)->next;
+					}
+					return head;
+				}
+
+				AstNode *subst(const AstNode *p, const AlgEnv &e, const set<string> *pre) {
+					if (isVariable(p)) {
+						const string name = (const char *)p->value.p;
+						AlgEnv::const_iterator it = e.find(name);
+						if (it != e.end()) {
+							return cloneAst(it->second.get());
+						}
+						if (pre != NULL && pre->count(name) > 0) {
+							return mkPre(cloneAst(p));
+						}
+						if (allAssigned.count(name) > 0 && !(pre != NULL)) {
+							fail("'" + name + "' is read before it is assigned in the algorithm section; its previous value cannot be used.");
+						}
+						return cloneAst(p);
+					}
+					if (p->op == OP_CALL && calleeName(p) != "" && (calleeName(p) == "der" || calleeName(p) == "pre")) {
+						return cloneAst(p);
+					}
+					AstNode *c = new AstNode(*p);
+					c->next = NULL;
+					c->index = -1;
+					c->subs[0] = substChain(p->subs[0], e, pre);
+					c->subs[1] = substChain(p->subs[1], e, pre);
+					return c;
+				}
+
+				AstNode *mkEqn(const AstNode *lhs, AstNode *rhs) {
+					AstNode *eq = new AstNode();
+					eq->op = OP_EQN;
+					eq->subs[0] = cloneAst(lhs);
+					eq->subs[1] = rhs;
+					return eq;
+				}
+
+				AstNode *mkIfExpr(AstNode *c, AstNode *a, AstNode *b) {
+					AstNode *branch = new AstNode();
+					branch->op = OP_BRANCH;
+					branch->subs[0] = a;
+					branch->subs[1] = b;
+					AstNode *n = new AstNode();
+					n->op = OP_IFEXPR;
+					n->subs[0] = c;
+					n->subs[1] = branch;
+					return n;
+				}
+
+				void assign(const AstNode *st, AlgEnv &e) {
+					const AstNode *lhs = st->subs[0];
+					if (!isVariable(lhs)) {
+						fail("the left side of `:=` must be a variable.");
+						return;
+					}
+					const string name = (const char *)lhs->value.p;
+					AstNode *rhs = subst(st->subs[1], e, NULL);
+					e[name] = ownAst(rhs);
+					if (lhsProto.count(name) == 0) {
+						lhsProto[name] = ownAst(cloneAst(lhs));
+						order.push_back(name);
+					}
+				}
+
+				void lowerIf(const AstNode *st, AlgEnv &e, vector<AstNode *> &out) {
+					AstNode *cond = subst(st->subs[0], e, NULL);
+					AlgValue condOwner = ownAst(cond);
+					AlgEnv thenEnv = e, elseEnv = e;
+					const AstNode *branch = st->subs[1];
+					lowerList(branch != NULL ? branch->subs[0] : NULL, thenEnv, out, false);
+					lowerList(branch != NULL ? branch->subs[1] : NULL, elseEnv, out, false);
+					set<string> names;
+					for (const AlgEnv::value_type &kv : thenEnv) {
+						if (e.count(kv.first) == 0 || e[kv.first] != kv.second) {
+							names.insert(kv.first);
+						}
+					}
+					for (const AlgEnv::value_type &kv : elseEnv) {
+						if (e.count(kv.first) == 0 || e[kv.first] != kv.second) {
+							names.insert(kv.first);
+						}
+					}
+					for (const string &name : names) {
+						AlgEnv::const_iterator t = thenEnv.find(name), f = elseEnv.find(name);
+						if (t == thenEnv.end() || f == elseEnv.end()) {
+							fail("'" + name + "' is assigned in only some branches of an if-statement and has no value before it.");
+							return;
+						}
+						e[name] = ownAst(mkIfExpr(cloneAst(cond), cloneAst(t->second.get()), cloneAst(f->second.get())));
+					}
+				}
+
+				// One branch of a when-statement: assignments become equations at the end of the body.
+				AstNode *lowerWhenBody(const AstNode *list, const AlgEnv &e) {
+					set<string> bodyAssigned;
+					for (const AstNode *s = list; s != NULL; s = s->next) {
+						if (s->op == OP_ASSIGN && isVariable(s->subs[0])) {
+							bodyAssigned.insert((const char *)s->subs[0]->value.p);
+						}
+					}
+					AlgEnv wenv = e;
+					for (const string &n : bodyAssigned) {
+						wenv.erase(n);
+					}
+					set<string> pre = bodyAssigned;
+					vector<string> assigned;
+					map<string, AlgValue> protos;
+					AstNode *head = NULL;
+					AstNode **tail = &head;
+					for (const AstNode *s = list; s != NULL; s = s->next) {
+						if (s->op == OP_ASSIGN) {
+							if (!isVariable(s->subs[0])) {
+								fail("the left side of `:=` must be a variable.");
+								continue;
+							}
+							const string name = (const char *)s->subs[0]->value.p;
+							wenv[name] = ownAst(subst(s->subs[1], wenv, &pre));
+							pre.erase(name);
+							if (protos.count(name) == 0) {
+								protos[name] = ownAst(cloneAst(s->subs[0]));
+								assigned.push_back(name);
+							}
+						} else if (s->op == OP_CALL && calleeName(s) == "reinit") {
+							AstNode *call = new AstNode(*s);
+							call->next = NULL;
+							call->index = -1;
+							const AstNode *target = s->subs[1];
+							call->subs[0] = cloneAst(s->subs[0]);
+							AstNode *first = cloneAst(target);
+							first->next = target != NULL && target->next != NULL ? substChain(target->next, wenv, &pre) : NULL;
+							call->subs[1] = first;
+							*tail = call;
+							tail = &call->next;
+						} else if (s->op == OP_CALL && (calleeName(s) == "assert" || calleeName(s) == "terminate")) {
+							AstNode *call = subst(s, wenv, &pre);
+							*tail = call;
+							tail = &call->next;
+						} else if (s->nodeKind == NK_IfEquation) {
+							fail("if-statements inside a when-statement are not supported in algorithm sections.");
+						} else {
+							fail("unsupported statement in a when-statement.");
+						}
+					}
+					for (const string &name : assigned) {
+						AstNode *eq = mkEqn(protos[name].get(), cloneAst(wenv[name].get()));
+						*tail = eq;
+						tail = &eq->next;
+					}
+					return head;
+				}
+
+				AstNode *lowerWhen(const AstNode *st, const AlgEnv &e) {
+					AstNode *node = new AstNode();
+					node->nodeKind = NK_WhenEquation;
+					node->line = st->line;
+					node->subs[0] = subst(st->subs[0], e, NULL);
+					AstNode *branch = new AstNode();
+					branch->op = OP_BRANCH;
+					branch->nodeKind = NK_Equation;
+					const AstNode *src = st->subs[1];
+					branch->subs[0] = lowerWhenBody(src != NULL ? src->subs[0] : NULL, e);
+					if (src != NULL && src->subs[1] != NULL) {
+						branch->subs[1] = lowerWhen(src->subs[1], e);
+					}
+					node->subs[1] = branch;
+					return node;
+				}
+
+				// `top` is true for the statements of the section itself (not inside an if-statement).
+				void lowerList(const AstNode *list, AlgEnv &e, vector<AstNode *> &out, bool top) {
+					for (const AstNode *s = list; s != NULL; s = s->next) {
+						if (s->op == OP_ASSIGN) {
+							assign(s, e);
+						} else if (s->nodeKind == NK_IfEquation) {
+							lowerIf(s, e, out);
+						} else if (s->nodeKind == NK_WhenEquation) {
+							if (!top) {
+								fail("when-statements inside an if-statement are not supported in algorithm sections.");
+							} else {
+								out.push_back(lowerWhen(s, e));
+							}
+						} else if (s->op == OP_CALL && calleeName(s) == "assert") {
+							if (!top) {
+								fail("assert inside an if-statement is not supported in algorithm sections.");
+							} else {
+								out.push_back(subst(s, e, NULL));
+							}
+						} else {
+							fail("unsupported statement in an algorithm section.");
+						}
+					}
+				}
+
+				// The equations (statements for the model) of a whole section.
+				vector<AstNode *> lower(const AstNode *list) {
+					collectAssigned(list);
+					vector<AstNode *> out;
+					lowerList(list, env, out, true);
+					for (const string &name : order) {
+						if (!ok || env.count(name) == 0) {
+							break;
+						}
+						out.push_back(mkEqn(lhsProto[name].get(), cloneAst(env[name].get())));
+					}
+					return out;
+				}
+			};
+
+			void parseAlgorithmSection(SasModelParser *parser) {
+				const int sectionLine = parser->coord.line;
+				AstNode *all = NULL;
+				AstNode **tail = &all;
+				while (!endsStatementList(parser->currentToken)) {
+					uchar *before = parser->reader.cursur;
+					const int line = parser->coord.line;
+					AstNode *st = parseStatement(parser, CTX_ALG);
+					if (st != NULL) {
+						Elab elab(parser, line);
+						AstNode *chain = elabChain(elab, st);
+						freeAst(st);
+						*tail = chain;
+						while (*tail != NULL) {
+							tail = &(*tail)->next;
+						}
+					}
+					if (parser->reader.cursur == before) {
+						getNextToken(parser);
+					}
+				}
+				AlgLowering lowering(parser, sectionLine);
+				vector<AstNode *> eqs = lowering.lower(all);
+				for (AstNode *eq : eqs) {
+					if (lowering.ok) {
+						shared_ptr<AstTree> tree = make_shared<AstTree>();
+						tree->pHead = eq;
+						tree->line = eq->line > 0 ? eq->line : sectionLine;
+						parser->currentModel->modelTrees.push_back(tree);
+					} else {
+						freeAst(eq);
+					}
+				}
+				freeAst(all);
+			}
+
 		} // namespace
 
 		void parseSingleSasModel(SasModelParser *parser) {
@@ -1049,8 +1424,17 @@ namespace che {
 					expect(parser, TK_SEMICOLON);
 				} else if (parser->currentToken == TK_K_INIT) {
 					getNextToken(parser);
+					if (parser->currentToken == TK_K_ALGORITHM) {
+						parser->error("Initial algorithm sections are not supported; use an initial equation section.");
+						getNextToken(parser);
+						parseAlgorithmSection(parser);
+						continue;
+					}
 					expect(parser, TK_K_EQN);
 					parseEquationSection(parser, CTX_INITIAL);
+				} else if (parser->currentToken == TK_K_ALGORITHM) {
+					getNextToken(parser);
+					parseAlgorithmSection(parser);
 				} else if (parser->currentToken == TK_K_EQN) {
 					getNextToken(parser);
 					parseEquationSection(parser, CTX_TOP);
@@ -1059,8 +1443,6 @@ namespace che {
 						parser->error("Declarations must come before the equation sections.");
 					} else if (parser->currentToken == TK_K_EXTENDS) {
 						parser->error("Inheritance (extends) is not supported; flatten the model first.");
-					} else if (parser->currentToken == TK_K_ALGORITHM) {
-						parser->error("Algorithm sections are not supported; write the statements as equations.");
 					} else if (parser->currentToken == TK_K_FUNCTION || parser->currentToken == TK_K_PACKAGE || parser->currentToken == TK_K_CLASS) {
 						parser->error("Nested classes and user-defined functions are not supported.");
 					} else {

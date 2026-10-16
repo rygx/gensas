@@ -39,6 +39,9 @@
 namespace che {
 	namespace core {
 
+		class SasModelParser;
+		struct SolverFeatures;
+
 		// Everything needed to run one Modelica simulation. Filled from a job file (parseModelicaJob) or
 		// directly by the caller. Limits on the numeric options are applied by Simulation (see
 		// applyJobLimits); out-of-range values are clamped and reported as warnings.
@@ -103,6 +106,17 @@ namespace che {
 				return warns;
 			}
 
+			// Parses and checks the model without running it. Returns true if run() would get past this
+			// stage. Errors and warnings about the text are in diagnostics(), the first error as text in
+			// error().
+			bool check();
+
+			// Errors and warnings about the model text found by the parser and the checker in the last
+			// run() or check(), with line numbers (empty if the model could not even be read).
+			const std::vector<Diagnostic> &diagnostics() const {
+				return diags;
+			}
+
 			// The effective job (after limits were applied).
 			const ModelicaJob &job() const {
 				return jobData;
@@ -123,9 +137,12 @@ namespace che {
 
 		private:
 			bool runImpl(const ProgressFn &progress);
+			// Reads and checks the model; `hybrid` and `features` are what the solver stage needs.
+			bool frontEnd(SasModelParser &parser, bool &hybrid, SolverFeatures &features);
 
 			ModelicaJob jobData;
 			std::vector<std::string> warns;
+			std::vector<Diagnostic> diags;
 			size_t nJobWarnings = 0;
 			std::string err;
 			bool wasCancelled = false;

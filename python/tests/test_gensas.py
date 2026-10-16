@@ -33,6 +33,25 @@ BALL = (
 
 
 class GenSASTest(unittest.TestCase):
+    def test_check_and_diagnostics(self):
+        with gensas.Simulation(job(DECAY, 1.0)) as sim:
+            self.assertEqual(sim.check(), [])
+            sim.run()
+        bad = "model M\n  Real x(start = 1);\nequation\n  der(x) = -y;\nend M;\n"
+        with gensas.Simulation(job(bad, 1.0)) as sim:
+            found = sim.check()
+            self.assertEqual(len(found), 1)
+            self.assertEqual((found[0].severity, found[0].line, found[0].source), ("error", 4, "checker"))
+            self.assertIn("undeclared identifier 'y'", found[0].message)
+            self.assertEqual(found[0].as_dict()["line"], 4)
+            with self.assertRaises(gensas.GenSASError) as ctx:
+                sim.run()
+            self.assertEqual(ctx.exception.diagnostics[0].line, 4)
+        warn = "model M\n  Real x(start = 1, nominal = 2);\nequation\n  der(x) = -x;\nend M;\n"
+        with gensas.Simulation(job(warn, 1.0)) as sim:
+            found = sim.check()
+            self.assertEqual([d.severity for d in found], ["warning"])
+
     def test_decay(self):
         r = gensas.run(job(DECAY, 2.0))
         self.assertAlmostEqual(r.time[-1], 2.0, places=9)

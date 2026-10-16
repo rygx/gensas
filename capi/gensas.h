@@ -63,7 +63,8 @@
 extern "C" {
 #endif
 
-#define GENSAS_API_VERSION 1
+/* Version 2 adds gensas_check and the gensas_diagnostic_* functions. */
+#define GENSAS_API_VERSION 2
 
 /* Return codes of gensas_run. */
 #define GENSAS_OK 0
@@ -93,6 +94,24 @@ GENSAS_API int gensas_run(gensas_simulation *sim, gensas_progress_fn progress, v
 
 /* Message of the last failed gensas_run; empty if none. Valid until the next call on this handle. */
 GENSAS_API const char *gensas_error(const gensas_simulation *sim);
+
+/* Parses and checks the model without running it, for editors. Returns GENSAS_OK or GENSAS_ERROR (see
+ * gensas_error); the errors and warnings about the text are available through gensas_diagnostic_*. */
+GENSAS_API int gensas_check(gensas_simulation *sim);
+
+/* Errors and warnings about the model text from the last gensas_check or gensas_run: severity
+ * (GENSAS_DIAG_ERROR or GENSAS_DIAG_WARNING), 1-based line and column (0 if unknown), the message, and
+ * the stage that found it ("parser" or "checker"). Errors of the solver itself (a function leaving its
+ * domain, ...) are not tied to a line and only available through gensas_error. Index out of range gives
+ * 0 or NULL. Strings stay valid until the next call that runs or checks the same handle. */
+#define GENSAS_DIAG_ERROR 0
+#define GENSAS_DIAG_WARNING 1
+GENSAS_API size_t gensas_diagnostic_count(const gensas_simulation *sim);
+GENSAS_API int gensas_diagnostic_severity(const gensas_simulation *sim, size_t index);
+GENSAS_API int gensas_diagnostic_line(const gensas_simulation *sim, size_t index);
+GENSAS_API int gensas_diagnostic_column(const gensas_simulation *sim, size_t index);
+GENSAS_API const char *gensas_diagnostic_message(const gensas_simulation *sim, size_t index);
+GENSAS_API const char *gensas_diagnostic_source(const gensas_simulation *sim, size_t index);
 
 /* Warnings produced when the job was created (options moved into the supported range, ...) and by
  * the last run (assert() calls with AssertionLevel.warning that failed). */

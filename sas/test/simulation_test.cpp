@@ -236,7 +236,72 @@ static void testWriteResult() {
 	CHECK(!sim.writeResult("xml", "x", err));
 }
 
+// Errors and warnings about the model text come with line numbers, without running the model.
+static void testDiagnostics() {
+	// a good model: no diagnostics, and it can be run afterwards
+	{
+		Simulation sim(sourceJob(kDecay, 1.0));
+		CHECK(sim.check());
+		CHECK(sim.diagnostics().empty());
+		CHECK(sim.run());
+	}
+	// a parser error
+	{
+		Simulation sim(sourceJob("model M\n  Real x;\nequation\n  der(x) = \nend M;\n", 1.0));
+		CHECK(!sim.check());
+		CHECK(!sim.diagnostics().empty());
+		if (!sim.diagnostics().empty()) {
+			const Diagnostic &d = sim.diagnostics()[0];
+			CHECK(d.severity == Diagnostic::Error);
+			CHECK(d.line >= 4);
+			CHECK_EQ(d.source, string("parser"));
+		}
+		CHECK(!sim.error().empty());
+	}
+	// the statement's own line, not the scanner's, and no "Line N:" prefix in the message
+	{
+		Simulation sim(sourceJob("model M\n  Real x[2];\nequation\n  der(x[3]) = 1;\n  der(x[1]) = 1;\n  der(x[2]) = 1;\nend M;\n", 1.0));
+		CHECK(!sim.check());
+		bool found = false;
+		for (const Diagnostic &d : sim.diagnostics()) {
+			if (d.message.find("out of range") != string::npos) {
+				CHECK_EQ(d.line, 4);
+				CHECK(d.message.find("Line") == string::npos);
+				found = true;
+			}
+		}
+		CHECK(found);
+	}
+	// a checker error (undeclared identifier)
+	{
+		Simulation sim(sourceJob("model M\n  Real x(start = 1);\nequation\n  der(x) = -y;\nend M;\n", 1.0));
+		CHECK(!sim.check());
+		bool found = false;
+		for (const Diagnostic &d : sim.diagnostics()) {
+			if (d.source == "checker") {
+				CHECK_EQ(d.line, 4);
+				CHECK(d.message.find("undeclared identifier 'y'") != string::npos);
+				found = true;
+			}
+		}
+		CHECK(found);
+		CHECK(!sim.run()); // run() fills the diagnostics too
+		CHECK(!sim.diagnostics().empty());
+	}
+	// a warning does not make the check fail
+	{
+		Simulation sim(sourceJob("model M\n  Real x(start = 1, nominal = 2);\nequation\n  der(x) = -x;\nend M;\n", 1.0));
+		CHECK(sim.check());
+		CHECK_EQ(sim.diagnostics().size(), (size_t)1);
+		if (sim.diagnostics().size() == 1) {
+			CHECK(sim.diagnostics()[0].severity == Diagnostic::Warning);
+			CHECK_EQ(sim.diagnostics()[0].line, 2);
+		}
+	}
+}
+
 int main() {
+	testDiagnostics();
 	testPlainRun();
 	testRunTwice();
 	testHybridRun();

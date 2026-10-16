@@ -29,6 +29,7 @@
 
 #include "sas/SasConfig.h"
 #include <list>
+#include <string>
 #include <vector>
 #include <iostream>
 #include <memory>
@@ -55,6 +56,18 @@ namespace che {
 			int line = 0;
 			int col = 0;
 		} Coord;
+
+		// A message about the model text, for editors: where it is (1-based line and column; 0 if unknown)
+		// and what is wrong. `source` says which stage found it: "parser" or "checker".
+		struct Diagnostic {
+			enum Severity { Error,
+							Warning };
+			Severity severity = Error;
+			int line = 0;
+			int column = 0;
+			std::string message;
+			std::string source;
+		};
 
 		typedef enum {
 #define TOKEN(k, n) k,

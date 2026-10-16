@@ -320,14 +320,8 @@ namespace che {
 			return false;
 		}
 
-		bool Simulation::runImpl(const ProgressFn &progress) {
-			err.clear();
-			warns.resize(nJobWarnings); // warnings of an earlier run
-			wasCancelled = false;
-			res = SasResult();
-			const auto started = chrono::steady_clock::now();
-
-			SasModelParser parser;
+		bool Simulation::frontEnd(SasModelParser &parser, bool &hybrid, SolverFeatures &solverFeatures) {
+			diags.clear();
 			ostringstream parseMessages; // errors and warnings of the parser go to the result, not to stderr
 			parser.diag = &parseMessages;
 			if (!jobData.modelFile.empty()) {
@@ -337,12 +331,17 @@ namespace che {
 			}
 			if (parser.reader.buffer == NULL || parser.reader.size <= 1) {
 				err = jobData.modelFile.empty() ? "the model text is empty" : "cannot read the model file " + jobData.modelFile;
+				Diagnostic d;
+				d.message = err;
+				d.source = "parser";
+				diags.push_back(d);
 				return false;
 			}
 			parser.currentModel = parser.pool.createNewTopModel();
 			parser.currentModel->diag = &parseMessages;
 			parseSingleSasModel(&parser);
 			parser.diag = &cerr; // parseMessages ends with this scope, the model may live longer
+			diags = parser.diagnostics;
 			if (parser.currentModel != nullptr) {
 				parser.currentModel->diag = &cerr;
 			}
@@ -353,11 +352,10 @@ namespace che {
 
 			// The default SolverFeatures describe what the plain solver can run today. Models with discrete
 			// variables, if/when statements or `time` go to the time-event simulator.
-			SolverFeatures solverFeatures;
 			// abs/min/max/sign in continuous equations become if-expressions (their switching points are state
 			// events) or, with PW_SMOOTH, smooth approximations.
 			rewritePiecewiseFunctions(*parser.currentModel, jobData.piecewise, jobData.smoothEps);
-			const bool hybrid = isHybridModel(*parser.currentModel);
+			hybrid = isHybridModel(*parser.currentModel);
 			if (hybrid) {
 				solverFeatures.discreteVariables = solverFeatures.ifExpressions = solverFeatures.ifEquations = true;
 				solverFeatures.whenEquations = solverFeatures.piecewiseFunctions = solverFeatures.eventFunctions = true;
@@ -367,8 +365,32 @@ namespace che {
 				solverFeatures.stateEvents = true;
 			}
 			ostringstream diagnostics;
-			if (checkModel(*parser.currentModel, solverFeatures, jobData.modelFile.empty() ? string("<string>") : jobData.modelFile, diagnostics) > 0) {
+			if (checkModel(*parser.currentModel, solverFeatures, jobData.modelFile.empty() ? string("<string>") : jobData.modelFile, diagnostics, &diags) > 0) {
 				err = "the model uses constructs that are not supported yet:\n" + diagnostics.str();
+				return false;
+			}
+			return true;
+		}
+
+		bool Simulation::check() {
+			err.clear();
+			SasModelParser parser;
+			bool hybrid = false;
+			SolverFeatures features;
+			return frontEnd(parser, hybrid, features);
+		}
+
+		bool Simulation::runImpl(const ProgressFn &progress) {
+			err.clear();
+			warns.resize(nJobWarnings); // warnings of an earlier run
+			wasCancelled = false;
+			res = SasResult();
+			const auto started = chrono::steady_clock::now();
+
+			SasModelParser parser;
+			bool hybrid = false;
+			SolverFeatures solverFeatures;
+			if (!frontEnd(parser, hybrid, solverFeatures)) {
 				return false;
 			}
 

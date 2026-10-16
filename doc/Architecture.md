@@ -142,7 +142,8 @@ A single model, parser or simulator is not thread safe and must stay on one thre
   reports). The browser tests (`web/e2e`) are not measured.
   The Coverage workflow does this on every pull request, shows the numbers in the job summary, comments
   them on the pull request and keeps the HTML reports as an artifact. Power flow and the PSAT reader are
-  built and tested through Bazel only, so the script does not see them.
+  built and tested through Bazel only, so the script does not see them: their files show as 0% and the summary
+  also gives the C++ figures without them (the list is `POWER_FLOW_FILES` in `scripts/coverage_summary.py`).
 * `scripts/run_integration_test.sh` runs the command line on a power-flow case and on the bouncing
   ball example (used by the Integration workflow on pushes to `main`).
 * Formatting: `bash scripts/format.sh` (clang-format 22.1.2, as in the lint check).

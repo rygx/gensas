@@ -428,6 +428,13 @@ namespace che {
 					err = "cancelled";
 					return false;
 				}
+				if (solutions != nullptr && solutions->stalled) {
+					err = solutions->stallMessage;
+					return false;
+				}
+				if (solutions != nullptr) {
+					warns.insert(warns.end(), solutions->warnings.begin(), solutions->warnings.end());
+				}
 			}
 
 			res = buildResult(*solutions, jobData.outputStep);

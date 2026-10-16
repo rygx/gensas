@@ -99,6 +99,12 @@ namespace che {
 			std::string terminateMessage;
 			std::vector<std::string> warnings;
 
+			// Set when the solver could not advance (singular solution or a function evaluated outside its
+			// domain); the segments computed up to stallTime are kept.
+			bool stalled = false;
+			double stallTime = 0.0;
+			std::string stallMessage;
+
 			// Computation models referenced by the solutions (SasSolution::linkCompModel is a raw pointer).
 			std::vector<std::shared_ptr<SasComputationModel>> keepAlive;
 
@@ -107,6 +113,17 @@ namespace che {
 			std::shared_ptr<SasSolution> findSasSolution(std::shared_ptr<SasComputationModel> &, double time);
 
 			virtual ~SasSolutionSet();
+		};
+
+		// An operand with a restricted range (argument of log, sqrt, asin, acos, denominator).
+		struct DomainCheck {
+			enum Kind { POSITIVE = 0,
+						NONNEGATIVE = 1,
+						UNIT = 2,
+						NONZERO = 3 };
+			AstNode *arg;
+			Kind kind;
+			const char *label;
 		};
 
 		class SasComputationModel {
@@ -162,6 +179,21 @@ namespace che {
 			vec getStartStateIVP();
 
 			vec calcDiff(CheSolution *solution, double alpha);
+
+			// Why the equations are undefined at a point of a solution (a function argument outside its
+			// domain); empty if nothing is found.
+			std::string describeDomainViolation(CheSolution *solution, double alpha);
+
+			// True if the operands with restricted ranges stay in their range along [0, alpha] of a
+			// solution; otherwise the reason goes to *why.
+			bool domainOk(CheSolution *solution, double alpha, std::string *why);
+			std::vector<DomainCheck> domainChecks;
+
+			// Messages of the last solve() about steps that were accepted with a relaxed tolerance.
+			std::vector<std::string> solverWarnings;
+			static const size_t MAX_SOLVER_WARNINGS = 10;
+			// Why the last segment could not advance (see SasSolutionSet::stalled).
+			std::string stallReason;
 
 			shared_ptr<SasSolution> solveSegment(const vec &init, double curAlpha, double seg, const SasComputationOptions &options);
 		};

@@ -30,6 +30,9 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <sstream>
+#include <limits>
+#include <algorithm>
 
 using namespace std;
 
@@ -1123,6 +1126,115 @@ namespace che {
 			}
 		}
 
+		// Largest absolute entry; infinity when any entry is not finite (arma's "inf" norm skips NaN, which
+		// would let a step with an undefined residual pass the tolerance check).
+		static double maxAbsEntry(const vec &v) {
+			double m = 0.0;
+			for (uword i = 0; i < v.n_elem; i++) {
+				if (!std::isfinite(v(i))) {
+					return std::numeric_limits<double>::infinity();
+				}
+				m = std::max(m, std::fabs(v(i)));
+			}
+			return m;
+		}
+
+		// Collects the places in a tree where an operand has a restricted range: arguments of log, sqrt,
+		// asin, acos, and the denominators of divisions and of 1/x.
+		static void collectDomainChecks(AstNode *p, vector<DomainCheck> &out) {
+			if (p == NULL) {
+				return;
+			}
+			if (p->op == OP_CALL && p->subs[0] != NULL && p->subs[1] != NULL && p->subs[0]->op == OP_ID) {
+				char *funcName = (char *)p->subs[0]->value.p;
+				TokenKind tk = (TokenKind)findDefaultFunctions(funcName, strlen(funcName));
+				if (tk == TK_F_LOG) {
+					out.push_back({p->subs[1], DomainCheck::POSITIVE, "log"});
+				} else if (tk == TK_F_SQRT) {
+					out.push_back({p->subs[1], DomainCheck::NONNEGATIVE, "sqrt"});
+				} else if (tk == TK_F_ASIN || tk == TK_F_ACOS) {
+					out.push_back({p->subs[1], DomainCheck::UNIT, tk == TK_F_ASIN ? "asin" : "acos"});
+				} else if (tk == TK_F_INV) {
+					out.push_back({p->subs[1], DomainCheck::NONZERO, "1/x"});
+				}
+			} else if (p->op == OP_DIV && p->subs[1] != NULL) {
+				out.push_back({p->subs[1], DomainCheck::NONZERO, "division"});
+			}
+			collectDomainChecks(p->subs[0], out);
+			collectDomainChecks(p->subs[1], out);
+			collectDomainChecks(p->next, out);
+		}
+
+		static bool domainValueBad(const DomainCheck &c, double x) {
+			switch (c.kind) {
+			case DomainCheck::POSITIVE:
+				return !(x > 0.0);
+			case DomainCheck::NONNEGATIVE:
+				return !(x >= 0.0);
+			case DomainCheck::UNIT:
+				return !(x >= -1.0 && x <= 1.0);
+			default:
+				return !(x != 0.0) || !std::isfinite(x);
+			}
+		}
+
+		static string domainMessage(const DomainCheck &c, double x) {
+			static const char *need[] = {"must be positive", "must not be negative", "must be in [-1, 1]", "must not be zero"};
+			ostringstream os;
+			os << c.label << ": the " << (strcmp(c.label, "division") == 0 ? "denominator" : "argument") << " is " << x << " but it " << need[c.kind];
+			return os.str();
+		}
+
+		// Checks the domain conditions along [0, alpha] of a solution at a few points. A denominator that
+		// changes sign between two points has a pole in between, which a series can pass without any
+		// residual (a rational function is represented exactly).
+		bool SasComputationModel::domainOk(CheSolution *solution, double alpha, string *why) {
+			if (domainChecks.empty()) {
+				return true;
+			}
+			const int samples = 8;
+			vector<double> prev(domainChecks.size(), 0.0);
+			list<shared_ptr<SasModel>> tempList;
+			IdLocator locator(tempList);
+			for (int k = 0; k <= samples; k++) {
+				vec state = solution->getSolValue(alpha * k / samples);
+				vec der(state.n_rows, fill::zeros);
+				locator.setStates(state, der);
+				for (size_t i = 0; i < domainChecks.size(); i++) {
+					const DomainCheck &c = domainChecks[i];
+					double x = calcTreeValue(c.arg, &locator);
+					// k == 0 is the start point (checked by the caller), used as the reference for sign changes
+					bool bad = k > 0 && domainValueBad(c, x);
+					bool crossed = k > 0 && c.kind == DomainCheck::NONZERO && std::isfinite(x) && ((x < 0.0) != (prev[i] < 0.0));
+					if (bad || crossed) {
+						if (why != NULL) {
+							*why = bad ? domainMessage(c, x) : string(c.label) + ": the denominator changes sign (from " + to_string(prev[i]) + " to " + to_string(x) + "), the solution has a pole";
+						}
+						return false;
+					}
+					prev[i] = x;
+				}
+			}
+			return true;
+		}
+
+		// Describes why the equations cannot be evaluated at the given point of a solution ("" if no
+		// function argument is outside its domain).
+		string SasComputationModel::describeDomainViolation(CheSolution *solution, double alpha) {
+			vec state = solution->getSolValue(alpha);
+			vec der(state.n_rows, fill::zeros);
+			list<shared_ptr<SasModel>> tempList;
+			IdLocator locator(tempList);
+			locator.setStates(state, der);
+			for (const DomainCheck &c : domainChecks) {
+				double x = calcTreeValue(c.arg, &locator);
+				if (domainValueBad(c, x)) {
+					return domainMessage(c, x);
+				}
+			}
+			return "";
+		}
+
 		vec SasComputationModel::calcDiff(CheSolution *solution, double alpha) {
 			vec diff(nDE + nAE, fill::zeros);
 			vec state = solution->getSolValue(alpha);
@@ -1185,7 +1297,7 @@ namespace che {
 				vec diff = calcDiff(sasSol->solution, 0.0);
 				vec initY = sasSol->solution->solution.col(0).tail(nY);
 				vec diffAE = diff.tail(nAE);
-				double diffMax = norm(diffAE, "inf");
+				double diffMax = maxAbsEntry(diffAE);
 				if (diffMax > tol / 2) {
 					// Newton's method; the Jacobian is rebuilt at each iterate.
 					int iter = 0;
@@ -1202,13 +1314,13 @@ namespace che {
 						resetPade();
 						diff = calcDiff(sasSol->solution, 0.0);
 						diffAE = diff.tail(nAE);
-						diffMax = norm(diffAE, "inf");
+						diffMax = maxAbsEntry(diffAE);
 						iter++;
 					}
 					if (singular || (diffMax > tol / 10 && iter >= maxIter) || !std::isfinite(diffMax)) { // if not good, then restore original solution.
 						sasSol->solution->solution.col(0).tail(nY) = initY;
 						resetPade();
-						const double before = norm(calcDiff(sasSol->solution, 0.0).tail(nAE), "inf");
+						const double before = maxAbsEntry(calcDiff(sasSol->solution, 0.0).tail(nAE));
 						if (!(before < 1e-4)) {
 							throw std::runtime_error("the algebraic equations cannot be solved consistently at t = " + std::to_string(startAbsAlpha) + " (residual " + std::to_string(before) + "); give the algebraic variables start values that are close to the solution");
 						}
@@ -1242,27 +1354,54 @@ namespace che {
 
 			// sasSol->solution->solution.print("sol");
 			vec diff = calcDiff(sasSol->solution, 0.0);
-			double diffMax = norm(diff, "inf");
+			double diffMax = maxAbsEntry(diff);
+			if (!std::isfinite(diffMax)) {
+				string why = describeDomainViolation(sasSol->solution, 0.0);
+				throw std::runtime_error("the equations cannot be evaluated at t = " + std::to_string(startAbsAlpha) + (why.empty() ? string("") : ": " + why));
+			}
 			if (diffMax > tol) {
-				cerr << "Starting error (" << diffMax << ") is larger than error Tol (" << tol << "), setting tol to " << diffMax << endl;
+				if (solverWarnings.size() < MAX_SOLVER_WARNINGS) {
+					ostringstream os;
+					os << "at t = " << startAbsAlpha << " the residual at the start of a step (" << diffMax << ") exceeds the error tolerance (" << tol << "); the tolerance was relaxed for that step";
+					solverWarnings.push_back(os.str());
+				}
 				tol = diffMax;
 			}
 			double alphaLeft = 0.0;
 			double alphaRight = maxAlpha;
 			double alpha = alphaRight;
-			while (alphaRight - alphaLeft > options.alphaTol) {
+			// The search resolution is alphaTol, but a short segment (the last one of a run, or one up to
+			// an event) is resolved finer so that a run can end exactly at the requested time.
+			const double resolution = std::min(options.alphaTol, maxAlpha / 64.0);
+			double rejectAlpha = -1.0; // the smallest step rejected because the residual is not finite
+			string rejectWhy;		   // the reason of the smallest step rejected because of a domain violation
+			while (alphaRight - alphaLeft > resolution) {
 				diff = calcDiff(sasSol->solution, alpha);
 				// diff.print("diff");
-				diffMax = norm(diff, "inf");
-				if (diffMax < tol) {
+				diffMax = maxAbsEntry(diff);
+				string why;
+				if (diffMax < tol && domainOk(sasSol->solution, alpha, &why)) {
 					alphaLeft = alpha;
 					alpha = (alphaLeft + alphaRight) / 2;
 				} else {
+					if (!why.empty()) {
+						rejectWhy = why;
+					} else if (!std::isfinite(diffMax)) {
+						rejectAlpha = alpha;
+					}
 					alphaRight = alpha;
 					alpha = (alphaLeft + alphaRight) / 2;
 				}
 			}
 			alpha = alphaLeft;
+			if (alpha <= 0.0) {
+				// The step cannot advance because the equations are undefined right after this point.
+				if (!rejectWhy.empty()) {
+					stallReason = rejectWhy;
+				} else if (rejectAlpha >= 0.0) {
+					stallReason = describeDomainViolation(sasSol->solution, rejectAlpha);
+				}
+			}
 			if (options.log != nullptr) {
 				*options.log << "Stage start " << startAbsAlpha << " end " << startAbsAlpha + alpha << ", length " << alpha << endl;
 			}
@@ -1281,16 +1420,39 @@ namespace che {
 			SasSolutionSet *solLink = new SasSolutionSet();
 			double alpha = options.startTime;
 			int noMoveCnt = 0;
-			while (alpha < options.endTime - options.alphaTol) {
+			// Runs until the end time is reached (up to rounding), not just to within alphaTol.
+			const double timeEps = 1e-12 * std::max(1.0, std::fabs(options.endTime));
+			solverWarnings.clear();
+			stallReason.clear();
+			domainChecks.clear();
+			for (const shared_ptr<AstTree> &t : eqnTable) {
+				collectDomainChecks(t->pHead, domainChecks);
+			}
+			while (alpha < options.endTime - timeEps) {
 				double seg = options.endTime - alpha;
 				if (seg > options.segment) {
 					seg = options.segment;
 				}
 				shared_ptr<SasSolution> sasSol = solveSegment(init, alpha, seg, options);
+				if (sasSol->absEnd >= options.endTime - timeEps) {
+					sasSol->absEnd = options.endTime; // land exactly on the end time
+				}
 				if (sasSol->absEnd <= alpha) {
 					noMoveCnt++;
+				} else {
+					noMoveCnt = 0;
 				}
 				if (noMoveCnt >= 2) {
+					solLink->stalled = true;
+					solLink->stallTime = alpha;
+					ostringstream os;
+					os << "the solver cannot advance beyond t = " << alpha;
+					if (!stallReason.empty()) {
+						os << ": " << stallReason;
+					} else {
+						os << " within the error tolerance; the solution may be singular here";
+					}
+					solLink->stallMessage = os.str();
 					break;
 				}
 				alpha = sasSol->absEnd;
@@ -1305,6 +1467,7 @@ namespace che {
 				}
 			}
 
+			solLink->warnings.insert(solLink->warnings.end(), solverWarnings.begin(), solverWarnings.end());
 			return solLink;
 		}
 

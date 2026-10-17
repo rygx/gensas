@@ -622,20 +622,28 @@ namespace che {
 			} else {
 				compModel.generateCompModel(parser.pool);
 				compModel.preprocessModels();
-				// check if all the ids are initialized, need to be repacked in the future.
-				int nonInitCnt = 0;
+				compModel.generateDAEs();
+				// A state without a start value begins at 0, which is easy to overlook.
+				// Algebraic variables only need a guess for the solver and are not reported.
+				vector<string> noStart;
 				for (const shared_ptr<SasModel> &m : compModel.topModels) {
 					for (const shared_ptr<IdPearl> &id : m->idTable) {
-						IdType idt = id->idTy;
-						if ((idt == ID_VAR || idt == ID_TMPVAR || idt == ID_IVAR) && !id->initVal) {
-							nonInitCnt++;
+						if (id->idTy == ID_VAR && id->index >= 0 && id->index < compModel.nX && !id->initVal && id->str != NULL) {
+							noStart.push_back((const char *)id->str);
 						}
 					}
 				}
-				if (nonInitCnt > 0) {
-					warns.push_back("there are " + to_string(nonInitCnt) + " uninitialized variables");
+				if (!noStart.empty()) {
+					const size_t shown = std::min<size_t>(noStart.size(), 5);
+					string names;
+					for (size_t i = 0; i < shown; i++) {
+						names += (i == 0 ? "" : ", ") + noStart[i];
+					}
+					if (noStart.size() > shown) {
+						names += ", ...";
+					}
+					warns.push_back("state" + string(noStart.size() == 1 ? "" : "s") + " without a start value begin" + (noStart.size() == 1 ? "s" : "") + " at 0: " + names);
 				}
-				compModel.generateDAEs();
 				if (jobData.verbose) {
 					cout << "Original model:" << endl;
 					parser.currentModel->printAllModelTrees();

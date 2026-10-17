@@ -638,7 +638,7 @@ namespace che {
 		}
 
 		void SasComputationModel::modelFlatten() {
-			vector<list<shared_ptr<IdReplaceTable>>> replaceTable(MAX_ID_PEARL);
+			vector<list<shared_ptr<IdReplaceTable>>> replaceTable(ID_HASH_BUCKETS);
 
 			list<shared_ptr<SasModel>>::iterator modelIt;
 			for (modelIt = topModels.begin(); modelIt != topModels.end(); modelIt++) {

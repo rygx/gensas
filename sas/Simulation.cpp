@@ -634,7 +634,7 @@ namespace che {
 					}
 				}
 				if (!noStart.empty()) {
-					const size_t shown = min<size_t>(noStart.size(), 5);
+					const size_t shown = std::min<size_t>(noStart.size(), 5);
 					string names;
 					for (size_t i = 0; i < shown; i++) {
 						names += (i == 0 ? "" : ", ") + noStart[i];

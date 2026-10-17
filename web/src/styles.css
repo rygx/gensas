@@ -361,7 +361,21 @@ summary {
 .result-bar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.result-bar label select {
+  margin-left: 4px;
+}
+.xy-canvas {
+  display: block;
+  width: 100%;
+  height: 420px;
+  touch-action: none;
+}
+.plot3d-hint {
+  font-size: 12px;
+  margin-top: 4px;
 }
 ul.legend {
   display: flex;

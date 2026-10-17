@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Api, ApiError } from "./api";
 import { Editor } from "./Editor";
-import { DiagnosticList, type Edits, ParamsPanel, RunStatus, overrides } from "./Panels";
+import { type AdvancedEdits, advancedErrors, advancedRequest, isAdvancedChanged } from "./advanced";
+import { AdvancedPanel, DiagnosticList, type Edits, ParamsPanel, RunStatus, overrides } from "./Panels";
 import { Plot, colorOf } from "./Plot";
 import { type Settings, loadSettings, loadSource, saveSettings, saveSource } from "./settings";
 import { type CheckResponse, type Diagnostic, type Example, FINISHED, HAS_RESULT, type ModelInfo, type ResultJson, type Run, type Version } from "./types";
@@ -39,6 +40,7 @@ export function App() {
   const [className, setClassName] = useState("");
   const [paramEdits, setParamEdits] = useState<Edits>({});
   const [startEdits, setStartEdits] = useState<Edits>({});
+  const [advanced, setAdvanced] = useState<AdvancedEdits>({});
 
   const [run, setRun] = useState<Run | null>(null);
   const [result, setResult] = useState<ResultJson | null>(null);
@@ -120,8 +122,9 @@ export function App() {
   const errors = diagnostics.filter((d) => d.severity === "error");
   const endValue = Number(endTime);
   const endValid = Number.isFinite(endValue) && endValue > 0;
+  const advancedValid = Object.keys(advancedErrors(advanced)).length === 0;
   const active = run !== null && (run.state === "queued" || run.state === "running");
-  const canRun = version !== null && !active && endValid && source.trim() !== "" && (checked === null || checked.ok);
+  const canRun = version !== null && !active && endValid && advancedValid && source.trim() !== "" && (checked === null || checked.ok);
 
   const start = useCallback(async () => {
     setRunError(null);
@@ -130,10 +133,11 @@ export function App() {
     const controller = new AbortController();
     abort.current = controller;
     try {
+      const adv = advancedRequest(advanced);
       const created = await api.createRun({
-        model: { source, className: className || undefined, parameters: overrides(paramEdits), start: overrides(startEdits) },
-        solver: { endTime: endValue },
-        output: { step: Math.min(1, Math.max(0.001, endValue / 1000)) },
+        model: { source, className: className || undefined, parameters: overrides(paramEdits), start: overrides(startEdits), ...adv.model },
+        solver: { ...adv.solver, endTime: endValue },
+        output: { step: adv.outputStep ?? Math.min(1, Math.max(0.001, endValue / 1000)) },
       });
       setRun(created);
       const final = await api.follow(created.id, setRun, controller.signal);
@@ -147,7 +151,7 @@ export function App() {
     } catch (err) {
       if ((err as Error).name !== "AbortError") setRunError(describe(err));
     }
-  }, [api, source, className, paramEdits, startEdits, endValue]);
+  }, [api, source, className, paramEdits, startEdits, advanced, endValue]);
 
   const cancel = useCallback(async () => {
     if (run) {
@@ -280,6 +284,11 @@ export function App() {
           <details open>
             <summary>Parameters and start values</summary>
             <ParamsPanel info={info} params={paramEdits} start={startEdits} setParams={setParamEdits} setStart={setStartEdits} />
+          </details>
+
+          <details>
+            <summary>Advanced solver settings{isAdvancedChanged(advanced) ? " (changed)" : ""}</summary>
+            <AdvancedPanel edits={advanced} setEdits={setAdvanced} />
           </details>
 
           {result && run && (

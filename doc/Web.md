@@ -8,6 +8,8 @@
 2. Or serve `web/dist` from any web server and open **Server** in the header to enter the address (and the access token, if the server wants one). The choice is remembered in the browser.
 3. Pick an example or type a model. After a short pause the model is checked: errors and warnings appear in the margin and in the list under the editor (click `line N` to jump there). **Run** (or Ctrl+Enter) starts a simulation; **Cancel** stops it.
 4. **Parameters and start values** list what the model declares. Type a new value to change it for the next run (the field is highlighted, **reset** puts the model's value back); the model text is not touched.
+
+   **Advanced solver settings** (below the parameters) change how the solver works for the next run: the longest step, the order of the series, the step shrink tolerance, the error tolerance, the spacing of the result samples, and whether `abs`, `min`, `max` and `sign` are exact (events) or smoothed (with a smoothing width). An empty field uses the default. Each field has the range the engine accepts; a value outside it is marked and the Run button stays disabled. Smaller tolerances and shorter steps are more accurate and slower.
 5. The plot shows the variables ticked above it. **One plot per variable** stacks them when their scales differ. Dashed vertical lines are events. Drag in the plot to zoom, double-click to reset. **CSV** and **MAT** download the full result.
 
 ## Development

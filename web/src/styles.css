@@ -304,42 +304,55 @@ summary {
   padding: 2px 0;
 }
 
-.params table {
+:is(.params, .advanced) table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 8px;
 }
-.params caption {
+:is(.params, .advanced) caption {
   text-align: left;
   color: var(--muted);
   font-size: 12px;
   padding: 6px 0 2px;
 }
-.params td {
+:is(.params, .advanced) td {
   padding: 2px 4px;
 }
-.params td.name {
+:is(.params, .advanced) td.name {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   width: 34%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.params td.unit {
+:is(.params, .advanced) td.unit {
   color: var(--muted);
   width: 15%;
 }
-.params td.reset {
+:is(.params, .advanced) td.reset {
   width: 60px;
   text-align: right;
 }
-.params input {
+:is(.params, .advanced) input {
   width: 100%;
   padding: 3px 8px;
 }
-.params tr.changed input {
+:is(.params, .advanced) tr.changed input {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.advanced td.name {
+  font-family: inherit;
+  width: 40%;
+}
+.advanced td.unit {
+  width: 28%;
+  font-size: 12px;
+}
+.advanced select {
+  width: 100%;
+  padding: 3px 4px;
 }
 
 .results {

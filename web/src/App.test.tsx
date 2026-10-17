@@ -93,7 +93,7 @@ describe("App", () => {
     expect(el.querySelector(".conn.ok")!.textContent).toContain("server 0.1.0");
     expect((el.querySelector("[data-testid=editor]") as HTMLTextAreaElement).value).toContain("model Decay");
     expect(el.querySelector(".status-line .ok-text")!.textContent).toContain("Decay");
-    expect(el.querySelectorAll("td.name").length).toBe(2); // k and x
+    expect(el.querySelectorAll(".params td.name").length).toBe(2); // k and x
   });
 
   it("runs the model with the edited values and shows the result", async () => {
@@ -112,6 +112,34 @@ describe("App", () => {
     expect(el.querySelector("[data-testid=plot]")!.textContent).toBe("x,y");
     expect(el.textContent).toContain("1 event");
     expect(calls.some((c) => c.path.startsWith("/runs/r1/result?format=json&maxPoints="))).toBe(true);
+  });
+
+  it("sends the advanced solver settings and blocks values out of range", async () => {
+    const el = await mount();
+    const input = (label: string) => el.querySelector(`.advanced input[aria-label="${label}"]`) as HTMLInputElement;
+    const type = async (label: string, value: string) => {
+      await act(async () => {
+        input(label).value = value;
+        input(label).dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    await type("Error tolerance", "0.5");
+    expect(input("Error tolerance").className).toContain("invalid");
+    expect((button("Run") as HTMLButtonElement).disabled).toBe(true);
+    await type("Error tolerance", "1e-7");
+    await type("Longest step", "0.25");
+    const mode = el.querySelector(".advanced select") as HTMLSelectElement;
+    await act(async () => {
+      mode.value = "smooth";
+      mode.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await type("Smoothing width", "1e-3");
+    await click(button("Run"));
+    await settle(300);
+    const post = calls.find((c) => c.method === "POST" && c.path === "/runs")!;
+    expect(post.body.solver).toEqual({ errorTol: 1e-7, segment: 0.25, endTime: 4 });
+    expect(post.body.model.piecewise).toBe("smooth");
+    expect(post.body.model.smoothEps).toBe(1e-3);
   });
 
   it("does not run a model with errors and lists them", async () => {

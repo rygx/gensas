@@ -1,3 +1,4 @@
+import { type AdvancedEdits, FIELDS, advancedErrors, piecewiseOf } from "./advanced";
 import type { Diagnostic, ModelInfo, Run } from "./types";
 
 /** The text typed into a value field, kept as text so that "1e" or "-" can be typed on the way. */
@@ -171,6 +172,71 @@ export function RunStatus({ run }: { run: Run | null }) {
             <li key={i}>{w}</li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+export function AdvancedPanel({ edits, setEdits }: { edits: AdvancedEdits; setEdits: (e: AdvancedEdits) => void }) {
+  const errors = advancedErrors(edits);
+  const smooth = piecewiseOf(edits) === "smooth";
+  const set = (key: string, value: string | null) => {
+    const next = { ...edits };
+    if (value === null || value === "") delete next[key];
+    else next[key] = value;
+    setEdits(next);
+  };
+  return (
+    <div class="advanced">
+      <p class="muted">Leave a field empty for the default. Values outside the range are not sent.</p>
+      <table>
+        <tbody>
+          <tr>
+            <td class="name" title="Exact: every sign change is an event the solver lands on. Smooth: rounded corners, no events, for models that switch very often.">
+              abs, min, max, sign
+            </td>
+            <td>
+              <select aria-label="abs, min, max, sign" value={smooth ? "smooth" : "events"} onChange={(e) => set("piecewise", (e.target as HTMLSelectElement).value === "smooth" ? "smooth" : null)}>
+                <option value="events">exact (events)</option>
+                <option value="smooth">smoothed</option>
+              </select>
+            </td>
+            <td class="unit" />
+            <td class="reset" />
+          </tr>
+          {FIELDS.filter((f) => f.key !== "smoothEps" || smooth).map((f) => (
+            <tr key={f.key} class={edits[f.key] !== undefined ? "changed" : ""}>
+              <td class="name" title={f.help}>
+                {f.label}
+              </td>
+              <td>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label={f.label}
+                  title={f.help}
+                  placeholder={f.fallback}
+                  value={edits[f.key] ?? ""}
+                  class={errors[f.key] ? "invalid" : ""}
+                  onInput={(e) => set(f.key, (e.target as HTMLInputElement).value)}
+                />
+              </td>
+              <td class="unit">{errors[f.key] ?? ""}</td>
+              <td class="reset">
+                {edits[f.key] !== undefined && (
+                  <button class="link" onClick={() => set(f.key, null)}>
+                    reset
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {Object.keys(edits).length > 0 && (
+        <button class="link" onClick={() => setEdits({})}>
+          reset all settings
+        </button>
       )}
     </div>
   );

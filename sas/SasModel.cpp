@@ -132,7 +132,7 @@ namespace che {
 			}
 		}
 
-		SasModel::SasModel() : modelTrees(), idTable(), idNecklaces(MAX_ID_PEARL), subModels() {
+		SasModel::SasModel() : modelTrees(), idTable(), idNecklaces(MAX_ID_PEARL + 1), subModels() {
 			errCount = 0;
 			warnCount = 0;
 		}

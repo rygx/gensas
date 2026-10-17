@@ -30,6 +30,7 @@
 #define MAX_ID_LEN 31
 #define MAX_STR_LEN 100
 #define MAX_PRINT_LEN 255
+// A mask: hash & MAX_ID_PEARL is an index from 0 to 255, so a table needs MAX_ID_PEARL + 1 buckets.
 #define MAX_ID_PEARL 255
 #define PRIME1 157
 #define PRIME2 101

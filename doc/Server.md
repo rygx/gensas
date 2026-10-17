@@ -8,8 +8,8 @@
 pip install -r server/requirements.txt
 bash scripts/build_shared_lib.sh /tmp/gensas-lib            # or: bazel build //capi:libgensas.so
 export GENSAS_LIBRARY=/tmp/gensas-lib/libgensas.so
-cd server && python -m gensas_server --port 8765
-curl http://127.0.0.1:8765/version
+cd server && python -m gensas_server --port 8764
+curl http://127.0.0.1:8764/version
 ```
 
 By default it listens on `127.0.0.1` only. To serve other machines use `--host 0.0.0.0` **and a token** (`--token SECRET` or `GENSAS_TOKEN`): every request except `GET /version` then needs `Authorization: Bearer SECRET`. Put the server behind a TLS proxy when it is reachable from the internet. The [deployment guide](Deployment.md) covers the Docker image, a home network and Google Cloud.
@@ -26,7 +26,7 @@ By default it listens on `127.0.0.1` only. To serve other machines use `--host 0
 
 | Flag | Variable | Default | Meaning |
 |---|---|---|---|
-| `--host`, `--port` | `GENSAS_HOST`, `GENSAS_PORT` | `127.0.0.1`, `8765` | where to listen |
+| `--host`, `--port` | `GENSAS_HOST`, `GENSAS_PORT` | `127.0.0.1`, `8764` | where to listen |
 | `--token` | `GENSAS_TOKEN` | none | bearer token required for all requests but `/version` |
 | `--cors-origin` (repeatable) | `GENSAS_CORS_ORIGINS` (comma separated) | local origins when bound to loopback, else none | browser origins allowed to call the API; `*` allows all |
 | `--static-dir` | `GENSAS_STATIC_DIR` | none | serve a built web client at `/` |

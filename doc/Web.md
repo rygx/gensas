@@ -4,7 +4,7 @@
 
 ## Using it
 
-1. Start a server (see [Server](Server.md)): `python -m gensas_server --static-dir ../web/dist` serves the built client at the server's own address, so one command gives you the whole application at `http://127.0.0.1:8765/`.
+1. Start a server (see [Server](Server.md)): `python -m gensas_server --static-dir ../web/dist` serves the built client at the server's own address, so one command gives you the whole application at `http://127.0.0.1:8764/`.
 2. Or serve `web/dist` from any web server and open **Server** in the header to enter the address (and the access token, if the server wants one). The choice is remembered in the browser.
 3. Pick an example or type a model. After a short pause the model is checked: errors and warnings appear in the margin and in the list under the editor (click `line N` to jump there). **Run** (or Ctrl+Enter) starts a simulation; **Cancel** stops it.
 4. **Parameters and start values** list what the model declares. Type a new value to change it for the next run (the field is highlighted, **reset** puts the model's value back); the model text is not touched.

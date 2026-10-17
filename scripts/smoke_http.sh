@@ -2,7 +2,7 @@
 # Checks a running GenSAS server that was started with a token: /version, authentication, a check, a run with its
 # result, and the web client page (when the server serves it).
 #
-# Usage:  bash scripts/smoke_http.sh http://127.0.0.1:8765 TOKEN
+# Usage:  bash scripts/smoke_http.sh http://127.0.0.1:8764 TOKEN
 set -euo pipefail
 
 BASE="${1:?base url}"

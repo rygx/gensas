@@ -5,7 +5,7 @@ A single-page application (Preact, CodeMirror 6, uPlot, built with Vite) for the
 ```bash
 cd web
 npm ci
-npm run dev        # http://localhost:5173, talks to a server at http://127.0.0.1:8765
+npm run dev        # http://localhost:5173, talks to a server at http://127.0.0.1:8764
 npm test           # unit tests
 npm run build      # static files in dist/
 ```

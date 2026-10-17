@@ -1,4 +1,4 @@
-"""Starts the server:  python -m gensas_server --port 8765"""
+"""Starts the server:  python -m gensas_server --port 8764"""
 
 import argparse
 

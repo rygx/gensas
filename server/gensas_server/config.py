@@ -8,7 +8,7 @@ from typing import List, Optional
 @dataclass
 class Config:
     host: str = "127.0.0.1"
-    port: int = 8765
+    port: int = 8764
     token: Optional[str] = None  # if set, requests need "Authorization: Bearer <token>"
     cors_origins: List[str] = field(default_factory=list)  # allowed browser origins; "*" allows all
     static_dir: Optional[str] = None  # a built web client to serve at /

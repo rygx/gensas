@@ -29,6 +29,16 @@ The target of GenSAS is large sparse systems, power grids first of all. The engi
 4. **Client.** The variable tree, the grouped parameters, the model summary.
 5. **Power-flow start values.**
 
+## Run time
+
+[The comparison with conventional integrators](SasComparison.md) shows that GenSAS needs fewer steps for a given error, but that a step is expensive: 20 to 100 microseconds for a few states, against well below one microsecond for a compiled Runge-Kutta step. Against the BDF solver of Modelica tools the run time is comparable, against explicit methods on non-stiff models it is 50 to 200 times worse. Making the step cheaper is the main way to turn the advantage in steps into an advantage in time, and it needs no change of the method. In the order of the profile:
+
+* **The trial evaluations of the step size search.** The solution is evaluated at many trial times; each evaluation of the Pade approximant allocates temporaries. Evaluating on plain arrays, and caching what does not depend on the trial time, should remove most of the 60% of the time that go there.
+* **One factorization per step for larger systems.** Algebraic systems of up to 64 unknowns are factored once per step; larger ones call SuperLU once per order. SuperLU can be called directly to factor once and solve for each order, or another sparse solver used. This matters for the networks of the next section.
+* **The interpretation of the model.** The series arithmetic walks the expression tree of the equations for every coefficient. Compiling the equations into a flat list of operations, or generating code, would cut the cost of the nonlinear terms.
+* **Larger models: measure the scaling.** The ring of machines in the comparison grows like the size to the power 1.2 in time; the number of steps does not depend on the size. A network with algebraic equations, compared with an implicit DAE solver with a sparse linear solver, is the measurement that is still missing.
+* **Accuracy at the top.** `errorTol` stops at 1e-10 and long runs end with errors of 1e-8 (the Kepler orbit), where `DOP853` reaches 1e-10. Whether a smaller tolerance and a higher order are enough, or the accumulation of the error needs attention, has not been looked at.
+
 ## Several runs and parameter sweeps
 
 Typical uses: how does the result depend on one or two parameters; scenarios (the clearing time of a fault); random samples with a fixed seed (Monte Carlo); sensitivity; fitting a parameter to data; the pictures that need many runs, such as a bifurcation diagram.

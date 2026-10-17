@@ -54,7 +54,7 @@ def problem_function(key, ring_n=0):
     from mpmath import mpf, sin
 
     if key == "lorenz":
-        sigma, rho, beta = mpf(10), mpf(28), mpf(8.0 / 3)
+        sigma, rho, beta = mpf(10), mpf(28), mpf(8.0 / 3)  # 8.0 / 3 in double precision, as the model reads it
         return (lambda t, y: [sigma * (y[1] - y[0]), y[0] * (rho - y[2]) - y[1], y[0] * y[1] - beta * y[2]]), [1, 1, 1], 10
     if key == "pendulum":
         return (lambda t, y: [y[1], -sin(y[0])]), [3, 0], 100

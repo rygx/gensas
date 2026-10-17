@@ -53,13 +53,17 @@ class Problem:
         same method at rtol = 1e-12, and another method at rtol = 1e-13), which is pessimistic."""
         if self._reference is not None:
             return self._reference
+        cached = hp.lookup(self.key) if self.key else None
         if self.exact is not None:
             info = (np.array(self.exact, dtype=float), EXACT_UNCERTAINTY, "closed form")
-        elif self.key and hp.lookup(self.key):
-            info = hp.lookup(self.key)
+        elif cached is not None:
+            info = cached
         else:
             def solve(method, rtol, atol):
-                return solve_ivp(self.f, (0, self.T), self.y0, method=method, rtol=rtol, atol=atol).y[:, -1]
+                r = solve_ivp(self.f, (0, self.T), self.y0, method=method, rtol=rtol, atol=atol)
+                if not r.success or r.t[-1] != self.T:
+                    sys.exit("the reference run %s (rtol %g) of %s failed: %s" % (method, rtol, self.title, r.message))
+                return r.y[:, -1]
 
             ref = solve(self.ref_method, 1e-13, 1e-16)
             other = "DOP853" if self.ref_method != "DOP853" else "Radau"
@@ -247,6 +251,8 @@ def compare_events(app, tolerances, targets=(1e-5, 1e-6, 1e-7)):
     cross.direction = -1
     ref = solve_ivp(f, (0, T), [3.0, 0.0], method="DOP853", rtol=1e-13, atol=1e-16, events=cross).t_events[0]
     alt = solve_ivp(f, (0, T), [3.0, 0.0], method="Radau", rtol=1e-13, atol=1e-16, events=cross).t_events[0]
+    if len(ref) != len(alt):
+        sys.exit("the reference runs found %d and %d events" % (len(ref), len(alt)))
     u = max(abs(a - b) for a, b in zip(ref, alt))
     print("\n### Event times: the pendulum above passes th = 0 (downwards) %d times in 100 s\n" % len(ref))
     print("Reference: SciPy DOP853, rtol 1e-13; the difference to Radau at the same tolerance is %.0e s, which bounds what the reference resolves.\n" % u)

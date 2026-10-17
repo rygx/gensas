@@ -26,19 +26,64 @@ import tempfile
 import numpy as np
 from scipy.integrate import solve_ivp
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchmark"))
+import reference as hp  # noqa: E402
+
 ALL_METHODS = ("RK45", "DOP853", "LSODA", "BDF", "Radau")
+# An error that is at most this many times the uncertainty of the reference is not resolved by it.
+RESOLUTION = 10.0
+# The rounding error of a closed form evaluated in double precision.
+EXACT_UNCERTAINTY = 2e-16
 
 
 class Problem:
     def __init__(self, title, model, f, y0, T, names, exact=None, ref_method="DOP853", methods=ALL_METHODS):
         self.title, self.model, self.f, self.y0, self.T, self.names = title, model, f, y0, T, names
         self.exact, self.ref_method, self.methods = exact, ref_method, methods
+        self.key = None  # name in references.json (set below)
+        self._reference = None
+
+    def reference_info(self):
+        """(final state, uncertainty, source) of the reference.
+
+        The uncertainty is the largest error of the reference, scaled like the errors in the tables, that the
+        reference allows. Order of preference: the closed form; a high precision solution from
+        references.json (scripts/benchmark/reference.py); otherwise the solution of SciPy with rtol = 1e-13,
+        whose uncertainty is taken as the largest difference to two other double precision solutions (the
+        same method at rtol = 1e-12, and another method at rtol = 1e-13), which is pessimistic."""
+        if self._reference is not None:
+            return self._reference
+        if self.exact is not None:
+            info = (np.array(self.exact, dtype=float), EXACT_UNCERTAINTY, "closed form")
+        elif self.key and hp.lookup(self.key):
+            info = hp.lookup(self.key)
+        else:
+            def solve(method, rtol, atol):
+                return solve_ivp(self.f, (0, self.T), self.y0, method=method, rtol=rtol, atol=atol).y[:, -1]
+
+            ref = solve(self.ref_method, 1e-13, 1e-16)
+            other = "DOP853" if self.ref_method != "DOP853" else "Radau"
+            alternatives = [solve(self.ref_method, 1e-12, 1e-15), solve("LSODA" if self.ref_method == "Radau" else other, 1e-13, 1e-16)]
+            u = max(scaled_error(a, ref) for a in alternatives)
+            info = (ref, u, "SciPy %s, rtol 1e-13 (uncertainty from two other runs)" % self.ref_method)
+        self._reference = info
+        return info
 
     def reference(self):
-        if self.exact is not None:
-            return np.array(self.exact, dtype=float)
-        r = solve_ivp(self.f, (0, self.T), self.y0, method=self.ref_method, rtol=1e-13, atol=1e-16)
-        return r.y[:, -1]
+        return self.reference_info()[0]
+
+    def uncertainty(self):
+        return self.reference_info()[1]
+
+
+def fmt_error(e, uncertainty):
+    """An error for a table; a dagger marks an error that the reference cannot resolve."""
+    return "%.1e%s" % (e, "†" if e <= RESOLUTION * uncertainty else "")
+
+
+def describe_reference(problem):
+    ref, u, source = problem.reference_info()
+    return "Reference: %s; uncertainty %.0e. A dagger (†) marks an error within %g times the uncertainty, which the reference does not resolve." % (source, u, RESOLUTION)
 
 
 PROBLEMS = {
@@ -126,13 +171,17 @@ def ring_problem(n):
         th, om = y[:n], y[n:]
         return np.concatenate([om, Pv - 0.2 * om + np.sin(np.roll(th, 1) - th) + np.sin(np.roll(th, -1) - th)])
 
-    return Problem(
+    problem = Problem(
         "A ring of %d coupled swing machines (%d states), t = 0 to 20" % (n, 2 * n),
         "\n".join(lines) + "\n", f, [0.0] * (2 * n), 20.0, ["th[%d]" % (i + 1) for i in range(n)] + ["om[%d]" % (i + 1) for i in range(n)],
     )
+    problem.key = "ring%d" % n
+    return problem
 
 
 PROBLEMS["ring"] = ring_problem(20)
+for _key, _problem in PROBLEMS.items():
+    _problem.key = _key if _key != "ring" else "ring20"
 
 EVENT_MODEL = (
     "model P\n  Real th(start = 3.0);\n  Real om(start = 0);\n  discrete Real n(start = 0);\nequation\n"
@@ -171,8 +220,9 @@ def scaled_error(values, ref):
 
 def compare_problem(app, key, tolerances):
     p = PROBLEMS[key]
-    ref = p.reference()
+    ref, u, _ = p.reference_info()
     print("\n### %s\n" % p.title)
+    print(describe_reference(p) + "\n")
     print("| method | steps | error |")
     print("|---|---:|---:|")
     for tol in tolerances:
@@ -180,35 +230,54 @@ def compare_problem(app, key, tolerances):
         if err:
             print("| GenSAS, errorTol %g | %d | failed: %s |" % (tol, steps, err))
         else:
-            print("| GenSAS, errorTol %g | %d | %.1e |" % (tol, steps, scaled_error([final[n] for n in p.names], ref)))
+            print("| GenSAS, errorTol %g | %d | %s |" % (tol, steps, fmt_error(scaled_error([final[n] for n in p.names], ref), u)))
     for m in p.methods:
         for tol in tolerances:
             s = solve_ivp(p.f, (0, p.T), p.y0, method=m, rtol=tol, atol=tol * 1e-3)
             if not s.success:
                 print("| %s, rtol %g | %d | failed: %s |" % (m, tol, len(s.t) - 1, s.message))
             else:
-                print("| %s, rtol %g | %d | %.1e |" % (m, tol, len(s.t) - 1, scaled_error(s.y[:, -1], ref)))
+                print("| %s, rtol %g | %d | %s |" % (m, tol, len(s.t) - 1, fmt_error(scaled_error(s.y[:, -1], ref), u)))
 
 
-def compare_events(app, tolerances):
+def compare_events(app, tolerances, targets=(1e-5, 1e-6, 1e-7)):
     T = 100.0
     f = lambda t, y: [y[1], -np.sin(y[0])]
     cross = lambda t, y: y[0]
     cross.direction = -1
     ref = solve_ivp(f, (0, T), [3.0, 0.0], method="DOP853", rtol=1e-13, atol=1e-16, events=cross).t_events[0]
+    alt = solve_ivp(f, (0, T), [3.0, 0.0], method="Radau", rtol=1e-13, atol=1e-16, events=cross).t_events[0]
+    u = max(abs(a - b) for a, b in zip(ref, alt))
     print("\n### Event times: the pendulum above passes th = 0 (downwards) %d times in 100 s\n" % len(ref))
+    print("Reference: SciPy DOP853, rtol 1e-13; the difference to Radau at the same tolerance is %.0e s, which bounds what the reference resolves.\n" % u)
     print("| method | steps | largest error of an event time (s) |")
     print("|---|---:|---:|")
+    runs = {}  # method -> [(steps, error)]
     for tol in tolerances:
         steps, _, events, err = run_gensas(app, EVENT_MODEL, T, tol)
         bad = err or len(events) != len(ref)
-        print("| GenSAS, errorTol %g | %d | %s |" % (tol, steps, "failed" if bad else "%.1e" % max(abs(a - b) for a, b in zip(events, ref))))
+        e = None if bad else max(abs(a - b) for a, b in zip(events, ref))
+        print("| GenSAS, errorTol %g | %d | %s |" % (tol, steps, "failed" if bad else "%.1e" % e))
+        if not bad:
+            runs.setdefault("GenSAS", []).append((steps, e))
     for m in ("RK45", "DOP853", "LSODA", "Radau"):
         for tol in tolerances:
             s = solve_ivp(f, (0, T), [3.0, 0.0], method=m, rtol=tol, atol=tol * 1e-3, events=cross)
             t = s.t_events[0]
             bad = (not s.success) or len(t) != len(ref)
-            print("| %s, rtol %g | %d | %s |" % (m, tol, len(s.t) - 1, "failed" if bad else "%.1e" % max(abs(a - b) for a, b in zip(t, ref))))
+            e = None if bad else max(abs(a - b) for a, b in zip(t, ref))
+            print("| %s, rtol %g | %d | %s |" % (m, tol, len(s.t) - 1, "failed" if bad else "%.1e" % e))
+            if not bad:
+                runs.setdefault(m, []).append((len(s.t) - 1, e))
+    methods = ["GenSAS", "RK45", "DOP853", "LSODA", "Radau"]
+    print("\nSteps needed for an event-time error of at most the target (the fewest steps among the tolerances tried; winner in bold):\n")
+    print("| error at most (s) | " + " | ".join(methods) + " |")
+    print("|---|" + "---:|" * len(methods))
+    for target in targets:
+        best = {m: min((st for st, e in runs.get(m, []) if e <= target), default=None) for m in methods}
+        fewest = min((v for v in best.values() if v is not None), default=None)
+        cells = ["not reached" if v is None else ("**%d**" % v if v == fewest else "%d" % v) for v in best.values()]
+        print("| %g | %s |" % (target, " | ".join(cells)))
 
 
 def main():

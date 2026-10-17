@@ -27,6 +27,7 @@ include/ and lib/ of SUNDIALS 5 or later (the libraries are linked statically if
 
 import argparse
 import csv
+import json
 import os
 import re
 import subprocess
@@ -113,73 +114,99 @@ def fmt_time(seconds):
 
 
 def benchmark(app, exe, key, problem, tolerances, ring_n, methods):
-    ref = problem.reference()
+    ref, u, _ = problem.reference_info()
 
     def err(v):
         return cmp.scaled_error(list(v), ref)
 
     print("\n### %s\n" % problem.title)
+    print(cmp.describe_reference(problem) + "\n")
     print("| method | steps | error | time (ms) |")
     print("|---|---:|---:|---:|")
+    rows = []
     for tol in tolerances:
         steps, final, t, bad = run_gensas(app, problem.model, problem.T, tol)
         if bad:
             print("| GenSAS, errorTol %g | %d | failed: %s | |" % (tol, steps, bad))
+            rows.append({"method": "gensas", "tol": tol, "steps": steps, "failed": bad})
         else:
-            print("| GenSAS, errorTol %g | %d | %.1e | %s |" % (tol, steps, err([final[n] for n in problem.names]), fmt_time(t)))
+            e = err([final[n] for n in problem.names])
+            print("| GenSAS, errorTol %g | %d | %s | %s |" % (tol, steps, cmp.fmt_error(e, u), fmt_time(t)))
+            rows.append({"method": "gensas", "tol": tol, "steps": steps, "error": e, "seconds": t})
     for m in methods:
         for tol in tolerances:
             r = run_baseline(exe, m, key, tol, ring_n)
             label = {"rk45": "RK45", "dop853": "DOP853", "cvode": "CVODE (BDF)"}[m]
             if r is None:
                 print("| %s, rtol %g | | failed | |" % (label, tol))
+                rows.append({"method": m, "tol": tol, "failed": "failed"})
             else:
-                print("| %s, rtol %g | %d | %.1e | %s |" % (label, tol, r[0], err(r[3]), fmt_time(r[2])))
+                print("| %s, rtol %g | %d | %s | %s |" % (label, tol, r[0], cmp.fmt_error(err(r[3]), u), fmt_time(r[2])))
+                rows.append({"method": m, "tol": tol, "steps": r[0], "error": err(r[3]), "seconds": r[2]})
+    return rows
 
 
-LADDER = [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11, 1e-12, 1e-13]
+# Two tolerances per decade, from 1e-3 to 1e-13; a finer ladder means less overshoot of the target error.
+LADDER = [float("%.3g" % 10 ** (-k / 2)) for k in range(6, 27)]
+GENSAS_RANGE = (1e-10, 1e-3)  # the errorTol values tried for GenSAS
 
 
 def time_to_accuracy(app, exe, key, problem, targets, ring_n, methods):
     """For each target error, the cheapest tolerance of each method that reaches it (a ladder of tolerances is tried)."""
-    ref = problem.reference()
+    ref, u, _ = problem.reference_info()
 
     def err(v):
         return cmp.scaled_error(list(v), ref)
 
+    cache = {}
+
+    def run(name, tol):
+        """(error, steps, seconds) of one run, or None if it failed; every run is done once."""
+        if (name, tol) not in cache:
+            if name == "gensas":
+                steps, final, t, bad = run_gensas(app, problem.model, problem.T, tol)
+                cache[(name, tol)] = None if bad else (err([final[n] for n in problem.names]), steps, t)
+            else:
+                r = run_baseline(exe, name, key, tol, ring_n)
+                cache[(name, tol)] = None if r is None else (err(r[3]), r[0], r[2])
+        return cache[(name, tol)]
+
     rows = {}
     for target in targets:
+        if target <= cmp.RESOLUTION * u:  # the reference cannot tell whether a method reached this
+            rows[target] = None
+            continue
         row = {}
         for name in ["gensas"] + methods:
             found = None
             for tol in LADDER:
-                if name == "gensas":
-                    if tol < 1e-10 or tol > 1e-6:  # the range GenSAS accepts for errorTol
-                        continue
-                    steps, final, t, bad = run_gensas(app, problem.model, problem.T, tol)
-                    if bad:
-                        continue
-                    e, st, sec = err([final[n] for n in problem.names]), steps, t
-                else:
-                    r = run_baseline(exe, name, key, tol, ring_n)
-                    if r is None:
-                        continue
-                    e, st, sec = err(r[3]), r[0], r[2]
-                if e <= target:
-                    found = (st, sec)
+                if name == "gensas" and not GENSAS_RANGE[0] <= tol <= GENSAS_RANGE[1]:
+                    continue
+                r = run(name, tol)
+                if r is not None and r[0] <= target:
+                    found = (r[1], r[2], r[0], tol)
                     break
             row[name] = found
         rows[target] = row
-    return rows
+    best = {}
+    for (name, tol), r in cache.items():
+        if r is not None and (name not in best or r[0] < best[name][0]):
+            best[name] = (r[0], tol)
+    return rows, best
 
 
-def print_accuracy_table(title, results, methods):
+def print_accuracy_table(title, results, methods, problem=None):
     names = ["gensas"] + methods
     labels = {"gensas": "GenSAS", "rk45": "RK45", "dop853": "DOP853", "cvode": "CVODE (BDF)"}
     print("\n### %s\n" % title)
+    if problem is not None:
+        print(cmp.describe_reference(problem) + " Targets within that range are not tried.\n")
     print("| error at most | " + " | ".join(labels[n] + " steps, ms" for n in names) + " |")
     print("|---|" + "---:|" * len(names))
     for target, row in results.items():
+        if row is None:
+            print("| %g | %s |" % (target, " | ".join(["below the accuracy of the reference"] * len(names))))
+            continue
         cells = []
         for n in names:
             f = row[n]
@@ -196,30 +223,42 @@ def main():
     ap.add_argument("--tolerances", nargs="*", type=float, default=[1e-6, 1e-10])
     ap.add_argument("--ring-sizes", nargs="*", type=int, default=[20], help="machines in the ring problem")
     ap.add_argument("--targets", nargs="*", type=float, help="instead of fixed tolerances, report the steps and time each method needs to reach these errors")
+    ap.add_argument("--json", help="also write the results to this file (input of scripts/benchmark/report.py)")
     args = ap.parse_args()
     if not os.path.exists(args.app) and os.path.exists(args.app + ".exe"):
         args.app += ".exe"
     if not os.path.exists(args.app):
         sys.exit("cannot find the application: " + args.app)
+    collected = []
+
+    def run_one(key, prob, ring_n):
+        ref, u, source = prob.reference_info()
+        entry = {"key": prob.key or key, "title": prob.title, "states": len(prob.y0), "reference": {"source": source, "uncertainty": u}}
+        if args.targets:
+            rows, best = time_to_accuracy(args.app, exe, key, prob, args.targets, ring_n, methods)
+            print_accuracy_table(prob.title, rows, methods, prob)
+            entry["mode"] = "ladder"
+            entry["best"] = {m: {"error": v[0], "tol": v[1]} for m, v in best.items()}  # the smallest error over all tolerances tried
+            entry["targets"] = {repr(t): (None if r is None else {m: (None if v is None else {"steps": v[0], "seconds": v[1], "error": v[2], "tol": v[3]}) for m, v in r.items()}) for t, r in rows.items()}
+        else:
+            entry["mode"] = "fixed"
+            entry["rows"] = benchmark(args.app, exe, key, prob, args.tolerances, ring_n, methods)
+        collected.append(entry)
+
     with tempfile.TemporaryDirectory() as d:
         exe = build_baselines(d, args.sundials)
         methods = ["rk45", "dop853"] + (["cvode"] if args.sundials else [])
         for key in args.problems:
             if key == "ring":
                 for n in args.ring_sizes:
-                    prob = cmp.ring_problem(n)
-                    if args.targets:
-                        print_accuracy_table(prob.title, time_to_accuracy(args.app, exe, "ring", prob, args.targets, n, methods), methods)
-                    else:
-                        benchmark(args.app, exe, "ring", prob, args.tolerances, n, methods)
+                    run_one("ring", cmp.ring_problem(n), n)
             elif key in cmp.PROBLEMS:
-                prob = cmp.PROBLEMS[key]
-                if args.targets:
-                    print_accuracy_table(prob.title, time_to_accuracy(args.app, exe, key, prob, args.targets, 0, methods), methods)
-                else:
-                    benchmark(args.app, exe, key, prob, args.tolerances, 0, methods)
+                run_one(key, cmp.PROBLEMS[key], 0)
             else:
                 sys.exit("unknown problem " + key)
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump(collected, f, indent=1)
 
 
 if __name__ == "__main__":

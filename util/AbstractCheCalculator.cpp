@@ -71,6 +71,9 @@ namespace che {
 			const int n = y.n_cols;
 
 			mat x(d, n, fill::zeros);
+			if (n <= 0 || d <= 0) {
+				return x;
+			}
 			std::vector<double> f(n), b(n), temp(n), cr(ct.n_cols), xr(n), yr(n);
 
 			for (int r = 0; r < d; r++) {
@@ -176,7 +179,7 @@ namespace che {
 				const int nn = numerator.n_cols;
 				const int nd = denomenator.n_cols;
 				for (int r = 0; r < nState; r++) {
-					double nv = numerator(r, nn - 1);
+					double nv = nn > 0 ? numerator(r, nn - 1) : 0.0;
 					for (int k = nn - 2; k >= 0; k--) {
 						nv = alpha * nv + numerator(r, k);
 					}

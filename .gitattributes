@@ -1,0 +1,6 @@
+# Files that bash, Docker or xargs read must have LF line endings, also in a Windows checkout with core.autocrlf=true
+# (a CRLF turns `set -o pipefail` into an error and adds a \r to every name in the source list).
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+scripts/solver_sources.txt text eol=lf

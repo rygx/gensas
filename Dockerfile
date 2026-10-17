@@ -27,7 +27,8 @@ COPY io ./io
 COPY util ./util
 COPY capi ./capi
 COPY scripts/build_shared_lib.sh scripts/solver_sources.txt ./scripts/
-RUN bash scripts/build_shared_lib.sh /out
+# (the sed makes the build work from a Windows checkout whose files still have CRLF line endings)
+RUN sed -i 's/\r$//' scripts/build_shared_lib.sh scripts/solver_sources.txt && bash scripts/build_shared_lib.sh /out
 
 # ---- the image that runs ----------------------------------------------------------------
 FROM python:3.12-slim-bookworm

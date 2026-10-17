@@ -534,6 +534,35 @@ static void testStartValueWarning() {
 		CHECK(hasStartWarning(sim, "x"));
 		CHECK(!hasStartWarning(sim, "y"));
 	}
+	// many states: the first five are named, the rest abbreviated
+	{
+		string src = "model M\n";
+		for (int i = 1; i <= 7; i++) {
+			src += "  Real s" + std::to_string(i) + ";\n";
+		}
+		src += "equation\n";
+		for (int i = 1; i <= 7; i++) {
+			src += "  der(s" + std::to_string(i) + ") = -s" + std::to_string(i) + ";\n";
+		}
+		src += "end M;\n";
+		Simulation sim(sourceJob(src.c_str(), 1.0));
+		CHECK(sim.run());
+		int found = 0;
+		for (const string &w : sim.warnings()) {
+			if (w.find("without a start value") != string::npos) {
+				found++;
+				CHECK(w.find(", ...") != string::npos);
+				int named = 0;
+				for (int i = 1; i <= 7; i++) {
+					if (w.find("s" + std::to_string(i)) != string::npos) {
+						named++;
+					}
+				}
+				CHECK_EQ(named, 5);
+			}
+		}
+		CHECK_EQ(found, 1);
+	}
 	{
 		Simulation sim(sourceJob("model M\n  Real x(start = 1);\n  Real y;\nequation\n  der(x) = -x;\n  y = 2*x;\nend M;\n", 1.0));
 		CHECK(sim.run());

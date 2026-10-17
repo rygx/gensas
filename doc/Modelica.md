@@ -214,7 +214,7 @@ A function can be defined before the `model` or inside it, and is called as `pol
   The body assigns discrete variables (`d = expr;`) and re-initializes states with `reinit(x, expr);`.
 * `terminate("message");` in a `when` equation ends the run successfully at that event; the result stops there and records the message.
 * `assert(condition, "message");` in the equation section is checked along the solution (a state event when the condition turns false) and in `when` bodies at the event. A violation stops the run with an error naming the time; with `AssertionLevel.warning` as a third argument it is reported once as a warning and the run goes on. `terminate` and `assert` are not supported inside `if` equations.
-* A simulation whose events accumulate in finite time (Zeno behavior, for example a bouncing ball) stops with an error.
+* A simulation whose events accumulate in finite time (Zeno behavior) stops with an error that names the time. This happens when the model switches infinitely often before some time, as in anything that loses a part of its energy at every impact (a bouncing ball with restitution below 1 never stops bouncing, in the model, before a finite time). Real systems settle there, so the model should say so: end the run with `terminate(...)` in a `when` equation, or put the state at its resting value once it is small (`reinit` in a `when` equation), or run to an end time before the accumulation point.
 
 ## What the solver checks
 

@@ -403,6 +403,7 @@ static void testZenoIsReported() {
 	SasSolutionSet *sol = sim.run(options);
 	CHECK(sol == NULL);
 	CHECK(sim.error().find("Zeno") != string::npos);
+	CHECK(sim.error().find("terminate()") != string::npos); // the message says what to do about it
 	delete sol;
 }
 

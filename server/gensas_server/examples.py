@@ -34,7 +34,7 @@ end Oscillator;
     {
         "id": "bouncing_ball",
         "title": "Bouncing ball",
-        "description": "A state event (the ball reaches the floor) reverses the velocity.",
+        "description": "A state event (the ball reaches the floor) reverses the velocity. The ball loses half its speed at each bounce, so the bounces pile up at about 1.35 s (Zeno behavior); the end time stays before that.",
         "endTime": 1.2,
         "source": """model BouncingBall "Bouncing ball"
   parameter Real g = 9.81;

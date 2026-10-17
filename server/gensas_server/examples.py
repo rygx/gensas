@@ -173,4 +173,26 @@ equation
 end RC;
 """,
     },
+    {
+        "id": "chua",
+        "title": "Chua circuit (chaos)",
+        "description": "Three states and a piecewise linear diode (abs): the double-scroll attractor. A start value changed in the fourth digit gives a different curve after about 30 s. Plot x against z for the attractor.",
+        "endTime": 100.0,
+        "source": """model Chua "Chua circuit, dimensionless form"
+  parameter Real alpha = 15.6;
+  parameter Real beta = 28;
+  parameter Real m0 = -1.143 "slope of the diode in the middle segment";
+  parameter Real m1 = -0.714 "slope of the diode in the outer segments";
+  Real x(start = 0.7) "voltage across the first capacitor";
+  Real y(start = 0) "voltage across the second capacitor";
+  Real z(start = 0) "inductor current";
+  Real h "current through the diode";
+equation
+  h = m1 * x + 0.5 * (m0 - m1) * (abs(x + 1) - abs(x - 1));
+  der(x) = alpha * (y - x - h);
+  der(y) = x - y + z;
+  der(z) = -beta * y;
+end Chua;
+""",
+    },
 ]

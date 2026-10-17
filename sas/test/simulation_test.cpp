@@ -518,6 +518,31 @@ static void testDiagnostics() {
 	}
 }
 
+// Only a state without a start value is reported; an algebraic variable only needs a solver guess.
+static void testStartValueWarning() {
+	auto hasStartWarning = [](Simulation &sim, const string &name) {
+		for (const string &w : sim.warnings()) {
+			if (w.find("without a start value") != string::npos && w.find(name) != string::npos) {
+				return true;
+			}
+		}
+		return false;
+	};
+	{
+		Simulation sim(sourceJob("model M\n  Real x;\n  Real y;\nequation\n  der(x) = -x;\n  y = 2*x;\nend M;\n", 1.0));
+		CHECK(sim.run());
+		CHECK(hasStartWarning(sim, "x"));
+		CHECK(!hasStartWarning(sim, "y"));
+	}
+	{
+		Simulation sim(sourceJob("model M\n  Real x(start = 1);\n  Real y;\nequation\n  der(x) = -x;\n  y = 2*x;\nend M;\n", 1.0));
+		CHECK(sim.run());
+		for (const string &w : sim.warnings()) {
+			CHECK(w.find("start value") == string::npos);
+		}
+	}
+}
+
 int main() {
 	testDiagnostics();
 	testModelInfo();
@@ -533,5 +558,6 @@ int main() {
 	testParseJobOverrides();
 	testOverrides();
 	testWriteResult();
+	testStartValueWarning();
 	return sastest::finish("simulation_test");
 }

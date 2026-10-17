@@ -1364,6 +1364,21 @@ namespace che {
 				}
 			}
 
+			// The matrix of the algebraic variables is the same at every order. For a few unknowns SuperLU's
+			// set-up costs more than the solve, so a small system is factored once, densely, and each order is
+			// two triangular solves.
+			const bool denseAE = nAE > 0 && nAE == nY && nY <= 64;
+			mat luL, luU, luP;
+			if (denseAE) {
+				bool singular = !lu(luL, luU, luP, mat(LHSY));
+				for (int i = 0; i < nY && !singular; i++) {
+					singular = !(std::fabs(luU(i, i)) > 0.0) || !std::isfinite(luU(i, i));
+				}
+				if (singular) {
+					throw std::runtime_error("the matrix of the algebraic equations is singular");
+				}
+			}
+
 			for (int lvl = 1; lvl < options.nLvl; lvl++) {
 				for (int iDE = 0; iDE < nDE; iDE++) {
 					updateDEcoeff(lvl, iDE, sasSol->solution->solution, eqnTable[iDE]->pHead->subs[1], 1.0);
@@ -1377,7 +1392,28 @@ namespace che {
 
 					rhs -= LHSX * sasSol->solution->solution.col(lvl).head(nX);
 
-					sasSol->solution->solution.col(lvl).tail(nY) = spsolve(LHSY, rhs, "superlu");
+					if (denseAE) {
+						// P*A = L*U: forward substitution with the unit lower factor, then back substitution
+						const vec pr = luP * rhs;
+						vec z(nY);
+						for (int i = 0; i < nY; i++) {
+							double acc = pr(i);
+							for (int j = 0; j < i; j++) {
+								acc -= luL(i, j) * z(j);
+							}
+							z(i) = acc;
+						}
+						for (int i = nY - 1; i >= 0; i--) {
+							double acc = z(i);
+							for (int j = i + 1; j < nY; j++) {
+								acc -= luU(i, j) * z(j);
+							}
+							z(i) = acc / luU(i, i);
+						}
+						sasSol->solution->solution.col(lvl).tail(nY) = z;
+					} else {
+						sasSol->solution->solution.col(lvl).tail(nY) = spsolve(LHSY, rhs, "superlu");
+					}
 				}
 			}
 

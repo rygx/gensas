@@ -27,6 +27,8 @@
 #include "util/AbstractCheCalculator.h"
 #include "util/CheCompUtil.h"
 
+#include <vector>
+
 using namespace che::util;
 using namespace che::io;
 
@@ -61,41 +63,60 @@ namespace che {
 			return x;
 		}
 
+		// Solves one Toeplitz system per row with Levinson's recursion. The rows are independent, so each one is
+		// done on plain arrays; the same arithmetic on matrix expressions allocated a dozen temporaries per
+		// step of the recursion and dominated the run time of small models.
 		static mat solveToepLevinson(const mat &ct, const mat &y) {
-			int d = ct.n_rows;
-			int n = y.n_cols;
+			const int d = ct.n_rows;
+			const int n = y.n_cols;
 
-			mat f(d, n, fill::zeros);
-			mat b(d, n, fill::zeros);
-			mat temp(d, n, fill::zeros);
 			mat x(d, n, fill::zeros);
-			vec epsf(d);
-			vec epsb(d);
-			vec epsx(d);
-			vec alphaf(d);
-			vec betaf(d);
-			vec alphab(d);
-			vec betab(d);
+			std::vector<double> f(n), b(n), temp(n), cr(ct.n_cols), xr(n), yr(n);
 
-			f.col(0) = ones<vec>(d) / ct.col(n - 1);
-			b.col(n - 1) = f.col(0);
-			x.col(0) = y.col(0) % f.col(0);
+			for (int r = 0; r < d; r++) {
+				for (int j = 0; j < (int)ct.n_cols; j++) {
+					cr[j] = ct(r, j);
+				}
+				for (int j = 0; j < n; j++) {
+					yr[j] = y(r, j);
+					f[j] = 0.0;
+					b[j] = 0.0;
+					temp[j] = 0.0;
+					xr[j] = 0.0;
+				}
+				f[0] = 1.0 / cr[n - 1];
+				b[n - 1] = f[0];
+				xr[0] = yr[0] * f[0];
 
-			for (int i = 1; i < n; i++) {
-				epsf = sum(f.cols(0, i - 1) % fliplr(ct.cols(n, n + i - 1)), 1);
-				epsb = sum(b.cols(n - i, n - 1) % fliplr(ct.cols(n - i - 1, n - 2)), 1);
-				epsx = sum(x.cols(0, i - 1) % fliplr(ct.cols(n, n + i - 1)), 1);
+				for (int i = 1; i < n; i++) {
+					double epsf = 0.0, epsb = 0.0, epsx = 0.0;
+					for (int k = 0; k < i; k++) {
+						epsf += f[k] * cr[n + i - 1 - k];
+						epsb += b[n - i + k] * cr[n - 2 - k];
+						epsx += xr[k] * cr[n + i - 1 - k];
+					}
+					const double alphaf = 1.0 / (1.0 - epsf * epsb);
+					const double betaf = -epsf * alphaf;
+					const double alphab = -epsb * alphaf;
+					const double betab = alphaf;
 
-				alphaf = ones<vec>(d) / (ones<vec>(d) - epsf % epsb);
-				betaf = -epsf % alphaf;
-				alphab = -epsb % alphaf;
-				betab = alphaf;
-
-				temp.cols(0, i - 1) = f.cols(0, i - 1);
-				f.cols(0, i) = temp.cols(0, i).each_col() % alphaf + b.cols(n - i - 1, n - 1).each_col() % betaf;
-				b.cols(n - i - 1, n - 1) = temp.cols(0, i).each_col() % alphab + b.cols(n - i - 1, n - 1).each_col() % betab;
-
-				x.cols(0, i) += b.cols(n - i - 1, n - 1).each_col() % (y.col(i) - epsx);
+					for (int k = 0; k < i; k++) {
+						temp[k] = f[k];
+					}
+					temp[i] = 0.0;
+					for (int k = 0; k <= i; k++) {
+						const double bk = b[n - i - 1 + k];
+						f[k] = temp[k] * alphaf + bk * betaf;
+						b[n - i - 1 + k] = temp[k] * alphab + bk * betab;
+					}
+					const double ex = yr[i] - epsx;
+					for (int k = 0; k <= i; k++) {
+						xr[k] += b[n - i - 1 + k] * ex;
+					}
+				}
+				for (int j = 0; j < n; j++) {
+					x(r, j) = xr[j];
+				}
 			}
 
 			return x;
@@ -150,7 +171,24 @@ namespace che {
 			if (!ready) {
 				return getPowerSeriesValue(solution, alpha);
 			} else {
-				vec sol = getPowerSeriesValue(numerator, alpha) / getPowerSeriesValue(join_rows(ones<mat>(denomenator.n_rows, 1), denomenator), alpha);
+				// Horner's rule on each row: the numerator, and the denominator 1 + d0*a + d1*a^2 + ...
+				vec sol(nState);
+				const int nn = numerator.n_cols;
+				const int nd = denomenator.n_cols;
+				for (int r = 0; r < nState; r++) {
+					double nv = numerator(r, nn - 1);
+					for (int k = nn - 2; k >= 0; k--) {
+						nv = alpha * nv + numerator(r, k);
+					}
+					double dv = nd > 0 ? denomenator(r, nd - 1) : 1.0;
+					for (int k = nd - 2; k >= 0; k--) {
+						dv = alpha * dv + denomenator(r, k);
+					}
+					if (nd > 0) {
+						dv = alpha * dv + 1.0;
+					}
+					sol(r) = nv / dv;
+				}
 				uvec nfrows = find_nonfinite(sol);
 				if (!nfrows.is_empty()) {
 					sol.rows(nfrows) = getPowerSeriesValue(solution.rows(nfrows), alpha);
@@ -185,15 +223,12 @@ namespace che {
 			this->denomenator = -solveToepLevinson(ttxc, ytxc);
 			this->numerator = augTc.cols(den, num + den - 1);
 
-			/*cout.precision(16);
-			cout.setf(ios::scientific);
-
-			this->denomenator.raw_print(cout, "den");
-			this->numerator.raw_print(cout, "num");*/
-
 			for (int i = 0; i < den; i++) {
-				this->numerator += augTc.cols(den - i - 1, num + den - i - 2).each_col() % this->denomenator.col(i);
-				// this->numerator.raw_print(cout, "num");
+				for (int j = 0; j < num; j++) {
+					for (int r = 0; r < nState; r++) {
+						this->numerator(r, j) += augTc(r, den - i - 1 + j) * this->denomenator(r, i);
+					}
+				}
 			}
 			return true;
 		}

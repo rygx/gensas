@@ -572,6 +572,13 @@ static void testStartValueWarning() {
 	}
 }
 
+// A singular matrix of algebraic equations is an error that says so (small systems are factored densely).
+static void testSingularAlgebraicMatrix() {
+	Simulation sim(sourceJob("model S\n  Real x(start = 1);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  y * 0 = x - 1;\nend S;\n", 1.0));
+	CHECK(!sim.run());
+	CHECK(sim.error().find("singular") != string::npos);
+}
+
 int main() {
 	testDiagnostics();
 	testModelInfo();
@@ -588,5 +595,6 @@ int main() {
 	testOverrides();
 	testWriteResult();
 	testStartValueWarning();
+	testSingularAlgebraicMatrix();
 	return sastest::finish("simulation_test");
 }

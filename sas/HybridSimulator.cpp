@@ -35,6 +35,11 @@ using namespace std;
 namespace che {
 	namespace core {
 
+		// Added to the errors for events that pile up. The cause is in the model, so the message says what to do about it.
+		static const char *const kZenoAdvice =
+			": the model switches infinitely often, or without progress, in a finite time (for example something that loses a part of its energy at every impact, like a bouncing ball). "
+			"Stop the run before this time, or let the model settle explicitly: in a when equation, end the run with terminate() or set the state to its resting value once it is small.";
+
 		HybridSimulator::HybridSimulator(shared_ptr<SasModel> model) : model(model) {}
 
 		bool HybridSimulator::fail(const string &msg) {
@@ -123,7 +128,7 @@ namespace che {
 				closeEvents = (lastEventT >= 0.0 && T - lastEventT < 1e-8 * (1.0 + fabs(T))) ? closeEvents + 1 : 0;
 				if (closeEvents >= 10) {
 					ostringstream os;
-					os << "events accumulate at t=" << T << " (chattering or Zeno behavior)";
+					os << "events accumulate at t=" << T << " (Zeno behavior or chattering)" << kZenoAdvice;
 					fail(os.str());
 					return false;
 				}
@@ -558,7 +563,7 @@ namespace che {
 				stuck = (segEnd - t < 1e-9 * (1.0 + fabs(t))) ? stuck + 1 : 0;
 				if (stuck > 1000) {
 					ostringstream os;
-					os << "the simulation does not advance at t=" << t << " (chattering or Zeno behavior)";
+					os << "the simulation does not advance at t=" << t << " (Zeno behavior or chattering)" << kZenoAdvice;
 					fail(os.str());
 					return NULL;
 				}

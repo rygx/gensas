@@ -572,6 +572,13 @@ static void testStartValueWarning() {
 	}
 }
 
+// A singular matrix of algebraic equations is an error that says so (small systems are factored densely).
+static void testSingularAlgebraicMatrix() {
+	Simulation sim(sourceJob("model S\n  Real x(start = 1);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  y * 0 = x - 1;\nend S;\n", 1.0));
+	CHECK(!sim.run());
+	CHECK(sim.error().find("singular") != string::npos);
+}
+
 // Regression: the identifier and replacement hash tables had 255 buckets but were indexed with values up
 // to 255, so a model with enough names and expressions wrote past the end of a table and crashed.
 static void testManyNames() {
@@ -611,6 +618,7 @@ int main() {
 	testOverrides();
 	testWriteResult();
 	testStartValueWarning();
+	testSingularAlgebraicMatrix();
 	testManyNames();
 	return sastest::finish("simulation_test");
 }

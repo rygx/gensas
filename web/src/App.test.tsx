@@ -11,6 +11,11 @@ vi.mock("./Plot", () => ({
   Plot: (p: { visible: string[]; stacked: boolean }) => <div data-testid="plot">{p.visible.join(",")}{p.stacked ? " stacked" : ""}</div>,
 }));
 
+vi.mock("./PhasePlot", () => ({
+  XYPlot: (p: { x: string; ys: string[] }) => <div data-testid="xy">{p.ys.join(",")} against {p.x}</div>,
+  Plot3D: (p: { x: string; y: string; z: string }) => <div data-testid="p3d">{[p.x, p.y, p.z].join(",")}</div>,
+}));
+
 import { App } from "./App";
 
 const version = { server: "0.1.0", api: 1, engine: { version: "GenSAS", apiVersion: 2 }, authRequired: false, limits: { maxSourceBytes: 1, maxConcurrentRuns: 1, runTimeoutSeconds: 1 } };
@@ -140,6 +145,33 @@ describe("App", () => {
     expect(post.body.solver).toEqual({ errorTol: 1e-7, segment: 0.25, endTime: 4 });
     expect(post.body.model.piecewise).toBe("smooth");
     expect(post.body.model.smoothEps).toBe(1e-3);
+  });
+
+  it("shows the result against a chosen variable and as a 3D trajectory", async () => {
+    const el = await mount();
+    await click(button("Run"));
+    await settle(300);
+    const choose = async (selector: string, value: string) => {
+      const select = el.querySelector(selector) as HTMLSelectElement;
+      await act(async () => {
+        select.value = value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    };
+    await choose("select[aria-label='plot type']", "xy");
+    expect(el.querySelector("[data-testid=plot]")).toBeNull();
+    expect(el.querySelector("[data-testid=xy]")!.textContent).toBe("y against x"); // the first variable is on the axis
+    await choose("select[aria-label='x axis']", "time");
+    expect(el.querySelector("[data-testid=xy]")!.textContent).toBe("x,y against time");
+    await click(el.querySelector(".legend input") as HTMLElement); // untick x
+    expect(el.querySelector("[data-testid=xy]")!.textContent).toBe("y against time");
+    await choose("select[aria-label='plot type']", "3d");
+    expect(el.querySelector(".legend")).toBeNull();
+    expect(el.querySelector("[data-testid=p3d]")!.textContent).toBe("x,y,y"); // two variables only: z repeats the last
+    await choose("select[aria-label='z variable']", "x");
+    expect(el.querySelector("[data-testid=p3d]")!.textContent).toBe("x,y,x");
+    await choose("select[aria-label='plot type']", "time");
+    expect(el.querySelector("[data-testid=plot]")).not.toBeNull();
   });
 
   it("does not run a model with errors and lists them", async () => {

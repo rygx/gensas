@@ -12,6 +12,8 @@
    **Advanced solver settings** (below the parameters) change how the solver works for the next run: the longest step, the order of the series, the step shrink tolerance, the error tolerance, the spacing of the result samples, and whether `abs`, `min`, `max` and `sign` are exact (events) or smoothed (with a smoothing width). An empty field uses the default. Each field has the range the engine accepts; a value outside it is marked and the Run button stays disabled. Smaller tolerances and shorter steps are more accurate and slower.
 5. The plot shows the variables ticked above it. **One plot per variable** stacks them when their scales differ. Dashed vertical lines are events. Drag in the plot to zoom, double-click to reset. **CSV** and **MAT** download the full result.
 
+   The **plot type** above the plot changes what is drawn. *Against time* is the default. *Against a variable (x–y)* puts any variable (or the time) on the x axis and draws the ticked variables against it, for example a phase portrait of a position against a velocity; the dot marks the start of each curve. *3D trajectory* draws three chosen variables as one line from the start (blue) to the end (orange): drag to turn it, scroll to zoom, double-click to reset.
+
 ## Development
 
 ```bash

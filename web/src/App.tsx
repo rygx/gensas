@@ -4,6 +4,7 @@ import { Editor } from "./Editor";
 import { type AdvancedEdits, advancedErrors, advancedRequest, isAdvancedChanged } from "./advanced";
 import { AdvancedPanel, DiagnosticList, type Edits, ParamsPanel, RunStatus, overrides } from "./Panels";
 import { Plot, colorOf } from "./Plot";
+import { Plot3D, XYPlot } from "./PhasePlot";
 import { type Settings, loadSettings, loadSource, saveSettings, saveSource } from "./settings";
 import { type CheckResponse, type Diagnostic, type Example, FINISHED, HAS_RESULT, type ModelInfo, type ResultJson, type Run, type Version } from "./types";
 
@@ -47,6 +48,8 @@ export function App() {
   const [runError, setRunError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [stacked, setStacked] = useState(false);
+  const [view, setView] = useState<"time" | "xy" | "3d">("time");
+  const [axes, setAxes] = useState({ x: "time", a: "", b: "", c: "" });
   const [jump, setJump] = useState<{ line: number } | null>(null);
   const abort = useRef<AbortController | null>(null);
 
@@ -147,6 +150,8 @@ export function App() {
         setResult(r);
         const names = [...Object.keys(r.variables), ...Object.keys(r.discrete)];
         setSelected(names.length <= 6 ? names : names.slice(0, 4));
+        // the variables of the phase portrait and the 3D plot: the first ones
+        setAxes({ x: names.length > 1 ? names[0] : "time", a: names[0] ?? "", b: names[1] ?? names[0] ?? "", c: names[2] ?? names[1] ?? names[0] ?? "" });
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") setRunError(describe(err));
@@ -175,6 +180,7 @@ export function App() {
   }, [canRun, start]);
 
   const allNames = result ? [...Object.keys(result.variables), ...Object.keys(result.discrete)] : [];
+  const data = useMemo(() => (result ? ({ time: result.time, ...result.variables, ...result.discrete } as Record<string, (number | null)[]>) : {}), [result]);
   const toggle = (name: string) => setSelected((s) => (s.includes(name) ? s.filter((n) => n !== name) : [...s, name]));
   const saveConnection = (s: Settings) => {
     saveSettings(s);
@@ -295,9 +301,38 @@ export function App() {
             <div class="results">
               <div class="result-bar">
                 <strong>Result</strong>
-                <label>
-                  <input type="checkbox" checked={stacked} onChange={(e) => setStacked((e.target as HTMLInputElement).checked)} /> one plot per variable
-                </label>
+                <select aria-label="plot type" value={view} onChange={(e) => setView((e.target as HTMLSelectElement).value as typeof view)}>
+                  <option value="time">against time</option>
+                  <option value="xy">against a variable (x–y)</option>
+                  <option value="3d">3D trajectory</option>
+                </select>
+                {view === "time" && (
+                  <label>
+                    <input type="checkbox" checked={stacked} onChange={(e) => setStacked((e.target as HTMLInputElement).checked)} /> one plot per variable
+                  </label>
+                )}
+                {view === "xy" && (
+                  <label>
+                    x axis
+                    <AxisSelect label="x axis" value={axes.x} names={["time", ...allNames]} onChange={(v) => setAxes({ ...axes, x: v })} />
+                  </label>
+                )}
+                {view === "3d" && (
+                  <>
+                    <label>
+                      x
+                      <AxisSelect label="x variable" value={axes.a} names={allNames} onChange={(v) => setAxes({ ...axes, a: v })} />
+                    </label>
+                    <label>
+                      y
+                      <AxisSelect label="y variable" value={axes.b} names={allNames} onChange={(v) => setAxes({ ...axes, b: v })} />
+                    </label>
+                    <label>
+                      z
+                      <AxisSelect label="z variable" value={axes.c} names={allNames} onChange={(v) => setAxes({ ...axes, c: v })} />
+                    </label>
+                  </>
+                )}
                 <span class="spacer" />
                 <button class="link" onClick={async () => download(await api.resultFile(run.id, "csv"), `${info?.name ?? "result"}.csv`)}>
                   CSV
@@ -306,6 +341,7 @@ export function App() {
                   MAT
                 </button>
               </div>
+              {view !== "3d" && (
               <ul class="legend">
                 {allNames.map((n, i) => (
                   <li key={n}>
@@ -317,7 +353,10 @@ export function App() {
                   </li>
                 ))}
               </ul>
-              <Plot result={result} visible={allNames.filter((n) => selected.includes(n))} all={allNames} stacked={stacked} />
+              )}
+              {view === "time" && <Plot result={result} visible={allNames.filter((n) => selected.includes(n))} all={allNames} stacked={stacked} />}
+              {view === "xy" && <XYPlot data={data} all={allNames} x={axes.x} ys={allNames.filter((n) => selected.includes(n) && n !== axes.x)} />}
+              {view === "3d" && <Plot3D data={data} all={allNames} x={axes.a} y={axes.b} z={axes.c} />}
               {result.events.length > 0 && (
                 <details>
                   <summary>{result.events.length} event{result.events.length === 1 ? "" : "s"}</summary>
@@ -346,6 +385,18 @@ export function App() {
         </section>
       </main>
     </div>
+  );
+}
+
+function AxisSelect(props: { label: string; value: string; names: string[]; onChange: (v: string) => void }) {
+  return (
+    <select aria-label={props.label} value={props.value} onChange={(e) => props.onChange((e.target as HTMLSelectElement).value)}>
+      {props.names.map((n) => (
+        <option key={n} value={n}>
+          {n}
+        </option>
+      ))}
+    </select>
   );
 }
 

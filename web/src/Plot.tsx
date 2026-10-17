@@ -1,13 +1,10 @@
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef } from "preact/hooks";
+import { PALETTE, colorOf } from "./colors";
 import type { ResultJson } from "./types";
 
-export const PALETTE = ["#2f6fdb", "#d9480f", "#2b8a3e", "#9c36b5", "#c2255c", "#0b7285", "#e67700", "#5f3dc4", "#495057", "#66a80f"];
-
-export function colorOf(index: number): string {
-  return PALETTE[index % PALETTE.length];
-}
+export { PALETTE, colorOf };
 
 interface Props {
   result: ResultJson;

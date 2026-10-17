@@ -572,6 +572,36 @@ static void testStartValueWarning() {
 	}
 }
 
+// A singular matrix of algebraic equations is an error that says so (small systems are factored densely).
+static void testSingularAlgebraicMatrix() {
+	Simulation sim(sourceJob("model S\n  Real x(start = 1);\n  Real y(start = 1);\nequation\n  der(x) = -x;\n  y * 0 = x - 1;\nend S;\n", 1.0));
+	CHECK(!sim.run());
+	CHECK(sim.error().find("singular") != string::npos);
+}
+
+// Regression: the identifier and replacement hash tables had 255 buckets but were indexed with values up
+// to 255, so a model with enough names and expressions wrote past the end of a table and crashed.
+static void testManyNames() {
+	const int n = 60;
+	string src = "model Ring\n  parameter Real K = 1;\n";
+	for (int i = 1; i <= n; i++) {
+		src += "  Real th" + std::to_string(i) + "(start = 0);\n  Real om" + std::to_string(i) + "(start = 0);\n";
+	}
+	src += "equation\n";
+	for (int i = 1; i <= n; i++) {
+		const int a = i == 1 ? n : i - 1;
+		const int b = i == n ? 1 : i + 1;
+		const string si = std::to_string(i);
+		src += "  der(th" + si + ") = om" + si + ";\n";
+		src += "  der(om" + si + ") = " + (i % 2 ? "0.5" : "-0.5") + " - 0.2*om" + si + " + K*(sin(th" + std::to_string(a) + " - th" + si + ") + sin(th" + std::to_string(b) + " - th" + si + "));\n";
+	}
+	src += "end Ring;\n";
+	Simulation sim(sourceJob(src.c_str(), 2.0));
+	CHECK(sim.run());
+	CHECK(sim.error().empty());
+	CHECK_EQ(sim.result().names.size(), (size_t)(2 * n));
+}
+
 int main() {
 	testDiagnostics();
 	testModelInfo();
@@ -588,5 +618,7 @@ int main() {
 	testOverrides();
 	testWriteResult();
 	testStartValueWarning();
+	testSingularAlgebraicMatrix();
+	testManyNames();
 	return sastest::finish("simulation_test");
 }

@@ -6,15 +6,15 @@ The [server](Server.md) and the [web client](Web.md) are packaged in one Docker 
 
 ```bash
 docker build -t gensas .
-docker run --rm -p 8765:8765 -e GENSAS_TOKEN=change-me gensas
+docker run --rm -p 8764:8764 -e GENSAS_TOKEN=change-me gensas
 ```
 
-Open `http://localhost:8765/`, press **Server** and enter the token. The image runs as an unprivileged user and needs no writable file system except `/tmp`, so this is the stricter way to run it:
+Open `http://localhost:8764/`, press **Server** and enter the token. The image runs as an unprivileged user and needs no writable file system except `/tmp`, so this is the stricter way to run it:
 
 ```bash
 docker run -d --name gensas --restart unless-stopped --read-only --tmpfs /tmp \
   --memory 1g --cpus 1 --pids-limit 256 --cap-drop ALL --security-opt no-new-privileges \
-  -p 8765:8765 -e GENSAS_TOKEN=change-me gensas
+  -p 8764:8764 -e GENSAS_TOKEN=change-me gensas
 ```
 
 `bash scripts/docker_smoke_test.sh` builds the image and checks it (the Docker workflow does the same on every push). The settings are the environment variables of the [server](Server.md#settings); `PORT` is read too, because Cloud Run sets it.
@@ -22,7 +22,7 @@ docker run -d --name gensas --restart unless-stopped --read-only --tmpfs /tmp \
 ## On your computer and at home
 
 * Only you, one machine, no Docker: follow [Server](Server.md) (`python -m gensas_server`), it listens on `127.0.0.1` only. The client from `web/` (`npm run dev`) or the image above both work.
-* Other computers on your home network: run the image (or the server with `--host 0.0.0.0`) on one machine and open `http://<that machine's address>:8765/` from the others. **Always set a token** (`GENSAS_TOKEN`) when the port is reachable by other computers; everything except `/version` then needs it. Do not forward the port on your router: the connection has no encryption, so the token and the models travel in the clear. For access from outside, use a VPN (WireGuard, Tailscale) to your home network, or one of the public set-ups below, which have TLS.
+* Other computers on your home network: run the image (or the server with `--host 0.0.0.0`) on one machine and open `http://<that machine's address>:8764/` from the others. **Always set a token** (`GENSAS_TOKEN`) when the port is reachable by other computers; everything except `/version` then needs it. Do not forward the port on your router: the connection has no encryption, so the token and the models travel in the clear. For access from outside, use a VPN (WireGuard, Tailscale) to your home network, or one of the public set-ups below, which have TLS.
 * Each run is a separate process. Set `GENSAS_MAX_CONCURRENT_RUNS` to the number of CPU cores you want to give it (the default is 2).
 
 ## A public app on Google Cloud
@@ -56,11 +56,11 @@ A small Compute Engine VM running the same image costs a fixed amount each month
 
 ```
 gensas.example.com {
-    reverse_proxy 127.0.0.1:8765
+    reverse_proxy 127.0.0.1:8764
 }
 ```
 
-(then publish the container on `127.0.0.1:8765` only, and set `GENSAS_TRUST_PROXY=1`). Open ports 80 and 443 in the VM's firewall rules and nothing else.
+(then publish the container on `127.0.0.1:8764` only, and set `GENSAS_TRUST_PROXY=1`). Open ports 80 and 443 in the VM's firewall rules and nothing else.
 
 ### Which one
 

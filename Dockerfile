@@ -1,9 +1,9 @@
 # GenSAS server with the web client, in one image.
 #
 #   docker build -t gensas .
-#   docker run --rm -p 8765:8765 -e GENSAS_TOKEN=change-me gensas
+#   docker run --rm -p 8764:8764 -e GENSAS_TOKEN=change-me gensas
 #
-# then open http://localhost:8765/ . See doc/Deployment.md for the LAN and Google Cloud set-ups.
+# then open http://localhost:8764/ . See doc/Deployment.md for the LAN and Google Cloud set-ups.
 
 # ---- the web client ---------------------------------------------------------------------
 FROM node:22-bookworm-slim AS web
@@ -52,7 +52,7 @@ ENV PYTHONPATH=/app/python:/app/server \
     GENSAS_HOST=0.0.0.0
 # Results are written below the temporary directory, so the container also runs with --read-only --tmpfs /tmp.
 USER gensas
-EXPOSE 8765
-# The server listens on $PORT (set by Cloud Run), or $GENSAS_PORT, or 8765.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD python -c "import os, urllib.request as u; u.urlopen('http://127.0.0.1:%s/version' % (os.environ.get('PORT') or os.environ.get('GENSAS_PORT') or '8765'), timeout=4)"
+EXPOSE 8764
+# The server listens on $PORT (set by Cloud Run), or $GENSAS_PORT, or 8764.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD python -c "import os, urllib.request as u; u.urlopen('http://127.0.0.1:%s/version' % (os.environ.get('PORT') or os.environ.get('GENSAS_PORT') or '8764'), timeout=4)"
 CMD ["python", "-m", "gensas_server"]

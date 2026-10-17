@@ -8,7 +8,7 @@ const SOURCE_KEY = "gensas.source";
 
 export function defaultServerUrl(): string {
   if (!import.meta.env.DEV && location.protocol.startsWith("http")) return location.origin; // served by the GenSAS server itself
-  return "http://127.0.0.1:8765";
+  return "http://127.0.0.1:8764";
 }
 
 export function loadSettings(): Settings {

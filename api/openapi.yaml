@@ -14,7 +14,7 @@ info:
     If the server was started with a token, every request except `GET /version` needs the header
     `Authorization: Bearer <token>`.
 servers:
-  - url: http://127.0.0.1:8765
+  - url: http://127.0.0.1:8764
     description: default local server
 
 paths:

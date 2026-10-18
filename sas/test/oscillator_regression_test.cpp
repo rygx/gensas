@@ -63,6 +63,10 @@ static void run(int nLvl, double errorTol) {
 	}
 	std::shared_ptr<SasSolution> st = found.back();
 	arma::vec x = st->solution->getSolValue(10.0 - st->absStart);
+	CHECK(ic < (int)x.n_rows && is < (int)x.n_rows);
+	if (ic >= (int)x.n_rows || is >= (int)x.n_rows) {
+		return;
+	}
 	CHECK_NEAR(x(ic), std::cos(10.0), 1e-3);
 	CHECK_NEAR(x(is), std::sin(10.0), 1e-3);
 }

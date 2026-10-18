@@ -76,7 +76,7 @@ namespace che {
 			// by getSolValue (the analytic derivative of the Pade approximant, or of the power series), not the
 			// value of an approximant built from the differentiated coefficients: the latter is the same function
 			// as the right-hand side of a linear equation and cannot show that the approximant is wrong.
-			virtual vec getDerValue(double alpha, int nRows) = 0;
+			virtual vec getDerValue(double alpha, int nRows = -1) = 0;
 
 			virtual ~CheSolution();
 

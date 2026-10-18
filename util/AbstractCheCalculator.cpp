@@ -189,13 +189,13 @@ namespace che {
 					dv[r] = nd > 0 ? dp[r + (size_t)(nd - 1) * nState] : 1.0;
 				}
 				for (int k = nn - 2; k >= 0; k--) {
-					const double *col = np + (size_t)k * nState;
+					const double *col = numerator.colptr(k);
 					for (int r = 0; r < nState; r++) {
 						s[r] = alpha * s[r] + col[r];
 					}
 				}
 				for (int k = nd - 2; k >= 0; k--) {
-					const double *col = dp + (size_t)k * nState;
+					const double *col = denomenator.colptr(k);
 					for (int r = 0; r < nState; r++) {
 						dv[r] = alpha * dv[r] + col[r];
 					}
@@ -256,17 +256,15 @@ namespace che {
 			const int nd = denomenator.n_cols;
 			vec out(nRows);
 			vec n(nRows, fill::zeros), dn(nRows, fill::zeros), q(nRows, fill::zeros), dq(nRows, fill::zeros);
-			const double *np = numerator.memptr();
-			const double *dp = denomenator.memptr();
 			for (int k = nn - 1; k >= 0; k--) {
-				const double *col = np + (size_t)k * nState;
+				const double *col = numerator.colptr(k);
 				for (int r = 0; r < nRows; r++) {
 					dn[r] = dn[r] * alpha + n[r];
 					n[r] = n[r] * alpha + col[r];
 				}
 			}
 			for (int k = nd - 1; k >= 0; k--) {
-				const double *col = dp + (size_t)k * nState;
+				const double *col = denomenator.colptr(k);
 				for (int r = 0; r < nRows; r++) {
 					dq[r] = dq[r] * alpha + q[r];
 					q[r] = q[r] * alpha + col[r];

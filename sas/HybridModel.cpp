@@ -872,6 +872,28 @@ namespace che {
 			return rels;
 		}
 
+		namespace {
+			void gatherNames(const AstNode *p, set<string> &out) {
+				for (; p != NULL; p = p->next) {
+					if (p->op == OP_ID && p->ty != TY_FUNCTION) {
+						out.insert(idName(p));
+					}
+					gatherNames(p->subs[0], out);
+					gatherNames(p->subs[1], out);
+				}
+			}
+		} // namespace
+
+		set<string> collectGuardNames(const vector<Guard> &guards) {
+			set<string> names;
+			for (const Guard &g : guards) {
+				if (g.dynamic) {
+					gatherNames(g.cond, names);
+				}
+			}
+			return names;
+		}
+
 		bool relationMargin(const AstNode *relation, const HybridEnv &env, double &margin, string &err) {
 			double a, b;
 			if (!env.eval(relation->subs[0], a, err) || !env.eval(relation->subs[1], b, err)) {

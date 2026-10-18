@@ -271,14 +271,33 @@ namespace che {
 					HybridEnv scanEnv = env;
 					map<int, bool> scanCur = cur;
 					bool scanFailed = false;
+					// Only the variables the guards refer to are copied into the environment (a grid model has
+					// hundreds of variables and a few guard variables; a string-keyed map update per variable
+					// and sample dominated the run time), and a solution is evaluated once per sample time.
+					const set<string> guardNames = collectGuardNames(guards);
+					vector<pair<string, int>> scanIdx;
+					for (const pair<string, int> &ni : nameIdx) {
+						if (guardNames.count(ni.first) > 0) {
+							scanIdx.push_back(ni);
+						}
+					}
+					const SasSolution *scanSol = NULL;
+					double scanAlpha = 0.0;
 					auto setEnvAt = [&](const shared_ptr<SasSolution> &sol, double alpha) {
-						arma::vec v = sol->solution->getSolValue(alpha - sol->absStart);
-						for (const pair<string, int> &ni : nameIdx) {
-							if (ni.second >= 0 && ni.second < (int)v.n_rows) {
-								scanEnv.values[ni.first] = v(ni.second);
+						if (scanSol == sol.get() && scanAlpha == alpha) {
+							return;
+						}
+						if (!scanIdx.empty()) {
+							arma::vec v = sol->solution->getSolValue(alpha - sol->absStart);
+							for (const pair<string, int> &ni : scanIdx) {
+								if (ni.second >= 0 && ni.second < (int)v.n_rows) {
+									scanEnv.values[ni.first] = v(ni.second);
+								}
 							}
 						}
 						scanEnv.time = alpha;
+						scanSol = sol.get();
+						scanAlpha = alpha;
 					};
 					auto truthAt = [&](const shared_ptr<SasSolution> &sol, double alpha, map<int, bool> &out) -> bool {
 						setEnvAt(sol, alpha);

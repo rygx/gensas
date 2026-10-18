@@ -167,6 +167,10 @@ namespace che {
 		// two sample times cannot see.
 		std::vector<const AstNode *> collectRelations(const std::vector<Guard> &guards);
 
+		// Names of the variables the conditions of the dynamic guards refer to (identifiers that are not functions).
+		// The simulator copies only these from a solution when it samples the guards.
+		std::set<std::string> collectGuardNames(const std::vector<Guard> &guards);
+
 		// Margin (left side minus right side) of a relation from collectRelations().
 		bool relationMargin(const AstNode *relation, const HybridEnv &env, double &margin, std::string &err);
 

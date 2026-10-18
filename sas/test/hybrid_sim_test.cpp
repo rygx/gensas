@@ -872,7 +872,34 @@ static void testReorderedEquations() {
 	CHECK_NEAR(finalValue(run, "y"), 2.0 * std::exp(-2.0), 1e-4);
 }
 
+// An algebraic equation with many roots (sin(y) = 0.5 in mode A) and a mode B (y = 100) between t = 1 and t = 2.
+// Back in mode A the Newton iteration from the values of mode B (y = 100) would find a root near 100; starting from
+// the last values of mode A finds y = asin(0.5). x(3) = integral of y = 2 asin(0.5) + 100.
+static void testModeMemory() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  discrete Real d(start = 0);\n"
+				  "  Real x(start = 0);\n"
+				  "  Real y(start = 0.5);\n"
+				  "equation\n"
+				  "  der(x) = y;\n"
+				  "  0 = if d < 0.5 then sin(y) - 0.5 else y - 100;\n"
+				  "  when time >= 1 then\n"
+				  "    d = 1;\n"
+				  "  elsewhen time >= 2 then\n"
+				  "    d = 0;\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  3.0)) {
+		return;
+	}
+	CHECK_NEAR(finalValue(run, "y"), std::asin(0.5), 1e-6);
+	CHECK_NEAR(finalValue(run, "x"), 2.0 * std::asin(0.5) + 100.0, 1e-3);
+}
+
 int main() {
+	testModeMemory();
 	testSmoothAbsConverges();
 	testSmoothMinMaxSign();
 	testSmoothSlidingFriction();

@@ -102,7 +102,8 @@ static void testRefactorAndSingular() {
 	d.val = {1.0, 2.0, 1.0, 2.0, 1.0, 1.0};
 	d.val[4] = 3.0;
 	d.val[5] = 4.0;
-	CHECK(lu.factor(d.n, d.colPtr.data(), d.rowIdx.data(), d.val.data()) || !lu.factored());
+	CHECK(!lu.factor(d.n, d.colPtr.data(), d.rowIdx.data(), d.val.data()));
+	CHECK(!lu.factored());
 	// an empty row (no entry in row 2)
 	Csc e;
 	e.n = 3;

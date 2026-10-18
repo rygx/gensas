@@ -1399,8 +1399,15 @@ namespace che {
 			const bool sparseAE = nAE > 0 && nAE == nY && !denseAE;
 			if (sparseAE) {
 				LHSY.sync();
-				const vector<int> colPtr(LHSY.col_ptrs, LHSY.col_ptrs + nY + 1);
-				const vector<int> rowIdx(LHSY.row_indices, LHSY.row_indices + LHSY.n_nonzero);
+				// Armadillo's index type (uword) may be 64 bits wide; the sizes here fit an int.
+				vector<int> colPtr(nY + 1);
+				for (int j = 0; j <= nY; j++) {
+					colPtr[j] = static_cast<int>(LHSY.col_ptrs[j]);
+				}
+				vector<int> rowIdx(LHSY.n_nonzero);
+				for (size_t k = 0; k < rowIdx.size(); k++) {
+					rowIdx[k] = static_cast<int>(LHSY.row_indices[k]);
+				}
 				if (!sparseLU.factor(nY, colPtr.data(), rowIdx.data(), LHSY.values)) {
 					throw std::runtime_error("the matrix of the algebraic equations is singular");
 				}

@@ -103,6 +103,15 @@ namespace che {
 			int_t *asub = intMalloc(nnz);
 			int_t *xa = intMalloc(n + 1);
 			if (a == nullptr || asub == nullptr || xa == nullptr) {
+				if (a != nullptr) {
+					SUPERLU_FREE(a);
+				}
+				if (asub != nullptr) {
+					SUPERLU_FREE(asub);
+				}
+				if (xa != nullptr) {
+					SUPERLU_FREE(xa);
+				}
 				return false;
 			}
 			for (int k = 0; k < nnz; k++) {
@@ -117,6 +126,8 @@ namespace che {
 			std::memset(&s.U, 0, sizeof(SuperMatrix));
 			dCreate_CompCol_Matrix(&A, n, n, nnz, a, asub, xa, SLU_NC, SLU_D, SLU_GE);
 
+			// The permutations and the elimination tree are plain int arrays in every SuperLU version, whatever
+			// int_t is (only the indices of the matrix are int_t).
 			s.permR = (int *)SUPERLU_MALLOC(n * sizeof(int));
 			s.permC = (int *)SUPERLU_MALLOC(n * sizeof(int));
 			int *etree = (int *)SUPERLU_MALLOC(n * sizeof(int));

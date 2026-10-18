@@ -40,7 +40,10 @@ namespace che {
 			SuperMatrix L, U;
 			int *permR = nullptr;
 			int *permC = nullptr;
-			SuperLUStat_t stat;
+
+			~Impl() {
+				release();
+			}
 
 			void release() {
 				if (ok) {
@@ -61,9 +64,7 @@ namespace che {
 
 		SparseLU::SparseLU() : impl(new Impl()) {}
 
-		SparseLU::~SparseLU() {
-			impl->release();
-		}
+		SparseLU::~SparseLU() = default;
 
 		bool SparseLU::factored() const {
 			return impl->ok;
@@ -73,7 +74,7 @@ namespace che {
 			Impl &s = *impl;
 			s.release();
 			s.n = n;
-			if (n <= 0) {
+			if (n <= 0 || colPtr == nullptr || rowIdx == nullptr || values == nullptr || colPtr[0] != 0) {
 				return false;
 			}
 			const int nnz = colPtr[n];
@@ -131,19 +132,28 @@ namespace che {
 			s.permR = (int *)SUPERLU_MALLOC(n * sizeof(int));
 			s.permC = (int *)SUPERLU_MALLOC(n * sizeof(int));
 			int *etree = (int *)SUPERLU_MALLOC(n * sizeof(int));
+			if (s.permR == nullptr || s.permC == nullptr || etree == nullptr) {
+				if (etree != nullptr) {
+					SUPERLU_FREE(etree);
+				}
+				Destroy_CompCol_Matrix(&A);
+				s.release();
+				return false;
+			}
+			SuperLUStat_t stat;
 			superlu_options_t options;
 			set_default_options(&options);
 			options.ColPerm = COLAMD;
 			get_perm_c(options.ColPerm, &A, s.permC);
-			StatInit(&s.stat);
+			StatInit(&stat);
 			sp_preorder(&options, &A, s.permC, etree, &AC);
 			GlobalLU_t glu;
 			int_t info = 0;
-			dgstrf(&options, &AC, sp_ienv(2), sp_ienv(1), etree, nullptr, 0, s.permC, s.permR, &s.L, &s.U, &glu, &s.stat, &info);
+			dgstrf(&options, &AC, sp_ienv(2), sp_ienv(1), etree, nullptr, 0, s.permC, s.permR, &s.L, &s.U, &glu, &stat, &info);
 			SUPERLU_FREE(etree);
 			Destroy_CompCol_Permuted(&AC);
 			Destroy_CompCol_Matrix(&A);
-			StatFree(&s.stat);
+			StatFree(&stat);
 			if (info != 0) {
 				// info > 0: a zero pivot (L and U may not have been built; SuperLU can leave its workspace
 				// allocated on this path, which is accepted for an error that ends the run)
@@ -171,15 +181,16 @@ namespace che {
 
 		bool SparseLU::solve(double *b) {
 			Impl &s = *impl;
-			if (!s.ok) {
+			if (!s.ok || b == nullptr) {
 				return false;
 			}
 			SuperMatrix B;
 			dCreate_Dense_Matrix(&B, s.n, 1, b, s.n, SLU_DN, SLU_D, SLU_GE);
-			StatInit(&s.stat);
+			SuperLUStat_t stat;
+			StatInit(&stat);
 			int_t info = 0;
-			dgstrs(NOTRANS, &s.L, &s.U, s.permC, s.permR, &B, &s.stat, &info);
-			StatFree(&s.stat);
+			dgstrs(NOTRANS, &s.L, &s.U, s.permC, s.permR, &B, &stat, &info);
+			StatFree(&stat);
 			Destroy_SuperMatrix_Store(&B);
 			return info == 0;
 		}

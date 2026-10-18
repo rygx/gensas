@@ -28,7 +28,6 @@
 #define _Che_SparseLU_H
 
 #include <memory>
-#include <vector>
 
 namespace che {
 	namespace core {

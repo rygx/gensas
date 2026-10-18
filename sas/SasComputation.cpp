@@ -308,7 +308,7 @@ namespace che {
 					if (tk == TK_F_DER) {
 						if (p->subs[1]->op == OP_ID && p->subs[1]->ty != TY_FUNCTION) {
 							if (locator->type == LOCATOR_STATE && p->subs[1]->index != -1) {
-								return locator->der(p->subs[1]->index);
+								return (*locator->der)(p->subs[1]->index);
 							} else {
 								char *b = (char *)p->subs[1]->value.p;
 								return locator->findDerValue(b, strlen(b));
@@ -325,7 +325,7 @@ namespace che {
 			} else if (p->op == OP_ID) {
 				if (locator != NULL) {
 					if (locator->type == LOCATOR_STATE && p->index != -1) {
-						return locator->state(p->index);
+						return (*locator->state)(p->index);
 					} else {
 						char *b = (char *)p->value.p;
 						return locator->findVarValue(b, strlen(b));
@@ -1382,14 +1382,24 @@ namespace che {
 			// set-up costs more than the solve, so a small system is factored once, densely, and each order is
 			// two triangular solves.
 			const bool denseAE = nAE > 0 && nAE == nY && nY <= 64;
-			mat luL, luU, luP;
+			mat luL, luU;
+			vector<int> luPerm; // row i of the permuted system is row luPerm[i] of the original
 			if (denseAE) {
+				mat luP;
 				bool singular = !lu(luL, luU, luP, mat(LHSY));
 				for (int i = 0; i < nY && !singular; i++) {
 					singular = !(std::fabs(luU(i, i)) > 0.0) || !std::isfinite(luU(i, i));
 				}
 				if (singular) {
 					throw std::runtime_error("the matrix of the algebraic equations is singular");
+				}
+				luPerm.assign(nY, 0);
+				for (int i = 0; i < nY; i++) {
+					for (int j = 0; j < nY; j++) {
+						if (luP(i, j) != 0.0) {
+							luPerm[i] = j;
+						}
+					}
 				}
 			}
 
@@ -1412,37 +1422,47 @@ namespace che {
 					throw std::runtime_error("the matrix of the algebraic equations is singular");
 				}
 			}
+			LHSX.sync();
 
+			// The buffers of the loop over the orders are allocated once per step.
+			vec rhs(nAE), z(nAE);
 			for (int lvl = 1; lvl < options.nLvl; lvl++) {
 				for (int iDE = 0; iDE < nDE; iDE++) {
 					updateDEcoeff(lvl, iDE, sasSol->solution->solution, eqnTable[iDE]->pHead->subs[1], 1.0);
 				}
 
 				if (nAE > 0) {
-					vec rhs(nAE, fill::zeros);
+					rhs.zeros();
 					for (int iAE = 0; iAE < nAE; iAE++) {
 						updateAERHS(lvl, iAE, sasSol->solution->solution, rhs, eqnTable[nDE + iAE]->pHead, 1.0);
 					}
 
-					rhs -= LHSX * sasSol->solution->solution.col(lvl).head(nX);
+					// rhs -= LHSX * (the differential part of this order), over the nonzeros of LHSX
+					const double *xCol = sasSol->solution->solution.colptr(lvl);
+					for (int c = 0; c < nX; c++) {
+						const double xc = xCol[c];
+						for (arma::uword k = LHSX.col_ptrs[c]; k < LHSX.col_ptrs[c + 1]; k++) {
+							rhs[LHSX.row_indices[k]] -= LHSX.values[k] * xc;
+						}
+					}
 
 					if (denseAE) {
 						// P*A = L*U: forward substitution with the unit lower factor, then back substitution
-						const vec pr = luP * rhs;
-						vec z(nY);
+						const double *l = luL.memptr(), *u = luU.memptr();
+						double *zp = z.memptr();
 						for (int i = 0; i < nY; i++) {
-							double acc = pr(i);
+							double acc = rhs[luPerm[i]];
 							for (int j = 0; j < i; j++) {
-								acc -= luL(i, j) * z(j);
+								acc -= l[i + (size_t)j * nY] * zp[j];
 							}
-							z(i) = acc;
+							zp[i] = acc;
 						}
 						for (int i = nY - 1; i >= 0; i--) {
-							double acc = z(i);
+							double acc = zp[i];
 							for (int j = i + 1; j < nY; j++) {
-								acc -= luU(i, j) * z(j);
+								acc -= u[i + (size_t)j * nY] * zp[j];
 							}
-							z(i) = acc / luU(i, i);
+							zp[i] = acc / u[i + (size_t)i * nY];
 						}
 						sasSol->solution->solution.col(lvl).tail(nY) = z;
 					} else if (sparseAE) {
@@ -1685,8 +1705,8 @@ namespace che {
 
 		void IdLocator::setStates(const arma::vec &state, const arma::vec &der) {
 			type = LOCATOR_STATE;
-			this->state = state;
-			this->der = der;
+			this->state = &state;
+			this->der = &der;
 		}
 
 		void IdLocator::unsetStates() {
@@ -1701,7 +1721,7 @@ namespace che {
 			if (this->type == LOCATOR_INIT) {
 				return id->value.d;
 			} else if (this->type == LOCATOR_STATE) {
-				return state(id->index);
+				return (*state)(id->index);
 			} else {
 				return NAN;
 			}
@@ -1715,7 +1735,7 @@ namespace che {
 			if (this->type == LOCATOR_INIT) {
 				return id->derVal.d;
 			} else if (this->type == LOCATOR_STATE) {
-				return der(id->index);
+				return (*der)(id->index);
 			} else {
 				return NAN;
 			}

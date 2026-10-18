@@ -175,25 +175,41 @@ namespace che {
 				return getPowerSeriesValue(solution, alpha);
 			} else {
 				// Horner's rule on each row: the numerator, and the denominator 1 + d0*a + d1*a^2 + ...
+				// The loop over the rows is the inner one, over contiguous memory (column-major storage).
 				vec sol(nState);
+				vec den(nState);
 				const int nn = numerator.n_cols;
 				const int nd = denomenator.n_cols;
+				double *s = sol.memptr();
+				double *dv = den.memptr();
+				const double *np = numerator.memptr();
+				const double *dp = denomenator.memptr();
 				for (int r = 0; r < nState; r++) {
-					double nv = nn > 0 ? numerator(r, nn - 1) : 0.0;
-					for (int k = nn - 2; k >= 0; k--) {
-						nv = alpha * nv + numerator(r, k);
-					}
-					double dv = nd > 0 ? denomenator(r, nd - 1) : 1.0;
-					for (int k = nd - 2; k >= 0; k--) {
-						dv = alpha * dv + denomenator(r, k);
-					}
-					if (nd > 0) {
-						dv = alpha * dv + 1.0;
-					}
-					sol(r) = nv / dv;
+					s[r] = nn > 0 ? np[r + (size_t)(nn - 1) * nState] : 0.0;
+					dv[r] = nd > 0 ? dp[r + (size_t)(nd - 1) * nState] : 1.0;
 				}
-				uvec nfrows = find_nonfinite(sol);
-				if (!nfrows.is_empty()) {
+				for (int k = nn - 2; k >= 0; k--) {
+					const double *col = np + (size_t)k * nState;
+					for (int r = 0; r < nState; r++) {
+						s[r] = alpha * s[r] + col[r];
+					}
+				}
+				for (int k = nd - 2; k >= 0; k--) {
+					const double *col = dp + (size_t)k * nState;
+					for (int r = 0; r < nState; r++) {
+						dv[r] = alpha * dv[r] + col[r];
+					}
+				}
+				bool finite = true;
+				for (int r = 0; r < nState; r++) {
+					if (nd > 0) {
+						dv[r] = alpha * dv[r] + 1.0;
+					}
+					s[r] /= dv[r];
+					finite = finite && std::isfinite(s[r]);
+				}
+				if (!finite) {
+					uvec nfrows = find_nonfinite(sol);
 					sol.rows(nfrows) = getPowerSeriesValue(solution.rows(nfrows), alpha);
 					numerator.rows(nfrows) = solution.submat(nfrows, regspace<uvec>(0, this->num - 1));
 					denomenator.rows(nfrows).fill(0.0);

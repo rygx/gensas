@@ -224,8 +224,9 @@ namespace che {
 		public:
 			int type = LOCATOR_INIT;
 			std::list<std::shared_ptr<SasModel>> searchDomain;
-			arma::vec state;
-			arma::vec der;
+			// The state and its derivative, owned by the caller and valid while the locator is used.
+			const arma::vec *state = nullptr;
+			const arma::vec *der = nullptr;
 
 			IdLocator(const std::list<std::shared_ptr<SasModel>> &);
 

@@ -350,6 +350,10 @@ static void testGuards() {
 		CHECK(guards[1].kind == G_WHEN && guards[1].dynamic);
 		CHECK(guards[2].kind == G_WHEN && !guards[2].dynamic);
 	}
+	// Only the variable of the dynamic guard (when h < 0) is needed to sample the guards, not v, g or up.
+	std::set<std::string> guardNames = collectGuardNames(guards);
+	CHECK_EQ(guardNames.size(), (size_t)1);
+	CHECK(guardNames.count("h") == 1);
 	std::vector<WhenClause> clauses = collectWhenClauses(*p.model);
 	CHECK_EQ(clauses.size(), (size_t)2);
 	if (clauses.size() == 2) {

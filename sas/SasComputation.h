@@ -193,6 +193,9 @@ namespace che {
 			// the Pade approximant of the derivative is built once for a series, not once per call.
 			vec calcDiff(CheSolution *solution, double alpha, CheSolution *derSol = nullptr);
 
+			// The residual of the equations for a given state and derivative.
+			vec calcDiffAt(const arma::vec &state, const arma::vec &der);
+
 			// Why the equations are undefined at a point of a solution (a function argument outside its
 			// domain); empty if nothing is found.
 			std::string describeDomainViolation(CheSolution *solution, double alpha);
@@ -224,7 +227,7 @@ namespace che {
 
 			IdLocator(const std::list<std::shared_ptr<SasModel>> &);
 
-			void setStates(arma::vec &, arma::vec &);
+			void setStates(const arma::vec &, const arma::vec &);
 
 			void unsetStates();
 

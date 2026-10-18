@@ -1264,7 +1264,6 @@ namespace che {
 		}
 
 		vec SasComputationModel::calcDiff(CheSolution *solution, double alpha, CheSolution *derSol) {
-			vec diff(nDE + nAE, fill::zeros);
 			vec state = solution->getSolValue(alpha);
 			std::unique_ptr<CheSolution> ownDerSol;
 			if (derSol == nullptr) {
@@ -1272,6 +1271,11 @@ namespace che {
 				derSol = ownDerSol.get();
 			}
 			vec der = derSol->getSolValue(alpha);
+			return calcDiffAt(state, der);
+		}
+
+		vec SasComputationModel::calcDiffAt(const vec &state, const vec &der) {
+			vec diff(nDE + nAE, fill::zeros);
 			list<shared_ptr<SasModel>> tempList;
 			IdLocator locator(tempList);
 			/*state.print("state");
@@ -1321,10 +1325,18 @@ namespace che {
 				}
 			};
 
+			// The residual of the equations at the initial state. Only that state is in the series so far, so
+			// the solution and its derivative at the start are the initial state and zero, with no need to
+			// build a Pade approximant of either.
+			auto residualAtStart = [&]() {
+				vec state = sasSol->solution->solution.col(0);
+				vec der(state.n_rows, fill::zeros);
+				return calcDiffAt(state, der);
+			};
+
 			if (nAE > 0) {
 				// Check and calibrate AE imbalances.
-				resetPade();
-				vec diff = calcDiff(sasSol->solution, 0.0);
+				vec diff = residualAtStart();
 				vec initY = sasSol->solution->solution.col(0).tail(nY);
 				vec diffAE = diff.tail(nAE);
 				double diffMax = maxAbsEntry(diffAE);
@@ -1341,16 +1353,14 @@ namespace che {
 							singular = true;
 							break;
 						}
-						resetPade();
-						diff = calcDiff(sasSol->solution, 0.0);
+						diff = residualAtStart();
 						diffAE = diff.tail(nAE);
 						diffMax = maxAbsEntry(diffAE);
 						iter++;
 					}
 					if (singular || (diffMax > tol / 10 && iter >= maxIter) || !std::isfinite(diffMax)) { // if not good, then restore original solution.
 						sasSol->solution->solution.col(0).tail(nY) = initY;
-						resetPade();
-						const double before = maxAbsEntry(calcDiff(sasSol->solution, 0.0).tail(nAE));
+						const double before = maxAbsEntry(residualAtStart().tail(nAE));
 						if (!(before < 1e-4)) {
 							string why = describeDomainViolation(sasSol->solution, 0.0);
 							if (!why.empty()) {
@@ -1604,7 +1614,7 @@ namespace che {
 
 		IdLocator::IdLocator(const std::list<std::shared_ptr<SasModel>> &searchDomain) : searchDomain(searchDomain) {}
 
-		void IdLocator::setStates(arma::vec &state, arma::vec &der) {
+		void IdLocator::setStates(const arma::vec &state, const arma::vec &der) {
 			type = LOCATOR_STATE;
 			this->state = state;
 			this->der = der;

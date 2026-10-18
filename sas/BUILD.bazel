@@ -137,6 +137,21 @@ cc_library(
     ]
 )
 
+# A sparse LU factorization (SuperLU) that is factored once and solved many times. It includes the
+# SuperLU headers only, not Armadillo.
+cc_library(
+    name = "sas_sparse_lu_lib",
+    hdrs = [
+        "SparseLU.h",
+    ],
+    srcs = [
+        "SparseLU.cpp",
+    ],
+    deps = [
+        "//:superlu_lib",
+    ],
+)
+
 # TODO - rygx: verify armadillo works with superlu
 # can be done with a test solving an equation.
 cc_library(
@@ -150,6 +165,7 @@ cc_library(
     deps = [
         ":sas_lexico_lib",
         ":sas_result_types_lib",
+        ":sas_sparse_lu_lib",
         "//util:abstract_che_calculator_lib",
         "//:superlu_lib",
     ]

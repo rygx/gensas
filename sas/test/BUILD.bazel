@@ -157,3 +157,13 @@ cc_test(
         "//io:mat_psat_rw_lib",
     ],
 )
+
+# The sparse LU factorization against dense solves.
+cc_test(
+    name = "sparse_lu_test",
+    srcs = ["sparse_lu_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_sparse_lu_lib",
+    ],
+)

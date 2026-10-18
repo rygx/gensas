@@ -1,0 +1,199 @@
+//
+// Copyright (C) 2022, UChicago Argonne, LLC. All rights reserved.
+//
+// Software Name: Generic Semi-Analytical Simulation Tool (GenSAS)
+// By: Argonne National Laboratory
+// OPEN SOURCE LICENSE
+//
+// Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+// 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+//
+//
+// ******************************************************************************************************
+// DISCLAIMER
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+// PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+// DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+// OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// ***************************************************************************************************
+//
+#include "sas/SparseLU.h"
+
+#include "slu_ddefs.h"
+
+#include <cstring>
+#include <vector>
+
+namespace che {
+	namespace core {
+
+		struct SparseLU::Impl {
+			int n = 0;
+			bool ok = false;
+			SuperMatrix L, U;
+			int *permR = nullptr;
+			int *permC = nullptr;
+
+			~Impl() {
+				release();
+			}
+
+			void release() {
+				if (ok) {
+					Destroy_SuperNode_Matrix(&L);
+					Destroy_CompCol_Matrix(&U);
+					ok = false;
+				}
+				if (permR != nullptr) {
+					SUPERLU_FREE(permR);
+					permR = nullptr;
+				}
+				if (permC != nullptr) {
+					SUPERLU_FREE(permC);
+					permC = nullptr;
+				}
+			}
+		};
+
+		SparseLU::SparseLU() : impl(new Impl()) {}
+
+		SparseLU::~SparseLU() = default;
+
+		bool SparseLU::factored() const {
+			return impl->ok;
+		}
+
+		bool SparseLU::factor(int n, const int *colPtr, const int *rowIdx, const double *values) {
+			Impl &s = *impl;
+			s.release();
+			s.n = n;
+			if (n <= 0 || colPtr == nullptr || rowIdx == nullptr || values == nullptr || colPtr[0] != 0) {
+				return false;
+			}
+			const int nnz = colPtr[n];
+
+			// SuperLU's pivoting reads past its arrays for an empty column, so a matrix with an empty
+			// column or row (structurally singular) is rejected here.
+			std::vector<char> rowUsed(n, 0);
+			for (int j = 0; j < n; j++) {
+				if (colPtr[j + 1] <= colPtr[j]) {
+					return false;
+				}
+				for (int k = colPtr[j]; k < colPtr[j + 1]; k++) {
+					if (rowIdx[k] < 0 || rowIdx[k] >= n) {
+						return false;
+					}
+					rowUsed[rowIdx[k]] = 1;
+				}
+			}
+			for (int i = 0; i < n; i++) {
+				if (!rowUsed[i]) {
+					return false;
+				}
+			}
+
+			// SuperLU takes over the arrays of the matrix (Destroy_CompCol_Matrix frees them).
+			double *a = doubleMalloc(nnz);
+			int_t *asub = intMalloc(nnz);
+			int_t *xa = intMalloc(n + 1);
+			if (a == nullptr || asub == nullptr || xa == nullptr) {
+				if (a != nullptr) {
+					SUPERLU_FREE(a);
+				}
+				if (asub != nullptr) {
+					SUPERLU_FREE(asub);
+				}
+				if (xa != nullptr) {
+					SUPERLU_FREE(xa);
+				}
+				return false;
+			}
+			for (int k = 0; k < nnz; k++) {
+				a[k] = values[k];
+				asub[k] = rowIdx[k];
+			}
+			for (int j = 0; j <= n; j++) {
+				xa[j] = colPtr[j];
+			}
+			SuperMatrix A, AC;
+			std::memset(&s.L, 0, sizeof(SuperMatrix));
+			std::memset(&s.U, 0, sizeof(SuperMatrix));
+			dCreate_CompCol_Matrix(&A, n, n, nnz, a, asub, xa, SLU_NC, SLU_D, SLU_GE);
+
+			// The permutations and the elimination tree are plain int arrays in every SuperLU version, whatever
+			// int_t is (only the indices of the matrix are int_t).
+			s.permR = (int *)SUPERLU_MALLOC(n * sizeof(int));
+			s.permC = (int *)SUPERLU_MALLOC(n * sizeof(int));
+			int *etree = (int *)SUPERLU_MALLOC(n * sizeof(int));
+			if (s.permR == nullptr || s.permC == nullptr || etree == nullptr) {
+				if (etree != nullptr) {
+					SUPERLU_FREE(etree);
+				}
+				Destroy_CompCol_Matrix(&A);
+				s.release();
+				return false;
+			}
+			SuperLUStat_t stat;
+			superlu_options_t options;
+			set_default_options(&options);
+			options.ColPerm = COLAMD;
+			get_perm_c(options.ColPerm, &A, s.permC);
+			StatInit(&stat);
+			sp_preorder(&options, &A, s.permC, etree, &AC);
+			GlobalLU_t glu;
+			int_t info = 0;
+			dgstrf(&options, &AC, sp_ienv(2), sp_ienv(1), etree, nullptr, 0, s.permC, s.permR, &s.L, &s.U, &glu, &stat, &info);
+			SUPERLU_FREE(etree);
+			Destroy_CompCol_Permuted(&AC);
+			Destroy_CompCol_Matrix(&A);
+			StatFree(&stat);
+			if (info != 0) {
+				// info > 0: a zero pivot (L and U may not have been built; SuperLU can leave its workspace
+				// allocated on this path, which is accepted for an error that ends the run)
+				if (s.L.Store != nullptr) {
+					Destroy_SuperNode_Matrix(&s.L);
+					s.L.Store = nullptr;
+				}
+				if (s.U.Store != nullptr) {
+					Destroy_CompCol_Matrix(&s.U);
+					s.U.Store = nullptr;
+				}
+				if (s.permR != nullptr) {
+					SUPERLU_FREE(s.permR);
+					s.permR = nullptr;
+				}
+				if (s.permC != nullptr) {
+					SUPERLU_FREE(s.permC);
+					s.permC = nullptr;
+				}
+				return false;
+			}
+			s.ok = true;
+			return true;
+		}
+
+		bool SparseLU::solve(double *b) {
+			Impl &s = *impl;
+			if (!s.ok || b == nullptr) {
+				return false;
+			}
+			SuperMatrix B;
+			dCreate_Dense_Matrix(&B, s.n, 1, b, s.n, SLU_DN, SLU_D, SLU_GE);
+			SuperLUStat_t stat;
+			StatInit(&stat);
+			int_t info = 0;
+			dgstrs(NOTRANS, &s.L, &s.U, s.permC, s.permR, &B, &stat, &info);
+			StatFree(&stat);
+			Destroy_SuperMatrix_Store(&B);
+			return info == 0;
+		}
+
+	} // namespace core
+} // namespace che

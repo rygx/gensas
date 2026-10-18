@@ -10,6 +10,7 @@ sas/HybridModel
 sas/HybridSimulator
 sas/Simulation
 capi/gensas
+sas/SparseLU
 sas/SasComputation
 sas/SasResult
 sas/SasResultMat

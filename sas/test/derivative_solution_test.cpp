@@ -89,12 +89,14 @@ static void checkRows(int type) {
 	};
 	std::unique_ptr<CheSolution> sol = make(), ref = make();
 	const std::vector<int> rows = {5, 0, 4, 2, 2};
-	for (double alpha : {0.0, 0.3, 0.9, 1.0}) {
+	// (alpha = 1 is the pole of row 4: after it the row stays on its power series, and so the values at 0.3 again)
+	for (double alpha : {0.0, 0.3, 0.9, 1.0, 0.3, 1.0}) {
 		const arma::vec some = sol->getSolValueRows(alpha, rows);
 		const arma::vec all = ref->getSolValue(alpha);
 		CHECK_EQ((int)some.n_rows, (int)rows.size());
 		for (size_t i = 0; i < rows.size() && i < some.n_rows; i++) {
-			CHECK_EQ(some(i), all(rows[i]));
+			// (not bitwise: a compiler may fuse the multiply and add of the Horner sums differently in the two loops)
+			CHECK_NEAR(some(i), all(rows[i]), 1e-12 * (1.0 + std::fabs(all(rows[i]))));
 		}
 	}
 	CHECK_EQ((int)sol->getSolValueRows(0.5, std::vector<int>()).n_rows, 0);

@@ -77,6 +77,21 @@ namespace che {
 			vector<WhenClause> clauses = collectWhenClauses(*model);
 			unique_ptr<SasSolutionSet> total(new SasSolutionSet());
 			map<string, double> state; // continuous variables by name, from the previous segment and reinits
+			// The continuous variables at the end of the last segment of each mode (the values of the discrete variables),
+			// to start the algebraic variables from when a mode is entered again (the voltages after a fault is cleared are
+			// close to those before it, not to those during it).
+			map<string, map<string, double>> modeSnapshot; // names of the algebraic variables to values
+			bool allowStartHint = true;
+			string previousModeKey;
+			auto modeKey = [&]() {
+				ostringstream os;
+				os.precision(17);
+				for (const string &n : env.discrete) {
+					const auto it = env.values.find(n);
+					os << n << '=' << (it != env.values.end() ? it->second : 0.0) << ';';
+				}
+				return os.str();
+			};
 			vector<string> stateNames; // names of the continuous variables, to detect structure changes
 			map<int, bool> cur;		   // truth of the dynamic guards
 			int closeEvents = 0;	   // consecutive events within 1e-8 of each other, to detect chattering
@@ -242,8 +257,39 @@ namespace che {
 							}
 						}
 					}
+					// Returning to a mode that was active before (a fault is cleared, a line is reconnected): the algebraic
+					// variables start from the values at the end of the last time in that mode, not from the values of
+					// the mode just left (the voltages are about 1 again, not close to zero as during the fault).
+					const string segmentModeKey = modeKey();
+					vector<shared_ptr<IdPearl>> hintedIds;
+					bool hinted = false;
+					if (allowStartHint && !previousModeKey.empty() && segmentModeKey != previousModeKey) {
+						map<string, map<string, double>>::const_iterator snap = modeSnapshot.find(segmentModeKey);
+						if (snap != modeSnapshot.end()) {
+							for (const shared_ptr<IdPearl> &id : cm.idTable) {
+								if ((id->idTy == ID_VAR || id->idTy == ID_IVAR) && id->str != NULL) {
+									map<string, double>::const_iterator v = snap->second.find((const char *)id->str);
+									if (v != snap->second.end()) {
+										id->value.d = v->second;
+										id->initVal = true;
+										hintedIds.push_back(id);
+										hinted = true;
+									}
+								}
+							}
+						}
+					}
 					comp->preprocessModels();
 					comp->generateDAEs();
+					// An override that turned out to be for a state in this mode is undone (continuity of the states).
+					for (const shared_ptr<IdPearl> &id : hintedIds) {
+						if (id->index >= 0 && id->index < comp->nX) {
+							map<string, double>::const_iterator it = state.find((const char *)id->str);
+							if (it != state.end()) {
+								id->value.d = it->second;
+							}
+						}
+					}
 					if (comp->nX != comp->nDE || comp->nY != comp->nAE) {
 						fail("the DAE is not well defined: states/differential equations and algebraic variables/equations do not match");
 						return NULL;
@@ -511,6 +557,13 @@ namespace che {
 						};
 					}
 					unique_ptr<SasSolutionSet> sols(comp->solve(opts));
+					if (hinted && sols->solutionLink.empty() && sols->stalled && !sols->cancelled) {
+						// The values of the earlier mode did not lead to a solution: once more from the values
+						// of the mode just left.
+						allowStartHint = false;
+						continue;
+					}
+					allowStartHint = true;
 					if (scanFailed) {
 						return NULL;
 					}
@@ -560,6 +613,14 @@ namespace che {
 					if (!sols->solutionLink.empty()) {
 						shared_ptr<SasSolution> last = sols->solutionLink.back();
 						arma::vec v = last->solution->getSolValue(max(0.0, min(segEnd, last->absEnd) - last->absStart));
+						map<string, double> algebraic;
+						for (const shared_ptr<IdPearl> &id : comp->idTable) {
+							if ((id->idTy == ID_VAR || id->idTy == ID_IVAR) && id->str != NULL && id->index >= comp->nX && id->index < (int)v.n_rows) {
+								algebraic[(const char *)id->str] = v(id->index);
+							}
+						}
+						modeSnapshot[segmentModeKey] = algebraic;
+						previousModeKey = segmentModeKey;
 						for (const shared_ptr<IdPearl> &id : comp->idTable) {
 							if ((id->idTy == ID_VAR || id->idTy == ID_IVAR) && id->index >= 0 && id->index < (int)v.n_rows) {
 								state[(const char *)id->str] = v(id->index);

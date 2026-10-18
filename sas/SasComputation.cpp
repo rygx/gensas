@@ -1401,29 +1401,78 @@ namespace che {
 			if (nAE > 0) {
 				// Check and calibrate AE imbalances.
 				vec diff = residualAtStart();
-				vec initY = sasSol->solution->solution.col(0).tail(nY);
+				const vec initY = sasSol->solution->solution.col(0).tail(nY);
 				vec diffAE = diff.tail(nAE);
 				double diffMax = maxAbsEntry(diffAE);
 				if (diffMax > tol / 2) {
-					// Newton's method; the Jacobian is rebuilt at each iterate.
-					int iter = 0;
-					int maxIter = 10;
-					bool singular = false;
-					while (diffMax > tol / 10 && iter < maxIter) {
-						try {
-							buildLHS(sasSol->solution->solution.col(0));
-							sasSol->solution->solution.col(0).tail(nY) -= spsolve(LHSY, diffAE);
-						} catch (const std::runtime_error &) {
-							singular = true;
-							break;
+					mat &col0Y = sasSol->solution->solution; // (only the first column is used below)
+					auto setY = [&](const vec &y) { col0Y.col(0).tail(nY) = y; };
+					// Newton's method from the values y0; the Jacobian is rebuilt at each iterate. With `damped` the
+					// step is halved until the largest residual decreases (many iterations are allowed).
+					// Returns whether the residual is below the tolerance; the iterate is left in the solution.
+					auto newton = [&](const vec &y0, bool damped) -> bool {
+						setY(y0);
+						diffAE = residualAtStart().tail(nAE);
+						double cur = maxAbsEntry(diffAE);
+						// an iterate this far from the starting values has diverged (and a factorization of the
+						// matrix there can crash SuperLU)
+						const double yDivergence = 1e6 * (1.0 + maxAbsEntry(y0));
+						const int maxIter = damped ? 100 : 10;
+						for (int iter = 0; iter < maxIter && std::isfinite(cur) && cur > tol / 10; iter++) {
+							vec dy;
+							try {
+								buildLHS(col0Y.col(0));
+								if (!LHSY.is_finite() || maxAbsEntry(col0Y.col(0).tail(nY)) > yDivergence) {
+									return false;
+								}
+								dy = spsolve(LHSY, diffAE);
+							} catch (const std::exception &) {
+								return false;
+							}
+							if (dy.n_elem != static_cast<arma::uword>(nY) || !dy.is_finite()) {
+								return false;
+							}
+							const vec yNow = col0Y.col(0).tail(nY);
+							double lambda = 1.0;
+							bool accepted = false;
+							for (int ls = 0; ls < (damped ? 30 : 1); ls++) {
+								setY(yNow - lambda * dy);
+								vec trial;
+								double next;
+								try {
+									trial = residualAtStart().tail(nAE);
+									next = maxAbsEntry(trial);
+								} catch (const std::exception &) {
+									if (!damped) {
+										return false; // leave the domain error to the damped pass (and the final report)
+									}
+									next = std::numeric_limits<double>::quiet_NaN(); // outside the domain: shorten the step
+								}
+								if (!damped || (std::isfinite(next) && next < (1.0 - 1e-4 * lambda) * cur)) {
+									diffAE = trial;
+									cur = next;
+									accepted = true;
+									break;
+								}
+								lambda *= 0.5;
+							}
+							if (!accepted) {
+								return false;
+							}
 						}
-						diff = residualAtStart();
-						diffAE = diff.tail(nAE);
-						diffMax = maxAbsEntry(diffAE);
-						iter++;
+						diffMax = cur;
+						return std::isfinite(cur) && cur <= tol / 10;
+					};
+					// The plain iteration first (as always), then the damped one.
+					bool solved = newton(initY, false);
+					if (!solved) {
+						solved = newton(initY, true);
+						if (solved && options.log != nullptr) {
+							*options.log << "The damped Newton iteration found a consistent set of algebraic variables" << endl;
+						}
 					}
-					if (singular || (diffMax > tol / 10 && iter >= maxIter) || !std::isfinite(diffMax)) { // if not good, then restore original solution.
-						sasSol->solution->solution.col(0).tail(nY) = initY;
+					if (!solved) { // if not good, then restore original solution.
+						setY(initY);
 						const double before = maxAbsEntry(residualAtStart().tail(nAE));
 						if (!(before < 1e-4)) {
 							string why = describeDomainViolation(sasSol->solution, 0.0);

@@ -29,6 +29,11 @@ import tempfile
 import numpy as np
 from scipy.integrate import solve_ivp
 
+try:
+    from mpmath import mp, mpf
+except ImportError:
+    sys.exit("this script needs mpmath (pip install mpmath)")
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import compare_with_scipy as cmp  # noqa: E402
 
@@ -61,6 +66,8 @@ def run_gensas(app, model, T, tol, extra=()):
             return steps, {}, text[-1] if text else "failed"
         with open(out, newline="", encoding="utf-8") as f:
             rows = list(csv.reader(f))
+        if len(rows) < 2:
+            return steps, {}, "the output file has no data rows"
         return steps, {n: float(v) for n, v in zip(rows[0], rows[-1])}, ""
 
 
@@ -80,8 +87,6 @@ def experiment_steps(app, T=100.0, tol=1e-6):
 
 def taylor_y2(y1, y2, terms=120):
     """Taylor coefficients of y2 for the Robertson problem about a state, in high precision."""
-    from mpmath import mp, mpf
-
     mp.dps = 60
     a1, a2 = [mpf(y1)], [mpf(y2)]
     for k in range(terms):
@@ -103,7 +108,10 @@ def experiment_radius(t=5.0):
     print("|---:|---:|---:|---:|")
     for rel in (0, 1e-3, 1e-5, 1e-7, 1e-9, 1e-11):
         a = taylor_y2(y1, y2 * (1 + rel))
-        rho = 1.0 / float(max(abs(a[k]) ** (1.0 / k) for k in range(60, 120) if a[k] != 0))
+        roots = [abs(a[k]) ** (1.0 / k) for k in range(60, 120) if a[k] != 0]
+        if not roots:
+            sys.exit("all Taylor coefficients 60 to 120 are zero")
+        rho = 1.0 / float(max(roots))
         print("| %s | %.3e | %.1f | %s |" % ("0" if rel == 0 else "%.0e" % rel, rho, rho * lam, "" if rel == 0 else "%.1f" % np.log(1 / rel)))
 
 

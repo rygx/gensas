@@ -240,7 +240,9 @@ namespace che {
 				double segEnd = timeEvent ? te : options.endTime;
 				double dynT = -1.0; // time of a detected state event, if any
 
-				if (segEnd - t > options.alphaTol) {
+				// A stretch between two events is integrated however short it is (alphaTol is the resolution of the step
+				// size search, not a minimum length); only a stretch that does not exceed the rounding of the time is skipped.
+				if (segEnd - t > 1e-9 * (1.0 + fabs(t))) {
 					shared_ptr<SasComputationModel> comp = make_shared<SasComputationModel>();
 					comp->log = options.log;
 					comp->generateCompModel(model);

@@ -77,6 +77,31 @@ static double finalValue(Run &run, const char *name) {
 	return it != run.sim->finalValues().end() ? it->second : NAN;
 }
 
+// Two events closer together than alphaTol (1e-4 here): the short stretch between them must be integrated, not skipped.
+// x' = -x, so x(2) = exp(-2) whatever the events do.
+static void testEventsCloserThanAlphaTol() {
+	Run run;
+	if (!simulate(run,
+				  "model M\n"
+				  "  discrete Real d(start = 0);\n"
+				  "  Real x(start = 1);\n"
+				  "equation\n"
+				  "  der(x) = -x;\n"
+				  "  when time >= 1 then\n"
+				  "    d = 1;\n"
+				  "  end when;\n"
+				  "  when time >= 1.00005 then\n"
+				  "    d = 2;\n"
+				  "  end when;\n"
+				  "end M;\n",
+				  2.0)) {
+		return;
+	}
+	CHECK_EQ(run.sim->events().size(), (size_t)2);
+	CHECK_NEAR(finalValue(run, "x"), std::exp(-2.0), 1e-7);
+	CHECK_NEAR(finalValue(run, "d"), 2.0, 1e-12);
+}
+
 // A discrete gain changes at t = 1: x(2) = exp(-1) * exp(-3).
 static void testDiscreteGainSwitch() {
 	Run run;
@@ -899,6 +924,7 @@ static void testModeMemory() {
 }
 
 int main() {
+	testEventsCloserThanAlphaTol();
 	testModeMemory();
 	testSmoothAbsConverges();
 	testSmoothMinMaxSign();

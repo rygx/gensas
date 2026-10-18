@@ -1274,7 +1274,7 @@ namespace che {
 			return calcDiffAt(state, der);
 		}
 
-		vec SasComputationModel::calcDiffAt(vec &state, vec &der) {
+		vec SasComputationModel::calcDiffAt(const vec &state, const vec &der) {
 			vec diff(nDE + nAE, fill::zeros);
 			list<shared_ptr<SasModel>> tempList;
 			IdLocator locator(tempList);
@@ -1614,7 +1614,7 @@ namespace che {
 
 		IdLocator::IdLocator(const std::list<std::shared_ptr<SasModel>> &searchDomain) : searchDomain(searchDomain) {}
 
-		void IdLocator::setStates(arma::vec &state, arma::vec &der) {
+		void IdLocator::setStates(const arma::vec &state, const arma::vec &der) {
 			type = LOCATOR_STATE;
 			this->state = state;
 			this->der = der;

@@ -194,7 +194,7 @@ namespace che {
 			vec calcDiff(CheSolution *solution, double alpha, CheSolution *derSol = nullptr);
 
 			// The residual of the equations for a given state and derivative.
-			vec calcDiffAt(arma::vec &state, arma::vec &der);
+			vec calcDiffAt(const arma::vec &state, const arma::vec &der);
 
 			// Why the equations are undefined at a point of a solution (a function argument outside its
 			// domain); empty if nothing is found.
@@ -227,7 +227,7 @@ namespace che {
 
 			IdLocator(const std::list<std::shared_ptr<SasModel>> &);
 
-			void setStates(arma::vec &, arma::vec &);
+			void setStates(const arma::vec &, const arma::vec &);
 
 			void unsetStates();
 

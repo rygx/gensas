@@ -48,9 +48,9 @@ int main() {
 	int ix = -1, iy = -1;
 	for (size_t i = 0; i < cm->idTable.size(); i++) {
 		if (std::strcmp((const char *)cm->idTable[i]->str, "x") == 0)
-			ix = (int)i;
+			ix = cm->idTable[i]->index;
 		if (std::strcmp((const char *)cm->idTable[i]->str, "y") == 0)
-			iy = (int)i;
+			iy = cm->idTable[i]->index;
 	}
 	CHECK(ix >= 0 && iy >= 0);
 	auto found = sol->findSasSolution(2.0);

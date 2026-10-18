@@ -1444,7 +1444,7 @@ namespace che {
 									next = maxAbsEntry(trial);
 								} catch (const std::exception &) {
 									if (!damped) {
-										throw; // the plain iteration reports the error as before
+										return false; // leave the domain error to the damped pass (and the final report)
 									}
 									next = std::numeric_limits<double>::quiet_NaN(); // outside the domain: shorten the step
 								}

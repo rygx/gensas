@@ -87,7 +87,8 @@ namespace che {
 				ostringstream os;
 				os.precision(17);
 				for (const string &n : env.discrete) {
-					os << n << '=' << env.values.at(n) << ';';
+					const auto it = env.values.find(n);
+					os << n << '=' << (it != env.values.end() ? it->second : 0.0) << ';';
 				}
 				return os.str();
 			};

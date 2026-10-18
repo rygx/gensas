@@ -1426,10 +1426,10 @@ namespace che {
 									return false;
 								}
 								dy = spsolve(LHSY, diffAE);
-							} catch (const std::runtime_error &) {
+							} catch (const std::exception &) {
 								return false;
 							}
-							if (!dy.is_finite()) {
+							if (dy.n_elem != static_cast<arma::uword>(nY) || !dy.is_finite()) {
 								return false;
 							}
 							const vec yNow = col0Y.col(0).tail(nY);
@@ -1437,8 +1437,17 @@ namespace che {
 							bool accepted = false;
 							for (int ls = 0; ls < (damped ? 30 : 1); ls++) {
 								setY(yNow - lambda * dy);
-								const vec trial = residualAtStart().tail(nAE);
-								const double next = maxAbsEntry(trial);
+								vec trial;
+								double next;
+								try {
+									trial = residualAtStart().tail(nAE);
+									next = maxAbsEntry(trial);
+								} catch (const std::exception &) {
+									if (!damped) {
+										throw; // the plain iteration reports the error as before
+									}
+									next = std::numeric_limits<double>::quiet_NaN(); // outside the domain: shorten the step
+								}
 								if (!damped || (std::isfinite(next) && next < (1.0 - 1e-4 * lambda) * cur)) {
 									diffAE = trial;
 									cur = next;

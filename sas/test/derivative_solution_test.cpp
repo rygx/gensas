@@ -50,7 +50,6 @@ static void check(int type) {
 	CHECK_EQ(big->nState, nState);
 }
 
-
 // getDerValue is the analytic derivative of the evaluated solution (for a Pade approximant, the derivative of
 // the approximant itself): it matches a central difference of getSolValue.
 static void checkAnalyticDerivative(int type) {

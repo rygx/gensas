@@ -50,8 +50,10 @@ static void run(int nLvl, double errorTol) {
 	SasComputationModel *cm = sol->solutionLink.back()->linkCompModel;
 	int ic = -1, is = -1;
 	for (size_t i = 0; i < cm->idTable.size(); i++) {
-		if (std::strcmp((const char *)cm->idTable[i]->str, "c") == 0) ic = (int)i;
-		if (std::strcmp((const char *)cm->idTable[i]->str, "s") == 0) is = (int)i;
+		if (std::strcmp((const char *)cm->idTable[i]->str, "c") == 0)
+			ic = (int)i;
+		if (std::strcmp((const char *)cm->idTable[i]->str, "s") == 0)
+			is = (int)i;
 	}
 	CHECK(ic >= 0 && is >= 0);
 	auto found = sol->findSasSolution(10.0);

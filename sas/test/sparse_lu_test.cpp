@@ -93,6 +93,23 @@ static void testRefactorAndSingular() {
 	CHECK(!lu.solve(b.data()));
 	CHECK(lu.factor(a.n, a.colPtr.data(), a.rowIdx.data(), a.val.data()));
 	CHECK(lu.solve(b.data()));
+
+	// two equal columns: singular with no empty column or row
+	Csc d;
+	d.n = 3;
+	d.colPtr = {0, 2, 4, 6};
+	d.rowIdx = {0, 1, 0, 1, 1, 2};
+	d.val = {1.0, 2.0, 1.0, 2.0, 1.0, 1.0};
+	d.val[4] = 3.0;
+	d.val[5] = 4.0;
+	CHECK(lu.factor(d.n, d.colPtr.data(), d.rowIdx.data(), d.val.data()) || !lu.factored());
+	// an empty row (no entry in row 2)
+	Csc e;
+	e.n = 3;
+	e.colPtr = {0, 1, 2, 3};
+	e.rowIdx = {0, 1, 1};
+	e.val = {1.0, 1.0, 1.0};
+	CHECK(!lu.factor(e.n, e.colPtr.data(), e.rowIdx.data(), e.val.data()));
 }
 
 int main() {

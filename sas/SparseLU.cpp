@@ -28,6 +28,9 @@
 
 #include "slu_ddefs.h"
 
+#include <cstring>
+#include <vector>
+
 namespace che {
 	namespace core {
 
@@ -75,6 +78,26 @@ namespace che {
 			}
 			const int nnz = colPtr[n];
 
+			// SuperLU's pivoting reads past its arrays for an empty column, so a matrix with an empty
+			// column or row (structurally singular) is rejected here.
+			std::vector<char> rowUsed(n, 0);
+			for (int j = 0; j < n; j++) {
+				if (colPtr[j + 1] <= colPtr[j]) {
+					return false;
+				}
+				for (int k = colPtr[j]; k < colPtr[j + 1]; k++) {
+					if (rowIdx[k] < 0 || rowIdx[k] >= n) {
+						return false;
+					}
+					rowUsed[rowIdx[k]] = 1;
+				}
+			}
+			for (int i = 0; i < n; i++) {
+				if (!rowUsed[i]) {
+					return false;
+				}
+			}
+
 			// SuperLU takes over the arrays of the matrix (Destroy_CompCol_Matrix frees them).
 			double *a = doubleMalloc(nnz);
 			int_t *asub = intMalloc(nnz);
@@ -90,6 +113,8 @@ namespace che {
 				xa[j] = colPtr[j];
 			}
 			SuperMatrix A, AC;
+			std::memset(&s.L, 0, sizeof(SuperMatrix));
+			std::memset(&s.U, 0, sizeof(SuperMatrix));
 			dCreate_CompCol_Matrix(&A, n, n, nnz, a, asub, xa, SLU_NC, SLU_D, SLU_GE);
 
 			s.permR = (int *)SUPERLU_MALLOC(n * sizeof(int));
@@ -109,12 +134,13 @@ namespace che {
 			Destroy_CompCol_Matrix(&A);
 			StatFree(&s.stat);
 			if (info != 0) {
-				// info > 0: a zero pivot at that column (L and U are not valid then); info < 0: bad argument
-				if (info > 0) {
-					if (info <= n) {
-						Destroy_SuperNode_Matrix(&s.L);
-						Destroy_CompCol_Matrix(&s.U);
-					}
+				// info > 0: a zero pivot (L and U may not have been built; SuperLU can leave its workspace
+				// allocated on this path, which is accepted for an error that ends the run)
+				if (s.L.Store != nullptr) {
+					Destroy_SuperNode_Matrix(&s.L);
+				}
+				if (s.U.Store != nullptr) {
+					Destroy_CompCol_Matrix(&s.U);
 				}
 				if (s.permR != nullptr) {
 					SUPERLU_FREE(s.permR);

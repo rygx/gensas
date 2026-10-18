@@ -149,9 +149,11 @@ namespace che {
 				// allocated on this path, which is accepted for an error that ends the run)
 				if (s.L.Store != nullptr) {
 					Destroy_SuperNode_Matrix(&s.L);
+					s.L.Store = nullptr;
 				}
 				if (s.U.Store != nullptr) {
 					Destroy_CompCol_Matrix(&s.U);
+					s.U.Store = nullptr;
 				}
 				if (s.permR != nullptr) {
 					SUPERLU_FREE(s.permR);

@@ -211,6 +211,8 @@ namespace che {
 			static const size_t MAX_SOLVER_WARNINGS = 10;
 			// Why the last segment could not advance (see SasSolutionSet::stalled).
 			std::string stallReason;
+			// The length of the previous step of the run; the search for the next one starts there.
+			double lastStep = 0.0;
 
 			shared_ptr<SasSolution> solveSegment(const vec &init, double curAlpha, double seg, const SasComputationOptions &options);
 		};

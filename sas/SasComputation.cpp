@@ -1588,7 +1588,7 @@ namespace che {
 			// coefficients of the other variables are computed forward as before, and the two are iterated until
 			// they agree. The method applies when the variable is on its slow manifold to within the error
 			// tolerance (otherwise the transient is real and the forward series, which resolves it, is used).
-			if (options.stableSeries && nX > 0 && nX == nDE && options.nLvl >= 10) {
+			if (options.stableSeries && nX > 0 && nX == nDE && nAE == nY && options.nLvl >= 10) {
 				mat &sol = sasSol->solution->solution;
 				const int N = options.nLvl - 1;
 				const double dMin = 2.0 * (N + 1);

@@ -232,6 +232,10 @@ namespace che {
 			double lastStep = 0.0;
 			// Steps whose series was computed backwards for fast variables (diagnostics, see solveSegment).
 			int stableSeriesSteps = 0;
+			// Attempts of the stable series that did not converge (diverged or stalled) in a row, and the number of steps
+			// that skip the attempt after them (they would cost sweeps and be discarded again).
+			int stableFails = 0;
+			int stableSkip = 0;
 			// The factorization of the matrix of the algebraic equations; it keeps the column ordering from
 			// step to step, because the sparsity pattern does not change.
 			SparseLU algebraicLU;

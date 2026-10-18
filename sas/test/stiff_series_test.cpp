@@ -27,6 +27,19 @@ static const char *kLinear =
 	"  der(y) = -1000 * (y - c);\n"
 	"end L;\n";
 
+// The same, but the fast variable starts far from the manifold y = c (a transient): the series of the manifold must
+// not be used.
+static const char *kLinearOff =
+	"model LO\n"
+	"  Real y(start = 5);\n"
+	"  Real c(start = 1);\n"
+	"  Real s(start = 0);\n"
+	"equation\n"
+	"  der(c) = -s;\n"
+	"  der(s) = c;\n"
+	"  der(y) = -1000 * (y - c);\n"
+	"end LO;\n";
+
 static const char *kRobertson =
 	"model R\n"
 	"  Real y1(start = 1);\n"
@@ -102,6 +115,27 @@ static Result run(const char *model, const std::vector<std::string> &names, doub
 }
 
 int main() {
+	// a start off the manifold (y(0) = 5, c = cos t, s = sin t): the transient of y must be computed, inside the boundary
+	// layer and after it, with and without the stable series; y = yp(t) + (5 - yp(0)) exp(-1000 t)
+	for (double T : {0.002, 10.0}) {
+		auto yExact = [](double t) {
+			auto yp = [](double u) { return (1e6 * std::cos(u) + 1000.0 * std::sin(u)) / (1e6 + 1.0); };
+			return yp(t) + (5.0 - yp(0.0)) * std::exp(-1000.0 * t);
+		};
+		Result on = run(kLinearOff, {"y", "c", "s"}, T, 1e-6, true);
+		Result off = run(kLinearOff, {"y", "c", "s"}, T, 1e-6, false);
+		CHECK_EQ((int)on.x.size(), 3);
+		CHECK_EQ((int)off.x.size(), 3);
+		if (on.x.size() == 3 && off.x.size() == 3) {
+			CHECK_NEAR(on.x[0], yExact(T), 1e-5);
+			CHECK_NEAR(off.x[0], yExact(T), 1e-5);
+			CHECK_NEAR(on.x[1], std::cos(T), 1e-5);
+			CHECK_NEAR(on.x[2], std::sin(T), 1e-5);
+			CHECK_NEAR(off.x[1], std::cos(T), 1e-5);
+			CHECK_NEAR(off.x[2], std::sin(T), 1e-5);
+		}
+	}
+
 	// linear: exact solution of x' = A x
 	{
 		arma::mat A = {{-1000.0, 1000.0, 0.0}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}}; // y, c, s

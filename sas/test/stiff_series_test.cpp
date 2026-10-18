@@ -27,6 +27,19 @@ static const char *kLinear =
 	"  der(y) = -1000 * (y - c);\n"
 	"end L;\n";
 
+// The same, but the fast variable starts far from the manifold y = c (a transient): the series of the manifold must
+// not be used.
+static const char *kLinearOff =
+	"model LO\n"
+	"  Real y(start = 5);\n"
+	"  Real c(start = 1);\n"
+	"  Real s(start = 0);\n"
+	"equation\n"
+	"  der(c) = -s;\n"
+	"  der(s) = c;\n"
+	"  der(y) = -1000 * (y - c);\n"
+	"end LO;\n";
+
 static const char *kRobertson =
 	"model R\n"
 	"  Real y1(start = 1);\n"
@@ -102,6 +115,20 @@ static Result run(const char *model, const std::vector<std::string> &names, doub
 }
 
 int main() {
+	// a start off the manifold: c = cos t and s = sin t exactly, y the same with and without the stable series
+	{
+		const double T = 10.0;
+		Result on = run(kLinearOff, {"y", "c", "s"}, T, 1e-6, true);
+		Result off = run(kLinearOff, {"y", "c", "s"}, T, 1e-6, false);
+		CHECK_EQ((int)on.x.size(), 3);
+		CHECK_EQ((int)off.x.size(), 3);
+		if (on.x.size() == 3 && off.x.size() == 3) {
+			CHECK_NEAR(on.x[1], std::cos(T), 1e-5);
+			CHECK_NEAR(on.x[2], std::sin(T), 1e-5);
+			CHECK_NEAR(off.x[1], std::cos(T), 1e-5);
+			CHECK_NEAR(on.x[0], off.x[0], 1e-5);
+		}
+	}
 	// linear: exact solution of x' = A x
 	{
 		arma::mat A = {{-1000.0, 1000.0, 0.0}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}}; // y, c, s

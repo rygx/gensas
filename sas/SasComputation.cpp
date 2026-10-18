@@ -1710,6 +1710,12 @@ namespace che {
 					sol.cols(1, N).zeros();
 					bool converged = false;
 					const int maxSweeps = 40;
+					// Early exits (the forward series is used in both cases): the order-0 values of the fast variables settle
+					// within a few sweeps, so a start far from the manifold (right after an event, a fast transient) is
+					// known early; and a sweep that no longer reduces its change has reached the rounding floor.
+					vector<double> prevGap(nf, -1.0);
+					double prevChange = std::numeric_limits<double>::infinity();
+					int stalled = 0;
 					for (int sweep = 0; sweep < maxSweeps && !converged; sweep++) {
 						// Pass A, upward in the order: the slow variables and the algebraic variables as usual, the fast
 						// ones keep their current coefficients and only record the right-hand side.
@@ -1767,6 +1773,21 @@ namespace che {
 						// `change` is the largest change beyond a relative 1e-9 of the coefficient itself (a change at that
 						// level is not resolved by the Pade approximant at the error tolerances in use), so 0 means converged.
 						converged = change <= 1e-12 * std::max(scale, 1e-300);
+						if (!converged) {
+							bool farOff = false;
+							for (int f = 0; f < nf; f++) {
+								const double gap = std::fabs(x0[fast[f]] - xf[f][0]);
+								if (sweep >= 2 && gap > 1e3 * 20.0 * tol / std::fabs(selfDeriv[f]) && std::fabs(gap - prevGap[f]) <= 0.1 * gap) {
+									farOff = true;
+								}
+								prevGap[f] = gap;
+							}
+							stalled = (sweep >= 6 && change >= 0.5 * prevChange) ? stalled + 1 : 0;
+							prevChange = change;
+							if (farOff || stalled >= 3) {
+								break;
+							}
+						}
 					}
 					// Accept the manifold series only if the start is on the manifold within the tolerance.
 					bool onManifold = converged;

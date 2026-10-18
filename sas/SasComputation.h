@@ -40,6 +40,20 @@
 namespace che {
 	namespace core {
 
+		// Buffers for building the Jacobian of the algebraic equations; they live as long as the model, so that
+		// the steps of a run do not allocate them again.
+		struct JacobianScratch {
+			std::vector<int> locRow;
+			std::vector<int> locCol;
+			std::vector<double> value;
+			std::vector<int> colCount;
+			std::vector<int> order;
+			std::vector<int> next;
+			std::vector<unsigned long long> rowInd;
+			std::vector<unsigned long long> colPtr;
+			std::vector<double> val;
+		};
+
 		class IdReplaceTable {
 		public:
 			AstNode *ori = NULL;
@@ -217,6 +231,7 @@ namespace che {
 			// The factorization of the matrix of the algebraic equations; it keeps the column ordering from
 			// step to step, because the sparsity pattern does not change.
 			SparseLU algebraicLU;
+			JacobianScratch jacobianScratch;
 
 			shared_ptr<SasSolution> solveSegment(const vec &init, double curAlpha, double seg, const SasComputationOptions &options);
 		};

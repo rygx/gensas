@@ -933,6 +933,76 @@ namespace che {
 			return w;
 		}
 
+		// Builds the sparse matrix of the given (row, column, value) entries and splits it into the columns
+		// below nLeft and the others. The entries are treated as Armadillo's batch constructor does: zero
+		// values are dropped, entries at the same position are summed in the order given (a sum that
+		// cancels stays as a stored zero), and the rows within a column are sorted.
+		void cscFromTriplets(const vector<int> &row, const vector<int> &col, const vector<double> &value, int nRows, int nCols, int nLeft, JacobianScratch &w, sp_mat &left, sp_mat &right) {
+			const int nEntry = static_cast<int>(value.size());
+			if (nEntry == 0) {
+				left.set_size(nRows, nLeft);
+				right.set_size(nRows, nCols - nLeft);
+				return;
+			}
+			w.colCount.assign(nCols + 1, 0);
+			for (int k = 0; k < nEntry; k++) {
+				if (value[k] != 0.0) {
+					w.colCount[col[k] + 1]++;
+				}
+			}
+			for (int j = 0; j < nCols; j++) {
+				w.colCount[j + 1] += w.colCount[j];
+			}
+			// A stable counting sort by column, then by row within each column.
+			w.order.resize(w.colCount[nCols]);
+			w.next.assign(w.colCount.begin(), w.colCount.end() - 1);
+			for (int k = 0; k < nEntry; k++) {
+				if (value[k] != 0.0) {
+					w.order[w.next[col[k]]++] = k;
+				}
+			}
+			for (int j = 0; j < nCols; j++) {
+				std::stable_sort(w.order.begin() + w.colCount[j], w.order.begin() + w.colCount[j + 1], [&](int a, int b) { return row[a] < row[b]; });
+			}
+			// Merge the entries at the same position.
+			w.rowInd.clear();
+			w.val.clear();
+			w.colPtr.assign(nCols + 1, 0);
+			for (int j = 0; j < nCols; j++) {
+				int begin = w.colCount[j];
+				int end = w.colCount[j + 1];
+				for (int q = begin; q < end; q++) {
+					int k = w.order[q];
+					if (q > begin && static_cast<uword>(row[k]) == w.rowInd.back()) {
+						w.val.back() += value[k];
+					} else {
+						w.rowInd.push_back(static_cast<uword>(row[k]));
+						w.val.push_back(value[k]);
+					}
+				}
+				w.colPtr[j + 1] = static_cast<uword>(w.rowInd.size());
+			}
+			// The two parts, written straight into the storage of the matrices.
+			const uword split = w.colPtr[nLeft];
+			const uword total = static_cast<uword>(w.rowInd.size());
+			auto fill = [&](sp_mat &m, int firstCol, int endCol, uword firstNz, uword endNz) {
+				m.set_size(nRows, endCol - firstCol);
+				m.mem_resize(endNz - firstNz);
+				uword *ri = access::rwp(m.row_indices);
+				double *vals = access::rwp(m.values);
+				uword *cp = access::rwp(m.col_ptrs);
+				for (uword k = firstNz; k < endNz; k++) {
+					ri[k - firstNz] = w.rowInd[k];
+					vals[k - firstNz] = w.val[k];
+				}
+				for (int j = firstCol; j <= endCol; j++) {
+					cp[j - firstCol] = w.colPtr[j] - firstNz;
+				}
+			};
+			fill(left, 0, nLeft, 0, split);
+			fill(right, nLeft, nCols, split, total);
+		}
+
 		// Prerequisites: (1) the equation has been flattened; (2) the equations and IDs have been numbered.
 		void insertLHS(AstNode *p, const vec &init, vector<int> &locRow, vector<int> &locCol, vector<double> &value, int row, int colOffset, double coeff) {
 			if (p == NULL) {
@@ -1302,19 +1372,17 @@ namespace che {
 			// Jacobian of the algebraic equations at the given state, split into the parts for the
 			// differential (X) and algebraic (Y) variables.
 			sp_mat LHSY, LHSX;
+			vector<int> &locRow = jacobianScratch.locRow;
+			vector<int> &locCol = jacobianScratch.locCol;
+			vector<double> &value = jacobianScratch.value;
 			auto buildLHS = [&](const vec &state) {
-				vector<int> locRow;
-				vector<int> locCol;
-				vector<double> value;
+				locRow.clear();
+				locCol.clear();
+				value.clear();
 				for (int iAE = 0; iAE < nAE; iAE++) {
 					insertLHS(eqnTable[nDE + iAE]->pHead, state, locRow, locCol, value, iAE, 0, 1.0);
 				}
-				uvec locRowVec = conv_to<uvec>::from(locRow);
-				uvec locColVec = conv_to<uvec>::from(locCol);
-				vec valueVec = conv_to<vec>::from(value);
-				sp_mat LHStotal(true, join_cols(locRowVec.t(), locColVec.t()), valueVec, nAE, nX + nY);
-				LHSY = LHStotal.tail_cols(nY);
-				LHSX = LHStotal.head_cols(nX);
+				cscFromTriplets(locRow, locCol, value, nAE, nX + nY, nX, jacobianScratch, LHSX, LHSY);
 			};
 			buildLHS(init);
 

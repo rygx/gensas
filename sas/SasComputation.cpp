@@ -1659,7 +1659,6 @@ namespace che {
 						xf[f][0] = x0[fast[f]];
 					}
 					sol.cols(1, N).zeros();
-					vec dx0(nX, fill::zeros);
 					bool converged = false;
 					const int maxSweeps = 40;
 					for (int sweep = 0; sweep < maxSweeps && !converged; sweep++) {
@@ -1703,9 +1702,9 @@ namespace che {
 						if (nAE > 0) {
 							vec totalRhs(nAE, fill::zeros);
 							for (int f = 0; f < nf; f++) {
-								dx0[fast[f]] = sol(fast[f], 0) - x0[fast[f]];
+								const double dxf = sol(fast[f], 0) - x0[fast[f]];
 								for (arma::uword k = LHSX.col_ptrs[fast[f]]; k < LHSX.col_ptrs[fast[f] + 1]; k++) {
-									totalRhs[LHSX.row_indices[k]] -= LHSX.values[k] * dx0[fast[f]];
+									totalRhs[LHSX.row_indices[k]] -= LHSX.values[k] * dxf;
 								}
 							}
 							if (!applyAlgebraicInverse(totalRhs)) {
@@ -1862,6 +1861,7 @@ namespace che {
 			solverWarnings.clear();
 			stallReason.clear();
 			lastStep = 0.0;
+			stableSeriesSteps = 0;
 			domainChecks.clear();
 			for (const shared_ptr<AstTree> &t : eqnTable) {
 				collectDomainChecks(t->pHead, domainChecks);

@@ -167,3 +167,13 @@ cc_test(
         "//sas:sas_sparse_lu_lib",
     ],
 )
+
+# The derivative of a solution for a number of rows.
+cc_test(
+    name = "derivative_solution_test",
+    srcs = ["derivative_solution_test.cpp"],
+    deps = [
+        ":test_util",
+        "//util:abstract_che_calculator_lib",
+    ],
+)

@@ -108,7 +108,7 @@ def experiment_radius(t=5.0):
     print("|---:|---:|---:|---:|")
     for rel in (0, 1e-3, 1e-5, 1e-7, 1e-9, 1e-11):
         a = taylor_y2(y1, y2 * (1 + rel))
-        roots = [abs(a[k]) ** (1.0 / k) for k in range(60, 120) if a[k] != 0]
+        roots = [abs(a[k]) ** (mpf(1) / k) for k in range(60, 120) if a[k] != 0]
         if not roots:
             sys.exit("all Taylor coefficients 60 to 120 are zero")
         rho = 1.0 / float(max(roots))
@@ -152,8 +152,10 @@ def experiment_first(app, L=-1e4):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--app", help="the GenSAS executable")
-    ap.add_argument("experiments", nargs="*", default=["steps", "radius", "models", "first"])
+    ap.add_argument("experiments", nargs="*", choices=["steps", "radius", "models", "first"], default=["steps", "radius", "models", "first"])
     args = ap.parse_args()
+    if args.app and not os.path.exists(args.app) and os.path.exists(args.app + ".exe"):
+        args.app += ".exe"
     for name in args.experiments:
         print("\n### %s\n" % name)
         if name == "radius":

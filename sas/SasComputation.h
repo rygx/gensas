@@ -193,6 +193,9 @@ namespace che {
 			// the Pade approximant of the derivative is built once for a series, not once per call.
 			vec calcDiff(CheSolution *solution, double alpha, CheSolution *derSol = nullptr);
 
+			// The residual of the equations for a given state and derivative.
+			vec calcDiffAt(arma::vec &state, arma::vec &der);
+
 			// Why the equations are undefined at a point of a solution (a function argument outside its
 			// domain); empty if nothing is found.
 			std::string describeDomainViolation(CheSolution *solution, double alpha);

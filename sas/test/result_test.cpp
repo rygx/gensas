@@ -121,6 +121,43 @@ static void testBuildResult() {
 	CHECK(buildResult(*run.sol, 0.0).empty());
 }
 
+// With many solution segments the samples are looked up by bisection; every time must get the
+// segments that contain it, two at the boundary of two segments, as a scan of the set gives.
+static void testManySegments() {
+	const char *src =
+		"model M\n"
+		"  discrete Real a(start = 1);\n"
+		"  Real x(start = 1);\n"
+		"  Real y(start = 0);\n"
+		"equation\n"
+		"  der(x) = a*y;\n"
+		"  der(y) = -400*x;\n"
+		"  when time >= 1 then\n"
+		"    a = 2;\n"
+		"  end when;\n"
+		"end M;\n";
+	Run run;
+	if (!simulate(run, src, 2.0)) {
+		return;
+	}
+	CHECK(run.sol->solutionLink.size() > 20);
+	SasResult r = buildResult(*run.sol, 0.003);
+	CHECK(r.time.size() > 600);
+	size_t j = 0;
+	while (j < r.time.size()) {
+		size_t k = j;
+		while (k < r.time.size() && r.time[k] == r.time[j]) {
+			k++;
+		}
+		CHECK_EQ(k - j, run.sol->findSasSolution(r.time[j]).size());
+		j = k;
+	}
+	// the discrete value switches at the event
+	for (size_t i = 0; i < r.time.size() && !r.discrete.empty(); i++) {
+		CHECK_NEAR(r.discrete[0][i], r.time[i] < 1.0 ? 1.0 : 2.0, 0.0 + (r.time[i] == 1.0 ? 1.0 : 0.0));
+	}
+}
+
 static void testJsonVersion() {
 	Run run;
 	if (!simulate(run, kModel, 2.0)) {
@@ -191,6 +228,7 @@ static void testCsv() {
 
 int main() {
 	testBuildResult();
+	testManySegments();
 	testJsonVersion();
 	testCsv();
 	return sastest::finish("result_test");

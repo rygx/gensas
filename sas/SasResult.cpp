@@ -45,15 +45,64 @@ namespace che {
 			// Index of the last discrete trace entry at or before time t (a sample takes the values that
 			// hold from the start of its solution segment, so the two samples at an event time show the
 			// values before and after the event).
-			size_t traceIndexAt(const SasDiscreteTrace &trace, double t) {
+			size_t traceIndexAt(const SasDiscreteTrace &trace, double t, bool sorted) {
+				const double limit = t + 1e-12 * (1.0 + fabs(t));
+				if (sorted) {
+					const vector<double>::const_iterator after = upper_bound(trace.times.begin(), trace.times.end(), limit);
+					return after == trace.times.begin() ? 0 : (size_t)(after - trace.times.begin()) - 1;
+				}
 				size_t k = 0;
 				for (size_t m = 0; m < trace.times.size(); m++) {
-					if (trace.times[m] <= t + 1e-12 * (1.0 + fabs(t))) {
+					if (trace.times[m] <= limit) {
 						k = m;
 					}
 				}
 				return k;
 			}
+
+			// The solution segments that contain a time, in the order of the set. The segments of a run
+			// follow each other, so with start and end times that do not decrease the candidates are found by
+			// bisection; any other set is scanned as findSasSolution does. Without this the lookup of every
+			// output sample walks all segments, and the time of a long run grows with samples times steps.
+			class SegmentIndex {
+			public:
+				explicit SegmentIndex(SasSolutionSet &set) : set(set) {
+					segs.reserve(set.solutionLink.size());
+					for (const shared_ptr<SasSolution> &sol : set.solutionLink) {
+						segs.push_back(&sol);
+					}
+					ordered = true;
+					for (size_t i = 0; i < segs.size() && ordered; i++) {
+						const double a = (*segs[i])->absStart, b = (*segs[i])->absEnd;
+						ordered = a == a && b == b && (i == 0 || (a >= (*segs[i - 1])->absStart && b >= (*segs[i - 1])->absEnd));
+					}
+				}
+
+				list<shared_ptr<SasSolution>> find(double t) const {
+					if (!ordered) {
+						return set.findSasSolution(t);
+					}
+					list<shared_ptr<SasSolution>> found;
+					size_t lo = 0, hi = segs.size();
+					while (lo < hi) { // the first segment that ends at or after t
+						const size_t mid = lo + (hi - lo) / 2;
+						if ((*segs[mid])->absEnd >= t) {
+							hi = mid;
+						} else {
+							lo = mid + 1;
+						}
+					}
+					for (size_t i = lo; i < segs.size() && (*segs[i])->absStart <= t; i++) {
+						found.push_back(*segs[i]);
+					}
+					return found;
+				}
+
+			private:
+				SasSolutionSet &set;
+				vector<const shared_ptr<SasSolution> *> segs;
+				bool ordered;
+			};
 		} // namespace
 
 		SasResult buildResult(SasSolutionSet &set, double interval) {
@@ -129,8 +178,9 @@ namespace che {
 					}
 				}
 			}
+			const SegmentIndex segments(set);
 			for (double t : times) {
-				list<shared_ptr<SasSolution>> found = set.findSasSolution(t);
+				list<shared_ptr<SasSolution>> found = segments.find(t);
 				for (const shared_ptr<SasSolution> &sol : found) {
 					samples.push_back(sol->solution->getSolValue(t - sol->absStart));
 					sampleModel.push_back(sol->linkCompModel);
@@ -150,8 +200,9 @@ namespace che {
 			if (!set.discrete.names.empty() && !set.discrete.times.empty()) {
 				res.discreteNames = set.discrete.names;
 				res.discrete.assign(res.discreteNames.size(), vector<double>(segStart.size(), 0.0));
+				const bool traceSorted = is_sorted(set.discrete.times.begin(), set.discrete.times.end());
 				for (size_t j = 0; j < segStart.size(); j++) {
-					size_t k = traceIndexAt(set.discrete, segStart[j]);
+					size_t k = traceIndexAt(set.discrete, segStart[j], traceSorted);
 					for (size_t n = 0; n < res.discreteNames.size(); n++) {
 						res.discrete[n][j] = set.discrete.values[k][n];
 					}

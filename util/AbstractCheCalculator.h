@@ -27,6 +27,7 @@
 #ifndef _Che_AbstractCheCalculator_H_
 #define _Che_AbstractCheCalculator_H_
 
+#include <vector>
 #include "util/CheState.h"
 #include "io/CheDataFormat.h"
 #include <list>
@@ -72,6 +73,11 @@ namespace che {
 
 			virtual vec getSolValue(double alpha) = 0;
 
+			// The values of the listed rows only: element i is getSolValue(alpha)(rows[i]). The cost is that of the listed
+			// rows, not of the whole solution (a network has hundreds or thousands of states and a few rows are needed to
+			// test event conditions).
+			virtual vec getSolValueRows(double alpha, const std::vector<int> &rows);
+
 			// The derivative with respect to alpha of the first nRows states of the solution as it is evaluated
 			// by getSolValue (the analytic derivative of the Pade approximant, or of the power series), not the
 			// value of an approximant built from the differentiated coefficients: the latter is the same function
@@ -90,6 +96,8 @@ namespace che {
 			CheSolutionPowerSeries(int nState, int nLvl);
 
 			virtual vec getSolValue(double alpha);
+
+			virtual vec getSolValueRows(double alpha, const std::vector<int> &rows);
 
 			virtual vec getDerValue(double alpha, int nRows);
 
@@ -110,6 +118,8 @@ namespace che {
 			CheSolutionPade(int nState, int nLvl, PadeSolverType sol = PADE_LEVINSON);
 
 			virtual vec getSolValue(double alpha);
+
+			virtual vec getSolValueRows(double alpha, const std::vector<int> &rows);
 
 			virtual vec getDerValue(double alpha, int nRows);
 

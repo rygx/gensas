@@ -76,6 +76,9 @@ namespace che {
 			// function outside its domain). The part of the step after an event is discarded by the caller,
 			// who checks the part that is kept with SasComputationModel::validateDomain().
 			bool tolerateNonFinite = false;
+			// Compute the series of a fast decaying differential variable backwards in the order, so that its steps
+			// are not limited to about 1/|d| (see the comment in SasComputationModel::solveSegment).
+			bool stableSeries = true;
 			// Called with each solution segment right after it was computed. If it returns true, solve()
 			// stops after this segment (used to cut the simulation at a detected event).
 			std::function<bool(const std::shared_ptr<SasSolution> &)> onSolution;
@@ -227,6 +230,8 @@ namespace che {
 			std::string stallReason;
 			// The length of the previous step of the run; the search for the next one starts there.
 			double lastStep = 0.0;
+			// Steps whose series was computed backwards for fast variables (diagnostics, see solveSegment).
+			int stableSeriesSteps = 0;
 			// The factorization of the matrix of the algebraic equations; it keeps the column ordering from
 			// step to step, because the sparsity pattern does not change.
 			SparseLU algebraicLU;

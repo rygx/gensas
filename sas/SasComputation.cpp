@@ -1489,52 +1489,241 @@ namespace che {
 
 			// The buffers of the loop over the orders are allocated once per step.
 			vec rhs(nAE), z(nAE);
+			// Solves the algebraic equations at one order, from the differential coefficients of that order and
+			// the coefficients of the lower orders, and stores the result in the series.
+			auto solveAlgebraicOrder = [&](int lvl) {
+				rhs.zeros();
+				for (int iAE = 0; iAE < nAE; iAE++) {
+					updateAERHS(lvl, iAE, sasSol->solution->solution, rhs, eqnTable[nDE + iAE]->pHead, 1.0);
+				}
+
+				// rhs -= LHSX * (the differential part of this order), over the nonzeros of LHSX
+				const double *xCol = sasSol->solution->solution.colptr(lvl);
+				for (int c = 0; c < nX; c++) {
+					const double xc = xCol[c];
+					for (arma::uword k = LHSX.col_ptrs[c]; k < LHSX.col_ptrs[c + 1]; k++) {
+						rhs[LHSX.row_indices[k]] -= LHSX.values[k] * xc;
+					}
+				}
+
+				if (denseAE) {
+					// P*A = L*U: forward substitution with the unit lower factor, then back substitution
+					const double *l = luL.memptr(), *u = luU.memptr();
+					double *zp = z.memptr();
+					for (int i = 0; i < nY; i++) {
+						double acc = rhs[luPerm[i]];
+						for (int j = 0; j < i; j++) {
+							acc -= l[i + (size_t)j * nY] * zp[j];
+						}
+						zp[i] = acc;
+					}
+					for (int i = nY - 1; i >= 0; i--) {
+						double acc = zp[i];
+						for (int j = i + 1; j < nY; j++) {
+							acc -= u[i + (size_t)j * nY] * zp[j];
+						}
+						zp[i] = acc / u[i + (size_t)i * nY];
+					}
+					sasSol->solution->solution.col(lvl).tail(nY) = z;
+				} else if (sparseAE) {
+					if (!sparseLU.solve(rhs.memptr())) {
+						throw std::runtime_error("the algebraic equations cannot be solved");
+					}
+					sasSol->solution->solution.col(lvl).tail(nY) = rhs;
+				} else {
+					sasSol->solution->solution.col(lvl).tail(nY) = spsolve(LHSY, rhs, "superlu");
+				}
+			};
+			// v := LHSY^-1 v
+			auto applyAlgebraicInverse = [&](vec &v) {
+				if (denseAE) {
+					const double *l = luL.memptr(), *u = luU.memptr();
+					vec w(nY);
+					double *zp = w.memptr();
+					for (int r = 0; r < nY; r++) {
+						double acc = v[luPerm[r]];
+						for (int c = 0; c < r; c++) {
+							acc -= l[r + (size_t)c * nY] * zp[c];
+						}
+						zp[r] = acc;
+					}
+					for (int r = nY - 1; r >= 0; r--) {
+						double acc = zp[r];
+						for (int c = r + 1; c < nY; c++) {
+							acc -= u[r + (size_t)c * nY] * zp[c];
+						}
+						zp[r] = acc / u[r + (size_t)r * nY];
+					}
+					v = w;
+					return true;
+				}
+				if (sparseAE) {
+					return sparseLU.solve(v.memptr());
+				}
+				v = spsolve(LHSY, v, "superlu");
+				return true;
+			};
 			for (int lvl = 1; lvl < options.nLvl; lvl++) {
 				for (int iDE = 0; iDE < nDE; iDE++) {
 					updateDEcoeff(lvl, iDE, sasSol->solution->solution, eqnTable[iDE]->pHead->subs[1], 1.0);
 				}
-
 				if (nAE > 0) {
-					rhs.zeros();
-					for (int iAE = 0; iAE < nAE; iAE++) {
-						updateAERHS(lvl, iAE, sasSol->solution->solution, rhs, eqnTable[nDE + iAE]->pHead, 1.0);
-					}
+					solveAlgebraicOrder(lvl);
+				}
+			}
 
-					// rhs -= LHSX * (the differential part of this order), over the nonzeros of LHSX
-					const double *xCol = sasSol->solution->solution.colptr(lvl);
-					for (int c = 0; c < nX; c++) {
-						const double xc = xCol[c];
-						for (arma::uword k = LHSX.col_ptrs[c]; k < LHSX.col_ptrs[c + 1]; k++) {
-							rhs[LHSX.row_indices[k]] -= LHSX.values[k] * xc;
+			// A fast decaying differential variable spoils the series above. Its coefficients obey
+			// (k+1) x[k+1] = d x[k] + r[k], with d the (negative, large) self-derivative of the variable, so a
+			// small error in any coefficient (an amplitude of 1e-16 is enough) is multiplied by d/(k+1) at every
+			// order: the error is the series of exp(d t), and as soon as d/(k+1) exceeds 1 it outgrows the
+			// coefficients of the slow solution. A Pade approximant of the sum can then follow the slow part
+			// only up to the order where the fast part starts to dominate, and the steps shrink in proportion
+			// to 1/|d|, as in an explicit method. The cure is to compute the coefficients of such a variable
+			// backwards in the order, x[k] = ((k+1) x[k+1] - r[k]) / d, which multiplies an error by (k+1)/|d|
+			// < 1 instead. That is the quasi-steady-state (slow manifold) series of the variable. The
+			// coefficients of the other variables are computed forward as before, and the two are iterated until
+			// they agree. The method applies when the variable is on its slow manifold to within the error
+			// tolerance (otherwise the transient is real and the forward series, which resolves it, is used).
+			if (options.stableSeries && nX > 0 && options.nLvl >= 10) {
+				mat &sol = sasSol->solution->solution;
+				const int N = options.nLvl - 1;
+				const double dMin = 2.0 * (N + 1);
+				// Candidates: the high-order coefficients of a decaying fast mode are those of exp(d t): the
+				// ratio (k+1) x[k+1] / x[k] is the same negative number d at every order.
+				vector<int> fast;
+				vector<double> selfDeriv;
+				for (int i = 0; i < nX; i++) {
+					const int k1 = N - 1, k0 = N - 6;
+					const double a1 = sol(i, k1), b1 = sol(i, k1 + 1), a0 = sol(i, k0), b0 = sol(i, k0 + 1);
+					if (!(a1 != 0.0 && a0 != 0.0 && std::isfinite(a1) && std::isfinite(b1) && std::isfinite(a0) && std::isfinite(b0))) {
+						continue;
+					}
+					const double r1 = (k1 + 1) * b1 / a1, r0 = (k0 + 1) * b0 / a0;
+					if (r1 < -dMin && r0 < 0.0) {
+						fast.push_back(i);
+					}
+				}
+				if (!fast.empty()) {
+					// The self-derivative of each candidate with the algebraic variables eliminated:
+					// d = df_i/dx_i - sum_j df_i/dy_j (LHSY^-1 LHSX)_{ji}.
+					const vec state0 = sol.col(0);
+					vector<int> keep;
+					vector<double> dEff;
+					vector<int> rowTmp, colTmp;
+					vector<double> valTmp;
+					for (int i : fast) {
+						rowTmp.clear();
+						colTmp.clear();
+						valTmp.clear();
+						insertLHS(eqnTable[i]->pHead->subs[1], state0, rowTmp, colTmp, valTmp, 0, 0, 1.0);
+						double d = 0.0;
+						for (size_t q = 0; q < colTmp.size(); q++) {
+							if (colTmp[q] == i) {
+								d += valTmp[q];
+							}
+						}
+						if (nAE > 0) {
+							// w = LHSY^-1 (column i of LHSX)
+							vec w(nAE, fill::zeros);
+							for (arma::uword k = LHSX.col_ptrs[i]; k < LHSX.col_ptrs[i + 1]; k++) {
+								w[LHSX.row_indices[k]] = LHSX.values[k];
+							}
+							if (!applyAlgebraicInverse(w)) {
+								continue;
+							}
+							for (size_t q = 0; q < colTmp.size(); q++) {
+								if (colTmp[q] >= nX) {
+									d -= valTmp[q] * w[colTmp[q] - nX];
+								}
+							}
+						}
+						if (std::isfinite(d) && d < -dMin) {
+							keep.push_back(i);
+							dEff.push_back(d);
 						}
 					}
-
-					if (denseAE) {
-						// P*A = L*U: forward substitution with the unit lower factor, then back substitution
-						const double *l = luL.memptr(), *u = luU.memptr();
-						double *zp = z.memptr();
-						for (int i = 0; i < nY; i++) {
-							double acc = rhs[luPerm[i]];
-							for (int j = 0; j < i; j++) {
-								acc -= l[i + (size_t)j * nY] * zp[j];
+					fast = keep;
+					selfDeriv = dEff;
+				}
+				if (!fast.empty()) {
+					const int nf = static_cast<int>(fast.size());
+					const mat forwardSeries = sol; // kept in case the iteration does not converge
+					const vec x0 = sol.col(0);
+					// x[f][k]: the coefficients of the fast variables, F[f][k]: the order-k coefficient of their right-hand side
+					vector<vector<double>> xf(nf, vector<double>(N + 1, 0.0)), Fk(nf, vector<double>(N + 1, 0.0));
+					for (int f = 0; f < nf; f++) {
+						xf[f][0] = x0[fast[f]];
+					}
+					sol.cols(1, N).zeros();
+					vec dx0(nX, fill::zeros);
+					bool converged = false;
+					const int maxSweeps = 40;
+					for (int sweep = 0; sweep < maxSweeps && !converged; sweep++) {
+						// Pass A, upward in the order: the slow variables and the algebraic variables as usual, the fast
+						// ones keep their current coefficients and only record the right-hand side.
+						for (int lvl = 1; lvl <= N; lvl++) {
+							for (int iDE = 0; iDE < nDE; iDE++) {
+								sol(iDE, lvl) = 0.0;
+								updateDEcoeff(lvl, iDE, sol, eqnTable[iDE]->pHead->subs[1], 1.0);
 							}
-							zp[i] = acc;
-						}
-						for (int i = nY - 1; i >= 0; i--) {
-							double acc = zp[i];
-							for (int j = i + 1; j < nY; j++) {
-								acc -= u[i + (size_t)j * nY] * zp[j];
+							for (int f = 0; f < nf; f++) {
+								Fk[f][lvl - 1] = lvl * sol(fast[f], lvl);
+								sol(fast[f], lvl) = xf[f][lvl];
 							}
-							zp[i] = acc / u[i + (size_t)i * nY];
+							if (nAE > 0) {
+								solveAlgebraicOrder(lvl);
+							}
 						}
-						sasSol->solution->solution.col(lvl).tail(nY) = z;
-					} else if (sparseAE) {
-						if (!sparseLU.solve(rhs.memptr())) {
-							throw std::runtime_error("the algebraic equations cannot be solved");
+						// Pass B, downward in the order: the fast variables.
+						double change = 0.0, scale = 0.0;
+						for (int f = 0; f < nf; f++) {
+							const double d = selfDeriv[f];
+							double next = 0.0; // the coefficient of order N+1 is taken as zero
+							xf[f][N] = 0.0;
+							next = xf[f][N];
+							for (int k = N - 1; k >= 0; k--) {
+								const double rest = Fk[f][k] - d * xf[f][k];
+								const double updated = ((k + 1) * next - rest) / d;
+								change = std::max(change, std::fabs(updated - xf[f][k]) - 1e-9 * std::fabs(updated));
+								xf[f][k] = updated;
+								next = updated;
+							}
+							scale = std::max(scale, std::fabs(xf[f][0]));
 						}
-						sasSol->solution->solution.col(lvl).tail(nY) = rhs;
+						for (int f = 0; f < nf; f++) {
+							for (int k = 0; k <= N; k++) {
+								sol(fast[f], k) = xf[f][k];
+							}
+						}
+						// The order-0 values of the fast variables moved to the manifold: the algebraic variables at
+						// order 0 follow by a Newton step (dy = -LHSY^-1 LHSX dx).
+						if (nAE > 0) {
+							vec totalRhs(nAE, fill::zeros);
+							for (int f = 0; f < nf; f++) {
+								dx0[fast[f]] = sol(fast[f], 0) - x0[fast[f]];
+								for (arma::uword k = LHSX.col_ptrs[fast[f]]; k < LHSX.col_ptrs[fast[f] + 1]; k++) {
+									totalRhs[LHSX.row_indices[k]] -= LHSX.values[k] * dx0[fast[f]];
+								}
+							}
+							if (!applyAlgebraicInverse(totalRhs)) {
+								break;
+							}
+							sol.col(0).tail(nY) = forwardSeries.col(0).tail(nY) + totalRhs;
+						}
+						if (!std::isfinite(change)) {
+							break;
+						}
+						converged = change <= 1e-12 * std::max(scale, 1e-300);
+					}
+					// Accept the manifold series only if the start is on the manifold within the tolerance.
+					bool onManifold = converged;
+					for (int f = 0; f < nf && onManifold; f++) {
+						onManifold = std::fabs(x0[fast[f]] - xf[f][0]) <= 20.0 * tol / std::fabs(selfDeriv[f]);
+					}
+					if (onManifold) {
+						stableSeriesSteps++;
 					} else {
-						sasSol->solution->solution.col(lvl).tail(nY) = spsolve(LHSY, rhs, "superlu");
+						sol = forwardSeries;
 					}
 				}
 			}

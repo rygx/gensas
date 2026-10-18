@@ -1,0 +1,127 @@
+// Stiff problems: the series of a fast decaying variable is computed backwards in the order
+// (SasComputationOptions::stableSeries), so that the step is not limited to about 1/|d|.
+//   - a linear fast mode y' = -1000 (y - c) coupled to an oscillator: exact solution by expm();
+//   - Robertson's problem: the same result with and without the option, in far fewer steps.
+#include "util/SafeArmadillo.h"
+#include "sas/SasComputation.h"
+#include "sas/SasExpr.h"
+#include "sas/SasLexico.h"
+#include "sas/test/test_util.h"
+
+#include <cmath>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
+
+using namespace che::core;
+
+static const char *kLinear =
+	"model L\n"
+	"  Real y(start = 1);\n"
+	"  Real c(start = 1);\n"
+	"  Real s(start = 0);\n"
+	"equation\n"
+	"  der(c) = -s;\n"
+	"  der(s) = c;\n"
+	"  der(y) = -1000 * (y - c);\n"
+	"end L;\n";
+
+static const char *kRobertson =
+	"model R\n"
+	"  Real y1(start = 1);\n"
+	"  Real y2(start = 0);\n"
+	"  Real y3(start = 0);\n"
+	"equation\n"
+	"  der(y1) = -0.04 * y1 + 1e4 * y2 * y3;\n"
+	"  der(y2) = 0.04 * y1 - 1e4 * y2 * y3 - 3e7 * y2 * y2;\n"
+	"  der(y3) = 3e7 * y2 * y2;\n"
+	"end R;\n";
+
+struct Result {
+	size_t steps = 0;
+	std::vector<double> x; // final state in the order of `names`
+};
+
+static Result run(const char *model, const std::vector<std::string> &names, double endTime, double errorTol, bool stable) {
+	Result res;
+	SasModelParser parser;
+	parser.parseString(model);
+	parser.currentModel = parser.pool.createNewTopModel();
+	parseSingleSasModel(&parser);
+	CHECK_EQ(parser.errCount, 0);
+	SasComputationModel compModel;
+	compModel.generateCompModel(parser.pool);
+	compModel.preprocessModels();
+	compModel.generateDAEs();
+	SasComputationOptions options;
+	options.endTime = endTime;
+	options.segment = endTime;
+	options.alphaTol = 1e-4;
+	options.errorTol = errorTol;
+	options.nLvl = 30;
+	options.stableSeries = stable;
+	std::unique_ptr<SasSolutionSet> sol(compModel.solve(options));
+	CHECK(sol != nullptr);
+	if (sol == nullptr || sol->solutionLink.empty()) {
+		return res;
+	}
+	res.steps = sol->solutionLink.size();
+	SasComputationModel *cm = sol->solutionLink.back()->linkCompModel;
+	auto found = sol->findSasSolution(endTime);
+	CHECK(!found.empty());
+	if (found.empty()) {
+		return res;
+	}
+	std::shared_ptr<SasSolution> st = found.back();
+	arma::vec x = st->solution->getSolValue(endTime - st->absStart);
+	for (const std::string &n : names) {
+		int idx = -1;
+		for (size_t i = 0; i < cm->idTable.size(); i++) {
+			if (n == (const char *)cm->idTable[i]->str) {
+				idx = (int)i;
+			}
+		}
+		CHECK(idx >= 0 && idx < (int)x.n_rows);
+		res.x.push_back(idx >= 0 && idx < (int)x.n_rows ? x(idx) : NAN);
+	}
+	return res;
+}
+
+int main() {
+	// linear: exact solution of x' = A x
+	{
+		arma::mat A = {{-1000.0, 1000.0, 0.0}, {0.0, 0.0, -1.0}, {0.0, 1.0, 0.0}}; // y, c, s
+		arma::vec x0 = {1.0, 1.0, 0.0};
+		const double T = 10.0;
+		arma::vec ref = arma::expmat(A * T) * x0;
+		Result on = run(kLinear, {"y", "c", "s"}, T, 1e-6, true);
+		Result off = run(kLinear, {"y", "c", "s"}, T, 1e-6, false);
+		CHECK_EQ((int)on.x.size(), 3);
+		CHECK_EQ((int)off.x.size(), 3);
+		for (int k = 0; k < 3 && (int)on.x.size() == 3 && (int)off.x.size() == 3; k++) {
+			CHECK_NEAR(on.x[k], ref(k), 1e-4);
+			CHECK_NEAR(off.x[k], ref(k), 1e-4);
+		}
+		// the step with the option is not limited by the fast mode
+		CHECK(on.steps > 0 && on.steps <= 10);
+		CHECK(on.steps * 5 < off.steps);
+	}
+	// Robertson: same result, far fewer steps
+	{
+		const double T = 100.0;
+		Result on = run(kRobertson, {"y1", "y2", "y3"}, T, 1e-6, true);
+		Result off = run(kRobertson, {"y1", "y2", "y3"}, T, 1e-6, false);
+		CHECK_EQ((int)on.x.size(), 3);
+		CHECK_EQ((int)off.x.size(), 3);
+		for (int k = 0; k < 3 && (int)on.x.size() == 3 && (int)off.x.size() == 3; k++) {
+			CHECK_NEAR(on.x[k], off.x[k], 1e-4);
+		}
+		CHECK(on.steps > 0 && on.steps * 10 < off.steps);
+		// the invariant y1 + y2 + y3 = 1
+		if (on.x.size() == 3) {
+			CHECK_NEAR(on.x[0] + on.x[1] + on.x[2], 1.0, 1e-6);
+		}
+	}
+	return sastest::finish("stiff_series_test");
+}

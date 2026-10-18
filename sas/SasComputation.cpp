@@ -940,8 +940,8 @@ namespace che {
 		void cscFromTriplets(const vector<int> &row, const vector<int> &col, const vector<double> &value, int nRows, int nCols, int nLeft, JacobianScratch &w, sp_mat &left, sp_mat &right) {
 			const int nEntry = static_cast<int>(value.size());
 			if (nEntry == 0) {
-				left.set_size(nRows, nLeft);
-				right.set_size(nRows, nCols - nLeft);
+				left.zeros(nRows, nLeft);
+				right.zeros(nRows, nCols - nLeft);
 				return;
 			}
 			w.colCount.assign(nCols + 1, 0);
@@ -986,7 +986,7 @@ namespace che {
 			const uword split = w.colPtr[nLeft];
 			const uword total = static_cast<uword>(w.rowInd.size());
 			auto fill = [&](sp_mat &m, int firstCol, int endCol, uword firstNz, uword endNz) {
-				m.set_size(nRows, endCol - firstCol);
+				m.zeros(nRows, endCol - firstCol);
 				m.mem_resize(endNz - firstNz);
 				uword *ri = access::rwp(m.row_indices);
 				double *vals = access::rwp(m.values);

@@ -49,8 +49,8 @@ namespace che {
 			std::vector<int> colCount;
 			std::vector<int> order;
 			std::vector<int> next;
-			std::vector<unsigned long long> rowInd;
-			std::vector<unsigned long long> colPtr;
+			std::vector<arma::uword> rowInd;
+			std::vector<arma::uword> colPtr;
 			std::vector<double> val;
 		};
 

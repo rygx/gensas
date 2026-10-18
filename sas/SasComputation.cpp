@@ -25,6 +25,7 @@
 // ***************************************************************************************************
 //
 #include "sas/SasComputation.h"
+#include "sas/SparseLU.h"
 #include <map>
 #include <memory>
 #include <cmath>
@@ -1392,6 +1393,19 @@ namespace che {
 				}
 			}
 
+			// A larger system is factored once, sparsely, with SuperLU: calling spsolve at every order
+			// factors the same matrix again each time.
+			SparseLU sparseLU;
+			const bool sparseAE = nAE > 0 && nAE == nY && !denseAE;
+			if (sparseAE) {
+				LHSY.sync();
+				const vector<int> colPtr(LHSY.col_ptrs, LHSY.col_ptrs + nY + 1);
+				const vector<int> rowIdx(LHSY.row_indices, LHSY.row_indices + LHSY.n_nonzero);
+				if (!sparseLU.factor(nY, colPtr.data(), rowIdx.data(), LHSY.values)) {
+					throw std::runtime_error("the matrix of the algebraic equations is singular");
+				}
+			}
+
 			for (int lvl = 1; lvl < options.nLvl; lvl++) {
 				for (int iDE = 0; iDE < nDE; iDE++) {
 					updateDEcoeff(lvl, iDE, sasSol->solution->solution, eqnTable[iDE]->pHead->subs[1], 1.0);
@@ -1424,6 +1438,11 @@ namespace che {
 							z(i) = acc / luU(i, i);
 						}
 						sasSol->solution->solution.col(lvl).tail(nY) = z;
+					} else if (sparseAE) {
+						if (!sparseLU.solve(rhs.memptr())) {
+							throw std::runtime_error("the algebraic equations cannot be solved");
+						}
+						sasSol->solution->solution.col(lvl).tail(nY) = rhs;
 					} else {
 						sasSol->solution->solution.col(lvl).tail(nY) = spsolve(LHSY, rhs, "superlu");
 					}

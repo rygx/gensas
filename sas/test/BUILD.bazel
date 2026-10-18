@@ -68,6 +68,19 @@ cc_test(
     ],
 )
 
+# Stiff problems with the series of fast variables computed backwards.
+cc_test(
+    name = "stiff_series_test",
+    srcs = ["stiff_series_test.cpp"],
+    deps = [
+        ":test_util",
+        "//sas:sas_computation_lib",
+        "//sas:sas_expr_parser_lib",
+        "//sas:sas_model_parser_lib",
+        "//util:safe_armadillo_headers",
+    ],
+)
+
 # Evaluation, specialization and time-event scheduling of hybrid models (no solver needed).
 cc_test(
     name = "hybrid_model_test",

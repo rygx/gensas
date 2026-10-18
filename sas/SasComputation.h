@@ -71,7 +71,7 @@ namespace che {
 			double segment = 1.0;
 			double alphaTol = 1e-4;
 			double errorTol = 1e-6;
-			int nLvl = 15;
+			int nLvl = 30; // order of the series; 30 was the fastest or near it in a sweep of 8 to 40 on ODEs and DAEs
 			// Hybrid simulations: do not reject a step because an equation is undefined at its end (a
 			// function outside its domain). The part of the step after an event is discarded by the caller,
 			// who checks the part that is kept with SasComputationModel::validateDomain().

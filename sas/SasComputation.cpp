@@ -1640,6 +1640,16 @@ namespace che {
 				} else if (rejectAlpha >= 0.0) {
 					stallReason = describeDomainViolation(sasSol->solution, rejectAlpha);
 				}
+				if (stallReason.empty()) {
+					// The trial steps were rejected for their residual, not for a domain check, as happens when
+					// the series is so long that the residual near a pole is large before any denominator
+					// changes sign within the step. A pole or a violation further along the segment explains it.
+					string why;
+					double at = 0.0;
+					if (!domainOk(sasSol->solution, maxAlpha, &why, &at)) {
+						stallReason = why + " at t = " + to_string(startAbsAlpha + at);
+					}
+				}
 			}
 			if (options.log != nullptr) {
 				*options.log << "Stage start " << startAbsAlpha << " end " << startAbsAlpha + alpha << ", length " << alpha << endl;

@@ -30,7 +30,7 @@ bazel-bin/app/app run job.json [--set key=value ...] [--validate]
 | `model.start` | replaces start values: `{"x": 2, "v[2]": 4}` | none |
 | `solver.endTime` | simulated time | 10 |
 | `solver.segment` | length of one solver segment | 1.0 |
-| `solver.level` | order of the semi-analytical solution, integer 1 to 1000 | 15 |
+| `solver.level` | order of the semi-analytical solution, integer 1 to 1000 | 30 |
 | `solver.alphaTol` | tolerance of the embedding variable | 1e-3 |
 | `solver.errorTol` | error tolerance of the equations | 1e-5 |
 | `output.step` | target spacing of the samples in the result; the last sample is always at the end time | 0.01 |

@@ -63,7 +63,7 @@ Explanations:
 * `--smooth-eps <eps>` (optional, default 1e-6) is the smoothing parameter.
 
 All result files share one schema, version 1: see [Result format](ResultFormat.md).
-* `-l/--level <sas-order>` (optional) specifies the order of SAS. If not specified, the order of SAS is 15.
+* `-l/--level <sas-order>` (optional) specifies the order of SAS. If not specified, the order of SAS is 30.
 * `-t/--time <max-time>` (optional) specifies the maximum time of simulated process. If not specified, the time is set as 10.0.
 * `-s/--segment <segment-length>` (optional) specfies the length of a segment of SAS computation. If not specified, the the segment length is 1.0.
 * `-a/--atol <alpha-tolerance>` (optional) specifies the tolerance of embedding variable in SAS. If not specified, the tolerance is set as 1e-3.

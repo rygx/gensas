@@ -1560,7 +1560,11 @@ namespace che {
 				if (sparseAE) {
 					return sparseLU.solve(v.memptr());
 				}
-				v = spsolve(LHSY, v, "superlu");
+				vec solved;
+				if (!spsolve(solved, LHSY, v, "superlu")) {
+					return false;
+				}
+				v = std::move(solved);
 				return true;
 			};
 			for (int lvl = 1; lvl < options.nLvl; lvl++) {
@@ -1584,7 +1588,7 @@ namespace che {
 			// coefficients of the other variables are computed forward as before, and the two are iterated until
 			// they agree. The method applies when the variable is on its slow manifold to within the error
 			// tolerance (otherwise the transient is real and the forward series, which resolves it, is used).
-			if (options.stableSeries && nX > 0 && options.nLvl >= 10) {
+			if (options.stableSeries && nX > 0 && nX == nDE && options.nLvl >= 10) {
 				mat &sol = sasSol->solution->solution;
 				const int N = options.nLvl - 1;
 				const double dMin = 2.0 * (N + 1);
@@ -1632,7 +1636,7 @@ namespace che {
 								continue;
 							}
 							for (size_t q = 0; q < colTmp.size(); q++) {
-								if (colTmp[q] >= nX) {
+								if (colTmp[q] >= nX && colTmp[q] - nX < static_cast<int>(w.n_elem)) {
 									d -= valTmp[q] * w[colTmp[q] - nX];
 								}
 							}
@@ -1678,9 +1682,8 @@ namespace che {
 						double change = 0.0, scale = 0.0;
 						for (int f = 0; f < nf; f++) {
 							const double d = selfDeriv[f];
-							double next = 0.0; // the coefficient of order N+1 is taken as zero
 							xf[f][N] = 0.0;
-							next = xf[f][N];
+							double next = 0.0; // the coefficient of order N+1 is taken as zero
 							for (int k = N - 1; k >= 0; k--) {
 								const double rest = Fk[f][k] - d * xf[f][k];
 								const double updated = ((k + 1) * next - rest) / d;
@@ -1713,6 +1716,8 @@ namespace che {
 						if (!std::isfinite(change)) {
 							break;
 						}
+						// `change` is the largest change beyond a relative 1e-9 of the coefficient itself (a change at that
+						// level is not resolved by the Pade approximant at the error tolerances in use), so 0 means converged.
 						converged = change <= 1e-12 * std::max(scale, 1e-300);
 					}
 					// Accept the manifold series only if the start is on the manifold within the tolerance.

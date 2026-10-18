@@ -187,7 +187,11 @@ namespace che {
 
 			vec getStartStateIVP();
 
-			vec calcDiff(CheSolution *solution, double alpha);
+			// The residual of the equations at a point of a solution. The derivative of a solution is
+			// built for each call, unless derSol (the result of CheSolutionFactory::makeDerivativeSol for
+			// the same solution, with the solution unchanged since) is given and then reused, so that
+			// the Pade approximant of the derivative is built once for a series, not once per call.
+			vec calcDiff(CheSolution *solution, double alpha, CheSolution *derSol = nullptr);
 
 			// Why the equations are undefined at a point of a solution (a function argument outside its
 			// domain); empty if nothing is found.

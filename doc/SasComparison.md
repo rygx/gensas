@@ -61,7 +61,7 @@ Fewer steps do not yet mean less time. A step of GenSAS costs about 20 to 100 mi
 
 A profile of a three-state model showed that most of the time of a step was not mathematics: 47% went into temporary matrices in the Levinson recursion that computes the Pade coefficients, and 27% into the set-up of SuperLU for a matrix of four unknowns, once per order. Replacing both (plain loops for the Pade routines, a dense LU, factored once per step, for algebraic systems of up to 64 unknowns) made the runs 1.4 to 3.3 times faster with the same results (Lorenz from 18 ms to 6 ms). What is left, in the order of the profile:
 
-* the evaluation of the solution at the many trial times of the step size search (about 60% of the time, mostly allocations in the Pade evaluation),
+* the evaluation of the solution at the many trial times of the step size search (about 60% of the time, mostly allocations in the Pade evaluation). Part of this was repeated work: the residual at a trial time needs the derivative of the solution, and its Pade approximant was rebuilt at every trial (about 13 per step). It is now built once per step, which gives the same steps and errors and runs 2.0 to 2.5 times faster on the small ODEs (Lorenz, 1e-8: 5.2 ms to 2.3 ms) and 1.6 times faster on the ring of machines. Counting arithmetic operations, this repetition was about 90% of the operations of a step on Lorenz.
 * SuperLU, called once per order for algebraic systems of more than 64 unknowns, where a single factorization per step would do,
 * the interpretation of the model: the series arithmetic walks the expression tree of the equations.
 

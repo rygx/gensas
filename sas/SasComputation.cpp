@@ -26,6 +26,7 @@
 //
 #include "sas/SasComputation.h"
 #include <map>
+#include <memory>
 #include <cmath>
 #include <string>
 #include <iostream>
@@ -1262,10 +1263,14 @@ namespace che {
 			return "";
 		}
 
-		vec SasComputationModel::calcDiff(CheSolution *solution, double alpha) {
+		vec SasComputationModel::calcDiff(CheSolution *solution, double alpha, CheSolution *derSol) {
 			vec diff(nDE + nAE, fill::zeros);
 			vec state = solution->getSolValue(alpha);
-			CheSolution *derSol = CheSolutionFactory::makeDerivativeSol(solution);
+			std::unique_ptr<CheSolution> ownDerSol;
+			if (derSol == nullptr) {
+				ownDerSol.reset(CheSolutionFactory::makeDerivativeSol(solution));
+				derSol = ownDerSol.get();
+			}
 			vec der = derSol->getSolValue(alpha);
 			list<shared_ptr<SasModel>> tempList;
 			IdLocator locator(tempList);
@@ -1275,8 +1280,6 @@ namespace che {
 			for (int i = 0; i < nDE + nAE; i++) {
 				diff(i) = calcTreeValue(eqnTable[i]->pHead, &locator);
 			}
-
-			delete derSol;
 
 			return diff;
 		}
@@ -1420,7 +1423,10 @@ namespace che {
 			resetPade();
 
 			// sasSol->solution->solution.print("sol");
-			vec diff = calcDiff(sasSol->solution, 0.0);
+			// The series is final from here on: the derivative, and its Pade approximant, are built once
+			// and used by every trial of the step size search.
+			std::unique_ptr<CheSolution> derSol(CheSolutionFactory::makeDerivativeSol(sasSol->solution));
+			vec diff = calcDiff(sasSol->solution, 0.0, derSol.get());
 			double diffMax = maxAbsEntry(diff);
 			if (!std::isfinite(diffMax)) {
 				string why = describeDomainViolation(sasSol->solution, 0.0);
@@ -1443,7 +1449,7 @@ namespace che {
 			double rejectAlpha = -1.0; // the smallest step rejected because the residual is not finite
 			string rejectWhy;		   // the reason of the smallest step rejected because of a domain violation
 			while (alphaRight - alphaLeft > resolution) {
-				diff = calcDiff(sasSol->solution, alpha);
+				diff = calcDiff(sasSol->solution, alpha, derSol.get());
 				// diff.print("diff");
 				diffMax = maxAbsEntry(diff, options.tolerateNonFinite);
 				string why;

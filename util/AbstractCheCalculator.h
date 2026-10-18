@@ -115,7 +115,8 @@ namespace che {
 		public:
 			static CheSolution *makeInitCheSol(int type, int nState, int nLvl);
 			static CheSolution *makeCopyCheSol(CheSolution *sol);
-			static CheSolution *makeDerivativeSol(CheSolution *sol);
+			// The derivative of a solution; with nRows >= 0, only of its first nRows states.
+			static CheSolution *makeDerivativeSol(CheSolution *sol, int nRows = -1);
 		};
 
 		class CheSingleEmbedSystem {

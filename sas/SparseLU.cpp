@@ -28,6 +28,7 @@
 
 #include "slu_ddefs.h"
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -37,6 +38,9 @@ namespace che {
 		struct SparseLU::Impl {
 			int n = 0;
 			bool ok = false;
+			bool reused = false;
+			// the pattern of the last matrix and the ordering computed for it
+			std::vector<int> patColPtr, patRowIdx, order;
 			SuperMatrix L, U;
 			int *permR = nullptr;
 			int *permC = nullptr;
@@ -70,10 +74,15 @@ namespace che {
 			return impl->ok;
 		}
 
+		bool SparseLU::orderingReused() const {
+			return impl->reused;
+		}
+
 		bool SparseLU::factor(int n, const int *colPtr, const int *rowIdx, const double *values) {
 			Impl &s = *impl;
 			s.release();
 			s.n = n;
+			s.reused = false;
 			if (n <= 0 || colPtr == nullptr || rowIdx == nullptr || values == nullptr || colPtr[0] != 0) {
 				return false;
 			}
@@ -144,7 +153,17 @@ namespace che {
 			superlu_options_t options;
 			set_default_options(&options);
 			options.ColPerm = COLAMD;
-			get_perm_c(options.ColPerm, &A, s.permC);
+			// The ordering depends on the pattern only. sp_preorder changes permC (it composes the
+			// postorder of the elimination tree into it), so the ordering is stored before that.
+			if (s.order.size() == (size_t)n && s.patColPtr.size() == (size_t)n + 1 && s.patRowIdx.size() == (size_t)nnz && std::equal(s.patColPtr.begin(), s.patColPtr.end(), colPtr) && std::equal(s.patRowIdx.begin(), s.patRowIdx.end(), rowIdx)) {
+				std::memcpy(s.permC, s.order.data(), n * sizeof(int));
+				s.reused = true;
+			} else {
+				get_perm_c(options.ColPerm, &A, s.permC);
+				s.order.assign(s.permC, s.permC + n);
+				s.patColPtr.assign(colPtr, colPtr + n + 1);
+				s.patRowIdx.assign(rowIdx, rowIdx + nnz);
+			}
 			StatInit(&stat);
 			sp_preorder(&options, &A, s.permC, etree, &AC);
 			GlobalLU_t glu;

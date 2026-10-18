@@ -113,8 +113,44 @@ static void testRefactorAndSingular() {
 	CHECK(!lu.factor(e.n, e.colPtr.data(), e.rowIdx.data(), e.val.data()));
 }
 
+// The column ordering is kept while the pattern stays the same, and the results do not depend on it.
+static void testOrderingReuse() {
+	Csc a = randomMatrix(80, 0.05, 31);
+	SparseLU reuse, fresh;
+	CHECK(reuse.factor(a.n, a.colPtr.data(), a.rowIdx.data(), a.val.data()));
+	CHECK(!reuse.orderingReused());
+	std::mt19937 gen(9);
+	std::uniform_real_distribution<double> u(-1.0, 1.0);
+	for (int round = 0; round < 3; round++) {
+		Csc b = a; // same pattern, other values
+		for (double &v : b.val) {
+			v *= 1.0 + 0.3 * u(gen);
+		}
+		CHECK(reuse.factor(b.n, b.colPtr.data(), b.rowIdx.data(), b.val.data()));
+		CHECK(reuse.orderingReused());
+		CHECK(fresh.factor(b.n, b.colPtr.data(), b.rowIdx.data(), b.val.data()));
+		std::vector<double> x1(b.n), x2;
+		for (double &v : x1) {
+			v = u(gen);
+		}
+		x2 = x1;
+		CHECK(reuse.solve(x1.data()));
+		CHECK(fresh.solve(x2.data()));
+		for (int i = 0; i < b.n; i++) {
+			CHECK_NEAR(x1[i], x2[i], 1e-9 * (1.0 + std::fabs(x2[i])));
+		}
+	}
+	// another pattern: the ordering is computed again
+	Csc c = randomMatrix(80, 0.07, 32);
+	CHECK(reuse.factor(c.n, c.colPtr.data(), c.rowIdx.data(), c.val.data()));
+	CHECK(!reuse.orderingReused());
+	CHECK(reuse.factor(c.n, c.colPtr.data(), c.rowIdx.data(), c.val.data()));
+	CHECK(reuse.orderingReused());
+}
+
 int main() {
 	testSolves();
 	testRefactorAndSingular();
+	testOrderingReuse();
 	return sastest::finish("sparse_lu_test");
 }

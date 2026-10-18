@@ -26,6 +26,7 @@
 //
 #include "sas/SasComputation.h"
 #include <map>
+#include <memory>
 #include <cmath>
 #include <string>
 #include <iostream>

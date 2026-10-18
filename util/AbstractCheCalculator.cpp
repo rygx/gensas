@@ -287,21 +287,24 @@ namespace che {
 			return d;
 		}
 
-		CheSolution *CheSolutionFactory::makeDerivativeSol(CheSolution *sol) {
+		CheSolution *CheSolutionFactory::makeDerivativeSol(CheSolution *sol, int nRows) {
 			if (sol == NULL)
 				return NULL;
+			if (nRows < 0 || nRows > sol->nState) {
+				nRows = sol->nState;
+			}
 			if (sol->type == CHESOL_PS) {
-				CheSolutionPowerSeries *pSol = new CheSolutionPowerSeries(sol->nState, sol->nLvl);
+				CheSolutionPowerSeries *pSol = new CheSolutionPowerSeries(nRows, sol->nLvl);
 				CheSolutionPowerSeries *pOri = dynamic_cast<CheSolutionPowerSeries *>(sol);
 				if (pOri != nullptr) {
-					pSol->solution = getDer(pOri->solution);
+					pSol->solution = getDer(pOri->solution.head_rows(nRows));
 				}
 				return pSol;
 			} else if (sol->type == CHESOL_PADE) {
-				CheSolutionPade *pSol = new CheSolutionPade(sol->nState, sol->nLvl, PADE_LEVINSON);
+				CheSolutionPade *pSol = new CheSolutionPade(nRows, sol->nLvl, PADE_LEVINSON);
 				CheSolutionPade *pOri = dynamic_cast<CheSolutionPade *>(sol);
 				if (pOri != nullptr) {
-					pSol->solution = getDer(pOri->solution);
+					pSol->solution = getDer(pOri->solution.head_rows(nRows));
 					pSol->num = pOri->num;
 					pSol->den = pOri->num;
 					pSol->ready = false;

@@ -1268,7 +1268,7 @@ namespace che {
 			vec state = solution->getSolValue(alpha);
 			std::unique_ptr<CheSolution> ownDerSol;
 			if (derSol == nullptr) {
-				ownDerSol.reset(CheSolutionFactory::makeDerivativeSol(solution));
+				ownDerSol.reset(CheSolutionFactory::makeDerivativeSol(solution, nX));
 				derSol = ownDerSol.get();
 			}
 			vec der = derSol->getSolValue(alpha);
@@ -1461,7 +1461,7 @@ namespace che {
 			// sasSol->solution->solution.print("sol");
 			// The series is final from here on: the derivative, and its Pade approximant, are built once
 			// and used by every trial of the step size search.
-			std::unique_ptr<CheSolution> derSol(CheSolutionFactory::makeDerivativeSol(sasSol->solution));
+			std::unique_ptr<CheSolution> derSol(CheSolutionFactory::makeDerivativeSol(sasSol->solution, nX));
 			vec diff = calcDiff(sasSol->solution, 0.0, derSol.get());
 			double diffMax = maxAbsEntry(diff);
 			if (!std::isfinite(diffMax)) {

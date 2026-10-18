@@ -1484,25 +1484,67 @@ namespace che {
 			const double resolution = std::min(options.alphaTol, maxAlpha / 64.0);
 			double rejectAlpha = -1.0; // the smallest step rejected because the residual is not finite
 			string rejectWhy;		   // the reason of the smallest step rejected because of a domain violation
-			while (alphaRight - alphaLeft > resolution) {
-				diff = calcDiff(sasSol->solution, alpha, derSol.get());
+			double rejectWhyAlpha = -1.0;
+			// Whether the equations hold within the tolerance after a step of the given length.
+			auto acceptable = [&](double a) {
+				diff = calcDiff(sasSol->solution, a, derSol.get());
 				// diff.print("diff");
 				diffMax = maxAbsEntry(diff, options.tolerateNonFinite);
 				string why;
-				if (diffMax < tol && (options.tolerateNonFinite || domainOk(sasSol->solution, alpha, &why))) {
-					alphaLeft = alpha;
-					alpha = (alphaLeft + alphaRight) / 2;
-				} else {
-					if (!why.empty()) {
+				if (diffMax < tol && (options.tolerateNonFinite || domainOk(sasSol->solution, a, &why))) {
+					return true;
+				}
+				if (!why.empty()) {
+					if (rejectWhyAlpha < 0.0 || a < rejectWhyAlpha) {
 						rejectWhy = why;
-					} else if (!std::isfinite(diffMax)) {
-						rejectAlpha = alpha;
+						rejectWhyAlpha = a;
 					}
+				} else if (!std::isfinite(diffMax) && (rejectAlpha < 0.0 || a < rejectAlpha)) {
+					rejectAlpha = a;
+				}
+				return false;
+			};
+			// Where to start the search: the length of the previous step. Consecutive steps are alike, so
+			// a probe at that length and a few geometric moves up or down bracket the answer in two or three
+			// trials instead of the thirteen of a bisection of the whole segment. Without a previous step
+			// (the first of a run) the search starts from the whole segment.
+			constexpr double kProbeFactor = 1.5;
+			if (lastStep > resolution && lastStep < maxAlpha) {
+				if (acceptable(lastStep)) {
+					alphaLeft = lastStep;
+					while (alphaLeft < maxAlpha) {
+						const double next = std::min(maxAlpha, alphaLeft * kProbeFactor);
+						if (acceptable(next)) {
+							alphaLeft = next;
+						} else {
+							alphaRight = next;
+							break;
+						}
+					}
+				} else {
+					alphaRight = lastStep;
+					while (alphaRight > resolution) {
+						const double next = alphaRight / kProbeFactor;
+						if (acceptable(next)) {
+							alphaLeft = next;
+							break;
+						}
+						alphaRight = next;
+					}
+				}
+			} else if (acceptable(maxAlpha)) {
+				alphaLeft = maxAlpha;
+			}
+			while (alphaRight - alphaLeft > resolution) {
+				alpha = (alphaLeft + alphaRight) / 2;
+				if (acceptable(alpha)) {
+					alphaLeft = alpha;
+				} else {
 					alphaRight = alpha;
-					alpha = (alphaLeft + alphaRight) / 2;
 				}
 			}
 			alpha = alphaLeft;
+			lastStep = alpha;
 			if (alpha <= 0.0) {
 				// The step cannot advance because the equations are undefined right after this point.
 				if (!rejectWhy.empty()) {
@@ -1533,6 +1575,7 @@ namespace che {
 			const double timeEps = 1e-12 * std::max(1.0, std::fabs(options.endTime));
 			solverWarnings.clear();
 			stallReason.clear();
+			lastStep = 0.0;
 			domainChecks.clear();
 			for (const shared_ptr<AstTree> &t : eqnTable) {
 				collectDomainChecks(t->pHead, domainChecks);

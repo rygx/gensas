@@ -324,9 +324,11 @@ namespace che {
 					// and sample dominated the run time), and a solution is evaluated once per sample time.
 					const set<string> guardNames = collectGuardNames(guards);
 					vector<pair<string, int>> scanIdx;
+					vector<int> scanRows; // the rows of the solution of the guard variables
 					for (const pair<string, int> &ni : nameIdx) {
-						if (guardNames.count(ni.first) > 0) {
+						if (guardNames.count(ni.first) > 0 && ni.second >= 0 && ni.second < comp->nX + comp->nY) {
 							scanIdx.push_back(ni);
+							scanRows.push_back(ni.second);
 						}
 					}
 					const SasSolution *scanSol = NULL;
@@ -336,11 +338,10 @@ namespace che {
 							return;
 						}
 						if (!scanIdx.empty()) {
-							arma::vec v = sol->solution->getSolValue(alpha - sol->absStart);
-							for (const pair<string, int> &ni : scanIdx) {
-								if (ni.second >= 0 && ni.second < (int)v.n_rows) {
-									scanEnv.values[ni.first] = v(ni.second);
-								}
+							// only the rows of the guard variables are evaluated (a grid has thousands of variables)
+							const arma::vec v = sol->solution->getSolValueRows(alpha - sol->absStart, scanRows);
+							for (size_t i = 0; i < scanIdx.size(); i++) {
+								scanEnv.values[scanIdx[i].first] = v[i];
 							}
 						}
 						scanEnv.time = alpha;

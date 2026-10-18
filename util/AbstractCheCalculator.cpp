@@ -150,6 +150,27 @@ namespace che {
 			return getPowerSeriesValue(solution, alpha);
 		}
 
+		vec CheSolution::getSolValueRows(double alpha, const std::vector<int> &rows) {
+			const vec all = getSolValue(alpha);
+			vec out(rows.size());
+			for (size_t i = 0; i < rows.size(); i++) {
+				out[i] = all[rows[i]];
+			}
+			return out;
+		}
+
+		vec CheSolutionPowerSeries::getSolValueRows(double alpha, const std::vector<int> &rows) {
+			vec out(rows.size());
+			for (size_t i = 0; i < rows.size(); i++) {
+				double v = solution(rows[i], solution.n_cols - 1);
+				for (int k = static_cast<int>(solution.n_cols) - 2; k >= 0; k--) {
+					v = alpha * v + solution(rows[i], k);
+				}
+				out[i] = v;
+			}
+			return out;
+		}
+
 		CheSolutionPowerSeries::~CheSolutionPowerSeries() {}
 
 		CheSolutionPade::CheSolutionPade(int nState, int num, int den, PadeSolverType sol) : CheSolution(nState, num + den) {
@@ -216,6 +237,57 @@ namespace che {
 				}
 				return sol;
 			}
+		}
+
+		vec CheSolutionPade::getSolValueRows(double alpha, const std::vector<int> &rows) {
+			if (!ready) {
+				if (solver == PADE_LEVINSON) {
+					ready = genPadeCoeffLevinson();
+				} else {
+					ready = genPadeCoeffLU();
+				}
+			}
+			vec out(rows.size());
+			if (!ready) {
+				for (size_t i = 0; i < rows.size(); i++) {
+					double v = solution(rows[i], solution.n_cols - 1);
+					for (int k = static_cast<int>(solution.n_cols) - 2; k >= 0; k--) {
+						v = alpha * v + solution(rows[i], k);
+					}
+					out[i] = v;
+				}
+				return out;
+			}
+			// The same Horner sums as getSolValue, row by row (so the values are identical to those of getSolValue).
+			const int nn = numerator.n_cols;
+			const int nd = denomenator.n_cols;
+			for (size_t i = 0; i < rows.size(); i++) {
+				const int r = rows[i];
+				double s = nn > 0 ? numerator(r, nn - 1) : 0.0;
+				double dv = nd > 0 ? denomenator(r, nd - 1) : 1.0;
+				for (int k = nn - 2; k >= 0; k--) {
+					s = alpha * s + numerator(r, k);
+				}
+				for (int k = nd - 2; k >= 0; k--) {
+					dv = alpha * dv + denomenator(r, k);
+				}
+				if (nd > 0) {
+					dv = alpha * dv + 1.0;
+				}
+				s /= dv;
+				if (!std::isfinite(s)) {
+					// as in getSolValue: the row falls back to its power series, for good
+					double v = solution(r, solution.n_cols - 1);
+					for (int k = static_cast<int>(solution.n_cols) - 2; k >= 0; k--) {
+						v = alpha * v + solution(r, k);
+					}
+					s = v;
+					numerator.row(r) = solution.submat(r, 0, r, this->num - 1);
+					denomenator.row(r).fill(0.0);
+				}
+				out[i] = s;
+			}
+			return out;
 		}
 
 		// Derivative of the power series sum c_k a^k, rows 0..nRows-1, by Horner's rule on k c_k.

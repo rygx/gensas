@@ -75,7 +75,36 @@ static void checkAnalyticDerivative(int type) {
 	}
 }
 
+// getSolValueRows gives the entries of getSolValue for the listed rows, in the order of the list (repeats allowed), also
+// for a row of a Pade approximant that is not finite at alpha (it falls back to the power series, for good).
+static void checkRows(int type) {
+	const int nState = 6, nLvl = 15;
+	auto make = [&]() {
+		std::unique_ptr<CheSolution> s(CheSolutionFactory::makeInitCheSol(type, nState, nLvl));
+		fillSeries(s.get(), nState, nLvl);
+		for (int k = 0; k < nLvl; k++) {
+			s->solution(4, k) = 1.0; // 1 / (1 - t): the Pade approximant has its pole at t = 1
+		}
+		return s;
+	};
+	std::unique_ptr<CheSolution> sol = make(), ref = make();
+	const std::vector<int> rows = {5, 0, 4, 2, 2};
+	// (alpha = 1 is the pole of row 4: after it the row stays on its power series, and so the values at 0.3 again)
+	for (double alpha : {0.0, 0.3, 0.9, 1.0, 0.3, 1.0}) {
+		const arma::vec some = sol->getSolValueRows(alpha, rows);
+		const arma::vec all = ref->getSolValue(alpha);
+		CHECK_EQ((int)some.n_rows, (int)rows.size());
+		for (size_t i = 0; i < rows.size() && i < some.n_rows; i++) {
+			// (not bitwise: a compiler may fuse the multiply and add of the Horner sums differently in the two loops)
+			CHECK_NEAR(some(i), all(rows[i]), 1e-12 * (1.0 + std::fabs(all(rows[i]))));
+		}
+	}
+	CHECK_EQ((int)sol->getSolValueRows(0.5, std::vector<int>()).n_rows, 0);
+}
+
 int main() {
+	checkRows(CHESOL_PADE);
+	checkRows(CHESOL_PS);
 	check(CHESOL_PADE);
 	check(CHESOL_PS);
 	checkAnalyticDerivative(CHESOL_PADE);

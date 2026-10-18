@@ -38,6 +38,19 @@ static const char *kRobertson =
 	"  der(y3) = 3e7 * y2 * y2;\n"
 	"end R;\n";
 
+// Robertson's problem with the third species as an algebraic variable (a DAE, so the effective self-derivative of a
+// fast variable is formed with the algebraic variables eliminated).
+static const char *kRobertsonDae =
+	"model RD\n"
+	"  Real y1(start = 1);\n"
+	"  Real y2(start = 0);\n"
+	"  Real y3(start = 0);\n"
+	"equation\n"
+	"  der(y1) = -0.04 * y1 + 1e4 * y2 * y3;\n"
+	"  der(y2) = 0.04 * y1 - 1e4 * y2 * y3 - 3e7 * y2 * y2;\n"
+	"  0 = y1 + y2 + y3 - 1;\n"
+	"end RD;\n";
+
 struct Result {
 	size_t steps = 0;
 	std::vector<double> x; // final state in the order of `names`
@@ -122,6 +135,20 @@ int main() {
 		if (on.x.size() == 3) {
 			CHECK_NEAR(on.x[0] + on.x[1] + on.x[2], 1.0, 1e-6);
 		}
+	}
+	// Robertson as a DAE: the same result in far fewer steps; y1(100) = 0.61723488 (reference solution)
+	{
+		const double T = 100.0;
+		Result on = run(kRobertsonDae, {"y1", "y2", "y3"}, T, 1e-6, true);
+		Result off = run(kRobertsonDae, {"y1", "y2", "y3"}, T, 1e-6, false);
+		CHECK_EQ((int)on.x.size(), 3);
+		CHECK_EQ((int)off.x.size(), 3);
+		if (on.x.size() == 3 && off.x.size() == 3) {
+			CHECK_NEAR(on.x[0], 0.617234882, 1e-5);
+			CHECK_NEAR(on.x[0] + on.x[1] + on.x[2], 1.0, 1e-9);
+			CHECK_NEAR(on.x[0], off.x[0], 1e-4);
+		}
+		CHECK(on.steps > 0 && on.steps * 10 < off.steps);
 	}
 	return sastest::finish("stiff_series_test");
 }

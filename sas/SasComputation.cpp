@@ -1682,7 +1682,7 @@ namespace che {
 						for (int f = 0; f < nf; f++) {
 							const double d = selfDeriv[f];
 							xf[f][N] = 0.0;
-							double next = 0.0; // the coefficient of order N+1 is taken as zero
+							double next = 0.0; // the coefficient of order N is taken as zero
 							for (int k = N - 1; k >= 0; k--) {
 								const double rest = Fk[f][k] - d * xf[f][k];
 								const double updated = ((k + 1) * next - rest) / d;

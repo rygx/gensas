@@ -1334,14 +1334,9 @@ namespace che {
 			return "";
 		}
 
-		vec SasComputationModel::calcDiff(CheSolution *solution, double alpha, CheSolution *derSol) {
+		vec SasComputationModel::calcDiff(CheSolution *solution, double alpha) {
 			vec state = solution->getSolValue(alpha);
-			std::unique_ptr<CheSolution> ownDerSol;
-			if (derSol == nullptr) {
-				ownDerSol.reset(CheSolutionFactory::makeDerivativeSol(solution, nX));
-				derSol = ownDerSol.get();
-			}
-			vec der = derSol->getSolValue(alpha);
+			vec der = solution->getDerValue(alpha, nX);
 			return calcDiffAt(state, der);
 		}
 
@@ -1549,8 +1544,7 @@ namespace che {
 			// sasSol->solution->solution.print("sol");
 			// The series is final from here on: the derivative, and its Pade approximant, are built once
 			// and used by every trial of the step size search.
-			std::unique_ptr<CheSolution> derSol(CheSolutionFactory::makeDerivativeSol(sasSol->solution, nX));
-			vec diff = calcDiff(sasSol->solution, 0.0, derSol.get());
+			vec diff = calcDiff(sasSol->solution, 0.0);
 			double diffMax = maxAbsEntry(diff);
 			if (!std::isfinite(diffMax)) {
 				string why = describeDomainViolation(sasSol->solution, 0.0);
@@ -1575,7 +1569,7 @@ namespace che {
 			double rejectWhyAlpha = -1.0;
 			// Whether the equations hold within the tolerance after a step of the given length.
 			auto acceptable = [&](double a) {
-				diff = calcDiff(sasSol->solution, a, derSol.get());
+				diff = calcDiff(sasSol->solution, a);
 				// diff.print("diff");
 				diffMax = maxAbsEntry(diff, options.tolerateNonFinite);
 				string why;

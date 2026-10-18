@@ -50,8 +50,35 @@ static void check(int type) {
 	CHECK_EQ(big->nState, nState);
 }
 
+// getDerValue is the analytic derivative of the evaluated solution (for a Pade approximant, the derivative of
+// the approximant itself): it matches a central difference of getSolValue.
+static void checkAnalyticDerivative(int type) {
+	const int nState = 5, nLvl = 15;
+	std::unique_ptr<CheSolution> sol(CheSolutionFactory::makeInitCheSol(type, nState, nLvl));
+	fillSeries(sol.get(), nState, nLvl);
+	const double h = 1e-5;
+	for (double alpha : {0.0, 0.05, 0.3, 0.9}) {
+		const arma::vec d = sol->getDerValue(alpha, nState);
+		const arma::vec hi = sol->getSolValue(alpha + h);
+		const arma::vec lo = sol->getSolValue(alpha - h);
+		CHECK_EQ((int)d.n_rows, nState);
+		for (int r = 0; r < nState && r < (int)d.n_rows; r++) {
+			CHECK_NEAR(d(r), (hi(r) - lo(r)) / (2 * h), 1e-6 * (1.0 + std::fabs(d(r))));
+		}
+	}
+	// a smaller number of rows gives the first rows
+	const arma::vec all = sol->getDerValue(0.3, nState);
+	const arma::vec head = sol->getDerValue(0.3, 3);
+	CHECK_EQ((int)head.n_rows, 3);
+	for (int r = 0; r < 3 && r < (int)head.n_rows; r++) {
+		CHECK_EQ(all(r), head(r));
+	}
+}
+
 int main() {
 	check(CHESOL_PADE);
 	check(CHESOL_PS);
+	checkAnalyticDerivative(CHESOL_PADE);
+	checkAnalyticDerivative(CHESOL_PS);
 	return sastest::finish("derivative_solution_test");
 }

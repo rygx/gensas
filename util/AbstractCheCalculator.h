@@ -72,6 +72,12 @@ namespace che {
 
 			virtual vec getSolValue(double alpha) = 0;
 
+			// The derivative with respect to alpha of the first nRows states of the solution as it is evaluated
+			// by getSolValue (the analytic derivative of the Pade approximant, or of the power series), not the
+			// value of an approximant built from the differentiated coefficients: the latter is the same function
+			// as the right-hand side of a linear equation and cannot show that the approximant is wrong.
+			virtual vec getDerValue(double alpha, int nRows = -1) = 0;
+
 			virtual ~CheSolution();
 
 			CheSolution(const CheSolution &) = delete;
@@ -84,6 +90,8 @@ namespace che {
 			CheSolutionPowerSeries(int nState, int nLvl);
 
 			virtual vec getSolValue(double alpha);
+
+			virtual vec getDerValue(double alpha, int nRows);
 
 			virtual ~CheSolutionPowerSeries();
 		};
@@ -102,6 +110,8 @@ namespace che {
 			CheSolutionPade(int nState, int nLvl, PadeSolverType sol = PADE_LEVINSON);
 
 			virtual vec getSolValue(double alpha);
+
+			virtual vec getDerValue(double alpha, int nRows);
 
 			virtual ~CheSolutionPade();
 

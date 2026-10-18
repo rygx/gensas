@@ -19,7 +19,7 @@ A conventional integrator takes a step by combining a few evaluations of the rig
 * **A solution that is a function, not a list of points.** The approximant can be evaluated at any time in the step. Output samples, the check of equation residuals, and the search for event times all use this function; none of them needs extra steps or an interpolation of lower order than the solver.
 * **No Newton iteration in time stepping.** Algebraic equations of a DAE are part of the series recurrence, so a step solves a sequence of linear systems with the same matrix, not a nonlinear iteration that may fail to converge.
 * **A step size that follows the analytic structure of the solution.** The Pade approximant is useful beyond the radius of convergence of the series, and the step is chosen from the residual of the equations, not from a stability limit of the method.
-* **A high and adjustable order** (default 15, up to 1000) instead of the fixed order of a Runge-Kutta pair.
+* **A high and adjustable order** (default 30, up to 1000) instead of the fixed order of a Runge-Kutta pair.
 
 The price is a more expensive step: one linear solve per order plus the series arithmetic of the nonlinear terms, and a model with many nonlinear functions has more series to carry.
 

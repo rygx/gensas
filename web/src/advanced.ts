@@ -21,7 +21,7 @@ export interface Field {
 
 export const FIELDS: Field[] = [
   { key: "segment", label: "Longest step", help: "Largest length of one solver segment (s). Shorter steps follow fast changes more closely and cost more time.", min: 1e-4, max: 10, fallback: "1" },
-  { key: "level", label: "Series order", help: "Order of the series solution in each step. A higher order allows longer steps for smooth models.", min: 1, max: 1000, fallback: "15", integer: true },
+  { key: "level", label: "Series order", help: "Order of the series solution in each step. A higher order allows longer steps for smooth models.", min: 1, max: 1000, fallback: "30", integer: true },
   { key: "alphaTol", label: "Step shrink tolerance", help: "How finely the step end is searched when the error is too large. At most the longest step.", min: 1e-9, max: 10, fallback: "0.001" },
   { key: "errorTol", label: "Error tolerance", help: "Largest residual of the equations accepted in a step. Smaller is more accurate and slower.", min: 1e-10, max: 1e-2, fallback: "1e-5" },
   { key: "outputStep", label: "Output spacing", help: "Spacing of the result samples (s). The solver steps are not affected. Default: one thousandth of the end time.", min: 1e-3, max: 1, fallback: "automatic" },

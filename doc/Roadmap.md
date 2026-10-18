@@ -71,7 +71,7 @@ Compare runs, then selective results (shared with large systems), then one-param
 ## Known problems and small fixes
 
 * **Smoothed `abs` can leave the domain of `sqrt`.** With `--piecewise smooth` the Chua circuit stops at t = 0.118 with a message about `sqrt`: the series of `sqrt(e*e + eps*eps)` is evaluated outside its domain. The exact mode (events) works.
-* **Very stiff problems are slow.** The Robertson problem needs about 80 000 steps (see [the comparison](SasComparison.md)). The cause is not analyzed.
+* **Very stiff problems are slow.** The Robertson problem needs about 100 000 steps (see [the comparison](SasComparison.md)). The cause is [the radius of convergence of the series](SasComparison.md#why-stiff-problems-cost-many-steps): the step is about 40 over the fast eigenvalue whenever the fast dynamics are nonlinear. Ideas, none tried: a higher default order for stiff models, an exponential integrating factor for the fast linear part, and measuring whether the fast modes of a power system are of this kind.
 * **A Zeno point ends the run with an error.** The message explains it, but the run could keep its results up to the accumulation point, or treat the accumulation point as the end of a run that ended normally. Not decided.
 * **A model with an unbound `input` cannot be run on its own.** The message is correct, but the web client could mark such models as components in the model selector, or point at the declaration.
 * **Algebraic variables need a start value when the equations cannot be evaluated at 0.** A division by an algebraic variable (`r` in a Kepler model) fails at t = 0 with the message that the equations cannot be evaluated; the fix is `Real r(start = 1)`. The message could say that.

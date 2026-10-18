@@ -1637,7 +1637,11 @@ namespace che {
 			// coefficients of the other variables are computed forward as before, and the two are iterated until
 			// they agree. The method applies when the variable is on its slow manifold to within the error
 			// tolerance (otherwise the transient is real and the forward series, which resolves it, is used).
-			if (options.stableSeries && nX > 0 && nX == nDE && nAE == nY && options.nLvl >= 10) {
+			const bool skipStable = stableSkip > 0;
+			if (skipStable) {
+				stableSkip--;
+			}
+			if (options.stableSeries && !skipStable && nX > 0 && nX == nDE && nAE == nY && options.nLvl >= 10) {
 				mat &sol = sasSol->solution->solution;
 				const int N = options.nLvl - 1;
 				const double dMin = 2.0 * (N + 1);
@@ -1716,6 +1720,8 @@ namespace che {
 					vector<double> prevGap(nf, -1.0);
 					double prevChange = std::numeric_limits<double>::infinity();
 					int stalled = 0;
+					int growing = 0;
+					bool farOffExit = false;
 					for (int sweep = 0; sweep < maxSweeps && !converged; sweep++) {
 						// Pass A, upward in the order: the slow variables and the algebraic variables as usual, the fast
 						// ones keep their current coefficients and only record the right-hand side.
@@ -1734,6 +1740,7 @@ namespace che {
 						}
 						// Pass B, downward in the order: the fast variables.
 						double change = 0.0, scale = 0.0;
+						bool finite = true;
 						for (int f = 0; f < nf; f++) {
 							const double d = selfDeriv[f];
 							xf[f][N] = 0.0;
@@ -1741,6 +1748,7 @@ namespace che {
 							for (int k = N - 1; k >= 0; k--) {
 								const double rest = Fk[f][k] - d * xf[f][k];
 								const double updated = ((k + 1) * next - rest) / d;
+								finite = finite && std::isfinite(updated);
 								change = std::max(change, std::fabs(updated - xf[f][k]) - 1e-9 * std::fabs(updated));
 								xf[f][k] = updated;
 								next = updated;
@@ -1767,8 +1775,8 @@ namespace che {
 							}
 							sol.col(0).tail(nY) = forwardSeries.col(0).tail(nY) + totalRhs;
 						}
-						if (!std::isfinite(change)) {
-							break;
+						if (!finite || !std::isfinite(change)) {
+							break; // (std::max ignores a NaN, so the coefficients are checked themselves)
 						}
 						// `change` is the largest change beyond a relative 1e-9 of the coefficient itself (a change at that
 						// level is not resolved by the Pade approximant at the error tolerances in use), so 0 means converged.
@@ -1783,8 +1791,15 @@ namespace che {
 								prevGap[f] = gap;
 							}
 							stalled = (sweep >= 6 && change >= 0.5 * prevChange) ? stalled + 1 : 0;
+							// the iteration diverges (as for some models with a fast variable that does not decay): the change
+							// more than doubles at three sweeps in a row
+							growing = (sweep >= 1 && change > 2.0 * prevChange) ? growing + 1 : 0;
 							prevChange = change;
-							if (farOff || stalled >= 3) {
+							if (farOff) {
+								farOffExit = true;
+								break;
+							}
+							if (stalled >= 3 || growing >= 3) {
 								break;
 							}
 						}
@@ -1793,6 +1808,13 @@ namespace che {
 					bool onManifold = converged;
 					for (int f = 0; f < nf && onManifold; f++) {
 						onManifold = std::fabs(x0[fast[f]] - xf[f][0]) <= 20.0 * tol / std::fabs(selfDeriv[f]);
+					}
+					if (!converged && !farOffExit) {
+						// diverged or stalled: skip the attempt at the next steps (1, 3, 7, 15 steps with the failures in a row)
+						stableFails++;
+						stableSkip = (1 << std::min(stableFails, 4)) - 1;
+					} else if (onManifold) {
+						stableFails = 0;
 					}
 					if (onManifold) {
 						stableSeriesSteps++;
@@ -1932,6 +1954,8 @@ namespace che {
 			stallReason.clear();
 			lastStep = 0.0;
 			stableSeriesSteps = 0;
+			stableFails = 0;
+			stableSkip = 0;
 			domainChecks.clear();
 			for (const shared_ptr<AstTree> &t : eqnTable) {
 				collectDomainChecks(t->pHead, domainChecks);

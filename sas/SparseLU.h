@@ -33,7 +33,9 @@ namespace che {
 	namespace core {
 
 		// A sparse LU factorization of a square matrix (SuperLU, column ordering COLAMD, partial pivoting),
-		// factored once and solved for any number of right-hand sides. The solver needs this for the
+		// factored once and solved for any number of right-hand sides. An object that factors matrices with
+		// the same pattern again and again (the matrix of the algebraic equations at each step) keeps the
+		// column ordering from one factorization to the next. The solver needs this for the
 		// matrix of the algebraic equations, which is the same at every order of a series.
 		//
 		// This header does not include SuperLU or Armadillo (their headers do not mix well), so the matrix
@@ -54,6 +56,11 @@ namespace che {
 			bool solve(double *b);
 
 			bool factored() const;
+
+			// Whether the last factor() reused the column ordering of the call before (the sparsity pattern
+			// was the same). The ordering depends on the pattern only, so the result is the same either way;
+			// computing it is a good part of the cost of the factorization of a sparse matrix.
+			bool orderingReused() const;
 
 		private:
 			struct Impl;

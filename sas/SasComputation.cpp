@@ -1405,7 +1405,7 @@ namespace che {
 
 			// A larger system is factored once, sparsely, with SuperLU: calling spsolve at every order
 			// factors the same matrix again each time.
-			SparseLU sparseLU;
+			SparseLU &sparseLU = algebraicLU;
 			const bool sparseAE = nAE > 0 && nAE == nY && !denseAE;
 			if (sparseAE) {
 				LHSY.sync();

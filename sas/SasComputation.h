@@ -31,6 +31,7 @@
 #include "sas/SasInput.h"
 #include "sas/SasLexico.h"
 #include "sas/SasResult.h"
+#include "sas/SparseLU.h"
 #include <functional>
 #include <list>
 #include <vector>
@@ -213,6 +214,9 @@ namespace che {
 			std::string stallReason;
 			// The length of the previous step of the run; the search for the next one starts there.
 			double lastStep = 0.0;
+			// The factorization of the matrix of the algebraic equations; it keeps the column ordering from
+			// step to step, because the sparsity pattern does not change.
+			SparseLU algebraicLU;
 
 			shared_ptr<SasSolution> solveSegment(const vec &init, double curAlpha, double seg, const SasComputationOptions &options);
 		};

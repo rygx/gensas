@@ -202,11 +202,10 @@ namespace che {
 
 			vec getStartStateIVP();
 
-			// The residual of the equations at a point of a solution. The derivative of a solution is
-			// built for each call, unless derSol (the result of CheSolutionFactory::makeDerivativeSol for
-			// the same solution, with the solution unchanged since) is given and then reused, so that
-			// the Pade approximant of the derivative is built once for a series, not once per call.
-			vec calcDiff(CheSolution *solution, double alpha, CheSolution *derSol = nullptr);
+			// The residual of the equations at a point of a solution: the state and the analytic derivative of
+			// the solution as it is evaluated (the derivative of the Pade approximant itself, so that the residual
+			// is the defect of the approximant; see CheSolution::getDerValue).
+			vec calcDiff(CheSolution *solution, double alpha);
 
 			// The residual of the equations for a given state and derivative.
 			vec calcDiffAt(const arma::vec &state, const arma::vec &der);

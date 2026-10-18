@@ -218,6 +218,78 @@ namespace che {
 			}
 		}
 
+		// Derivative of the power series sum c_k a^k, rows 0..nRows-1, by Horner's rule on k c_k.
+		static vec powerSeriesDerivative(const mat &c, int nRows, double alpha) {
+			vec d(nRows, fill::zeros);
+			for (int k = static_cast<int>(c.n_cols) - 1; k >= 1; k--) {
+				for (int r = 0; r < nRows; r++) {
+					d[r] = d[r] * alpha + k * c(r, k);
+				}
+			}
+			return d;
+		}
+
+		vec CheSolutionPowerSeries::getDerValue(double alpha, int nRows) {
+			if (nRows < 0 || nRows > nState) {
+				nRows = nState;
+			}
+			return powerSeriesDerivative(solution, nRows, alpha);
+		}
+
+		vec CheSolutionPade::getDerValue(double alpha, int nRows) {
+			if (nRows < 0 || nRows > nState) {
+				nRows = nState;
+			}
+			if (!ready) {
+				if (solver == PADE_LEVINSON) {
+					ready = genPadeCoeffLevinson();
+				} else {
+					ready = genPadeCoeffLU();
+				}
+			}
+			if (!ready) {
+				return powerSeriesDerivative(solution, nRows, alpha);
+			}
+			// P = N / D with D = 1 + a Q(a); P' = (N' D - N D') / D^2. Horner's rule for each polynomial and its
+			// derivative, the loop over the rows innermost on contiguous memory.
+			const int nn = numerator.n_cols;
+			const int nd = denomenator.n_cols;
+			vec out(nRows);
+			vec n(nRows, fill::zeros), dn(nRows, fill::zeros), q(nRows, fill::zeros), dq(nRows, fill::zeros);
+			const double *np = numerator.memptr();
+			const double *dp = denomenator.memptr();
+			for (int k = nn - 1; k >= 0; k--) {
+				const double *col = np + (size_t)k * nState;
+				for (int r = 0; r < nRows; r++) {
+					dn[r] = dn[r] * alpha + n[r];
+					n[r] = n[r] * alpha + col[r];
+				}
+			}
+			for (int k = nd - 1; k >= 0; k--) {
+				const double *col = dp + (size_t)k * nState;
+				for (int r = 0; r < nRows; r++) {
+					dq[r] = dq[r] * alpha + q[r];
+					q[r] = q[r] * alpha + col[r];
+				}
+			}
+			bool finite = true;
+			for (int r = 0; r < nRows; r++) {
+				const double den = 1.0 + alpha * q[r];
+				const double dden = q[r] + alpha * dq[r];
+				out[r] = (dn[r] * den - n[r] * dden) / (den * den);
+				finite = finite && std::isfinite(out[r]);
+			}
+			if (!finite) {
+				const vec ps = powerSeriesDerivative(solution, nRows, alpha);
+				for (int r = 0; r < nRows; r++) {
+					if (!std::isfinite(out[r])) {
+						out[r] = ps[r];
+					}
+				}
+			}
+			return out;
+		}
+
 		bool CheSolutionPade::genPadeCoeffLU() {
 			mat augTc = join_rows(mat(nState, den, fill::zeros), solution);
 			int nT = 2 * den - 1;

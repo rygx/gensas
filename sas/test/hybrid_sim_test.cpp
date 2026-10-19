@@ -965,8 +965,8 @@ static void testStableSeriesAcrossEvents() {
 }
 
 // Runs a model with and without the cache of the flattened model of each mode: the same segments, events and values to the
-// last bit. Returns the number of segments.
-static int compareModeCache(const string &src, double endTime) {
+// last bit. Returns the number of segments and the number of segments that reused a model.
+static int compareModeCache(const string &src, double endTime, int *hits) {
 	Run with, without;
 	g_modeCache = true;
 	const bool ok1 = simulate(with, src, endTime);
@@ -978,6 +978,8 @@ static int compareModeCache(const string &src, double endTime) {
 		return 0;
 	}
 	CHECK_EQ(with.sim->segmentCount(), without.sim->segmentCount());
+	CHECK_EQ(without.sim->modeCacheHits(), 0);
+	*hits = with.sim->modeCacheHits();
 	CHECK_EQ(with.sol->solutionLink.size(), without.sol->solutionLink.size());
 	CHECK_EQ(with.sim->events().size(), without.sim->events().size());
 	if (with.sim->events().size() == without.sim->events().size()) {
@@ -999,6 +1001,7 @@ static int compareModeCache(const string &src, double endTime) {
 // A thermostat with an algebraic variable switches between two modes many times: every return to a mode reuses its
 // flattened model, and the run is the same as without the cache.
 static void testModeCacheRecurringModes() {
+	int hits = 0;
 	const int segments = compareModeCache(
 		"model Thermostat\n"
 		"  Real T(start = 20);\n"
@@ -1013,8 +1016,26 @@ static void testModeCacheRecurringModes() {
 		"    on = false;\n"
 		"  end when;\n"
 		"end Thermostat;\n",
-		40.0);
+		40.0, &hits);
 	CHECK(segments >= 8);
+	CHECK(hits >= segments - 3); // the two modes are built once; the segments of the first stretch may differ in the guards
+}
+
+// The mode changes through the truth of a guard on a continuous variable (an if-expression in an equation), not through
+// a discrete variable: a mass between two springs that differ on the two sides of zero crosses it again and again.
+static void testModeCacheDynamicGuard() {
+	int hits = 0;
+	const int segments = compareModeCache(
+		"model M\n"
+		"  Real x(start = 1);\n"
+		"  Real v(start = 0);\n"
+		"equation\n"
+		"  der(x) = v;\n"
+		"  der(v) = if x > 0 then -4*x - 0.3 else -9*x + 0.3;\n"
+		"end M;\n",
+		30.0, &hits);
+	CHECK(segments >= 10);
+	CHECK(hits >= segments - 3);
 }
 
 // Every segment is a new mode (a counter in the equation), also more of them than the cache holds: nothing is reused.
@@ -1029,8 +1050,10 @@ static void testModeCacheDistinctModes() {
 		"    n = pre(n) + 1;\n"
 		"  end when;\n"
 		"end M;\n";
-	const int segments = compareModeCache(src, 7.05);
+	int hits = 0;
+	const int segments = compareModeCache(src, 7.05, &hits);
 	CHECK(segments >= 70);
+	CHECK_EQ(hits, 0);
 	Run run;
 	if (simulate(run, src, 7.05)) {
 		// the rate is 1 + 0.01 n during the n-th tenth: x(T) = exp(-(0.1 * 70 + 0.001 * (0 + 1 + ... + 69)) - 0.05 * 1.70)
@@ -1043,6 +1066,7 @@ int main() {
 	testModeMemory();
 	testStableSeriesAcrossEvents();
 	testModeCacheRecurringModes();
+	testModeCacheDynamicGuard();
 	testModeCacheDistinctModes();
 	testSmoothAbsConverges();
 	testSmoothMinMaxSign();

@@ -29,6 +29,7 @@
 #include <cmath>
 #include <iostream>
 #include <sstream>
+#include <unordered_map>
 
 using namespace std;
 
@@ -57,6 +58,7 @@ namespace che {
 			terminateTime = 0.0;
 			terminateMessage.clear();
 			nSegments = 0;
+			nCacheHits = 0;
 			if (model == nullptr) {
 				fail("no model");
 				return NULL;
@@ -99,7 +101,7 @@ namespace che {
 			// specialisation (before the start values were set), to go back to them.
 			struct ModeCacheEntry {
 				shared_ptr<SasComputationModel> comp;
-				map<const IdPearl *, pair<double, bool>> pre;
+				unordered_map<const IdPearl *, pair<double, bool>> pre;
 			};
 			map<string, ModeCacheEntry> modeCache;
 			const size_t maxCachedModes = 64;
@@ -257,18 +259,20 @@ namespace che {
 				// size search, not a minimum length); only a stretch that does not exceed the rounding of the time is skipped.
 				if (segEnd - t > 1e-9 * (1.0 + fabs(t))) {
 					string cacheKey = modeKey();
+					cacheKey += '|';
 					for (const pair<const int, bool> &g : cur) {
-						cacheKey += g.second ? '1' : '0';
+						cacheKey += to_string(g.first) + (g.second ? '1' : '0') + ';';
 					}
 					const map<string, ModeCacheEntry>::const_iterator cached = options.modeCache ? modeCache.find(cacheKey) : modeCache.end();
 					const bool cacheHit = cached != modeCache.end();
 					shared_ptr<SasComputationModel> comp;
-					map<const IdPearl *, pair<double, bool>> preValues;
+					unordered_map<const IdPearl *, pair<double, bool>> preValues;
 					if (cacheHit) {
 						comp = cached->second.comp;
+						nCacheHits++;
 						// back to the values right after the specialisation
 						for (const shared_ptr<IdPearl> &id : comp->topModels.front()->idTable) {
-							const map<const IdPearl *, pair<double, bool>>::const_iterator pre = cached->second.pre.find(id.get());
+							const unordered_map<const IdPearl *, pair<double, bool>>::const_iterator pre = cached->second.pre.find(id.get());
 							// the temporary variables of the flattening had no value
 							id->value.d = pre != cached->second.pre.end() ? pre->second.first : 0.0;
 							id->initVal = pre != cached->second.pre.end() && pre->second.second;

@@ -66,10 +66,11 @@ static const char *kRobertsonDae =
 
 struct Result {
 	size_t steps = 0;
+	int manifoldSteps = 0; // steps whose series was computed backwards for a fast variable
 	std::vector<double> x; // final state in the order of `names`
 };
 
-static Result run(const char *model, const std::vector<std::string> &names, double endTime, double errorTol, bool stable) {
+static Result run(const char *model, const std::vector<std::string> &names, double endTime, double errorTol, bool stable, bool adaptive = true) {
 	Result res;
 	SasModelParser parser;
 	parser.parseString(model);
@@ -87,12 +88,14 @@ static Result run(const char *model, const std::vector<std::string> &names, doub
 	options.errorTol = errorTol;
 	options.nLvl = 30;
 	options.stableSeries = stable;
+	options.stableSeriesAdaptive = adaptive;
 	std::unique_ptr<SasSolutionSet> sol(compModel.solve(options));
 	CHECK(sol != nullptr);
 	if (sol == nullptr || sol->solutionLink.empty()) {
 		return res;
 	}
 	res.steps = sol->solutionLink.size();
+	res.manifoldSteps = compModel.manifoldSeriesSteps();
 	SasComputationModel *cm = sol->solutionLink.back()->linkCompModel;
 	auto found = sol->findSasSolution(endTime);
 	CHECK(!found.empty());
@@ -183,6 +186,45 @@ int main() {
 			CHECK_NEAR(on.x[0], off.x[0], 1e-4);
 		}
 		CHECK(on.steps > 0 && on.steps * 10 < off.steps);
+	}
+	// The manifold series is tried only where it pays. A fast mode (d = -2000) under a forcing at 300 rad/s: the
+	// step is limited by the forcing, the manifold series saves 1.75 times the steps and costs several passes of
+	// the series per step, so the adaptive rule keeps using the forward series almost always, and the result is
+	// the same as with the series at every step.
+	{
+		const char *forced =
+			"model F\n"
+			"  Real y(start = 1);\n"
+			"  Real c(start = 1);\n"
+			"  Real s(start = 0);\n"
+			"equation\n"
+			"  der(c) = -300 * s;\n"
+			"  der(s) = 300 * c;\n"
+			"  der(y) = -2000 * (y - c);\n"
+			"end F;\n";
+		const double T = 1.0;
+		Result adaptive = run(forced, {"y", "c", "s"}, T, 1e-3, true, true);
+		Result always = run(forced, {"y", "c", "s"}, T, 1e-3, true, false);
+		Result forward = run(forced, {"y", "c", "s"}, T, 1e-3, false, false);
+		CHECK_EQ((int)adaptive.x.size(), 3);
+		CHECK_EQ((int)always.x.size(), 3);
+		CHECK_EQ((int)forward.x.size(), 3);
+		for (int k = 0; k < 3 && adaptive.x.size() == 3 && always.x.size() == 3 && forward.x.size() == 3; k++) {
+			CHECK_NEAR(adaptive.x[k], always.x[k], 2e-3);
+			CHECK_NEAR(adaptive.x[k], forward.x[k], 2e-3);
+		}
+		CHECK(always.manifoldSteps > 20);
+		CHECK(adaptive.manifoldSteps * 3 < always.manifoldSteps);
+		CHECK(adaptive.steps <= forward.steps);
+	}
+	// A linear fast mode on the manifold: the adaptive rule finds that the manifold series pays and keeps it (a few
+	// steps, as with the series at every step, plus at most one trial)
+	{
+		const double T = 10.0;
+		Result adaptive = run(kLinear, {"y", "c", "s"}, T, 1e-6, true, true);
+		Result always = run(kLinear, {"y", "c", "s"}, T, 1e-6, true, false);
+		CHECK(adaptive.steps <= always.steps + 2);
+		CHECK(adaptive.manifoldSteps >= 1);
 	}
 	return sastest::finish("stiff_series_test");
 }

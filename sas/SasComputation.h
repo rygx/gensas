@@ -64,6 +64,15 @@ namespace che {
 		class SasComputationModel;
 		class SasSolution;
 
+		// What a run has learnt about the series of fast decaying variables (SasComputationOptions::stableSeriesAdaptive).
+		// One object is shared by all the steps of a run, also across the segments of a hybrid run.
+		struct StableSeriesAdvice {
+			bool on = false;  // the manifold series paid off: use it first
+			int skip = 0;	  // steps that do not try it
+			int fails = 0;	  // trials that ran and did not pay off, or uses that failed, in a row
+			int offFails = 0; // trials that found the start off the manifold, in a row
+		};
+
 		class SasComputationOptions {
 		public:
 			double startTime = 0.0; // absolute time at which the initial values apply
@@ -79,6 +88,14 @@ namespace che {
 			// Compute the series of a fast decaying differential variable backwards in the order, so that its steps
 			// are not limited to about 1/|d| (see the comment in SasComputationModel::solveSegment).
 			bool stableSeries = true;
+			// Try the manifold series only where it pays: the forward series and its step are computed first, and the
+			// manifold series is tried if a fast decaying variable could limit that step (|d| times the step above 15)
+			// and kept only if it makes the step longer than the extra work it costs. With false, it is tried at every
+			// step (the behaviour before this option). The manifold series saves steps on a stiff problem but costs
+			// several passes of the series, which on a power system with fast controllers is more than it saves.
+			bool stableSeriesAdaptive = true;
+			// Shared by the steps of a run; a hybrid run passes one object for all its segments. Null: one per solve().
+			std::shared_ptr<StableSeriesAdvice> stableAdvice;
 			// Called with each solution segment right after it was computed. If it returns true, solve()
 			// stops after this segment (used to cut the simulation at a detected event).
 			std::function<bool(const std::shared_ptr<SasSolution> &)> onSolution;
@@ -181,6 +198,11 @@ namespace che {
 			// goes to *why.
 			bool validateDomain(const SasSolution &sol, std::string *why);
 
+			// Steps of the last solve() whose series was computed backwards for fast decaying variables.
+			int manifoldSeriesSteps() const {
+				return stableSeriesSteps;
+			}
+
 			virtual ~SasComputationModel();
 
 		private:
@@ -236,6 +258,7 @@ namespace che {
 			// that skip the attempt after them (they would cost sweeps and be discarded again).
 			int stableFails = 0;
 			int stableSkip = 0;
+			StableSeriesAdvice ownAdvice; // used when the options carry none
 			// The factorization of the matrix of the algebraic equations; it keeps the column ordering from
 			// step to step, because the sparsity pattern does not change.
 			SparseLU algebraicLU;

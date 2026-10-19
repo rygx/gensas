@@ -95,8 +95,10 @@ namespace che {
 			vector<string> stateNames; // names of the continuous variables, to detect structure changes
 			map<int, bool> cur;		   // truth of the dynamic guards
 			int closeEvents = 0;	   // consecutive events within 1e-8 of each other, to detect chattering
-			double lastEventT = -1.0;  // times of the last two handled events (< 0: none), to size the
-			double prevEventT = -1.0;  // detection sampling after an event
+			// what the steps of all the segments have learnt about the series of fast variables
+			const shared_ptr<StableSeriesAdvice> stableAdvice = make_shared<StableSeriesAdvice>();
+			double lastEventT = -1.0; // times of the last two handled events (< 0: none), to size the
+			double prevEventT = -1.0; // detection sampling after an event
 
 			const double endTol = 1e-9 * max(1.0, fabs(options.endTime));
 			double t = options.startTime;
@@ -452,6 +454,7 @@ namespace che {
 					opts.startTime = t;
 					opts.endTime = segEnd;
 					opts.tolerateNonFinite = true; // the part after an event is cut off; the rest is validated below
+					opts.stableAdvice = stableAdvice;
 					if (options.progress) {
 						// Report against the end of the whole run, not of this inter-event segment.
 						opts.progress = [&](double tm, double) { return options.progress(tm, options.endTime); };

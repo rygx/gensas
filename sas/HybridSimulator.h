@@ -80,6 +80,9 @@ namespace che {
 			// Number of solver segments (between events) that were run.
 			int segmentCount() const { return nSegments; }
 
+			// Number of segments that reused the flattened model of an earlier segment (SasComputationOptions::modeCache).
+			int modeCacheHits() const { return nCacheHits; }
+
 			// Number of samples per solution segment used to detect state events (default 48).
 			void setGuardSamples(int n) { guardSamples = n < 2 ? 2 : n; }
 
@@ -89,6 +92,7 @@ namespace che {
 			std::vector<HybridEvent> firedEvents;
 			std::map<std::string, double> finalVals;
 			int nSegments = 0;
+			int nCacheHits = 0;
 			bool wasCancelled = false;
 			std::vector<std::string> warningList;
 			bool wasTerminated = false;

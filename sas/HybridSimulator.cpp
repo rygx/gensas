@@ -29,6 +29,7 @@
 #include <cmath>
 #include <iostream>
 #include <sstream>
+#include <unordered_map>
 
 using namespace std;
 
@@ -57,6 +58,7 @@ namespace che {
 			terminateTime = 0.0;
 			terminateMessage.clear();
 			nSegments = 0;
+			nCacheHits = 0;
 			if (model == nullptr) {
 				fail("no model");
 				return NULL;
@@ -92,6 +94,17 @@ namespace che {
 				}
 				return os.str();
 			};
+			// The flattened model of each mode, to be reused when the mode comes back. The equations of a segment depend on the
+			// values of the discrete variables and on the truth of the dynamic guards (all that specializeModel() looks at),
+			// and the numbering and flattening of the equations is what a segment spends the most on outside the solver.
+			// Only the start values differ between segments. 'pre' holds the values the variables had right after the
+			// specialisation (before the start values were set), to go back to them.
+			struct ModeCacheEntry {
+				shared_ptr<SasComputationModel> comp;
+				unordered_map<const IdPearl *, pair<double, bool>> pre;
+			};
+			map<string, ModeCacheEntry> modeCache;
+			const size_t maxCachedModes = 64;
 			vector<string> stateNames; // names of the continuous variables, to detect structure changes
 			map<int, bool> cur;		   // truth of the dynamic guards
 			int closeEvents = 0;	   // consecutive events within 1e-8 of each other, to detect chattering
@@ -245,13 +258,39 @@ namespace che {
 				// A stretch between two events is integrated however short it is (alphaTol is the resolution of the step
 				// size search, not a minimum length); only a stretch that does not exceed the rounding of the time is skipped.
 				if (segEnd - t > 1e-9 * (1.0 + fabs(t))) {
-					shared_ptr<SasComputationModel> comp = make_shared<SasComputationModel>();
-					comp->log = options.log;
-					comp->generateCompModel(model);
-					SasModel &cm = *comp->topModels.front();
-					if (!specializeModel(cm, env, err, &cur)) {
-						return NULL;
+					string cacheKey = modeKey();
+					cacheKey += '|';
+					for (const pair<const int, bool> &g : cur) {
+						cacheKey += to_string(g.first) + (g.second ? '1' : '0') + ';';
 					}
+					const map<string, ModeCacheEntry>::const_iterator cached = options.modeCache ? modeCache.find(cacheKey) : modeCache.end();
+					const bool cacheHit = cached != modeCache.end();
+					shared_ptr<SasComputationModel> comp;
+					unordered_map<const IdPearl *, pair<double, bool>> preValues;
+					if (cacheHit) {
+						comp = cached->second.comp;
+						nCacheHits++;
+						// back to the values right after the specialisation
+						for (const shared_ptr<IdPearl> &id : comp->topModels.front()->idTable) {
+							const unordered_map<const IdPearl *, pair<double, bool>>::const_iterator pre = cached->second.pre.find(id.get());
+							// the temporary variables of the flattening had no value
+							id->value.d = pre != cached->second.pre.end() ? pre->second.first : 0.0;
+							id->initVal = pre != cached->second.pre.end() && pre->second.second;
+						}
+					} else {
+						comp = make_shared<SasComputationModel>();
+						comp->log = options.log;
+						comp->generateCompModel(model);
+						if (!specializeModel(*comp->topModels.front(), env, err, &cur)) {
+							return NULL;
+						}
+						if (options.modeCache) {
+							for (const shared_ptr<IdPearl> &id : comp->topModels.front()->idTable) {
+								preValues[id.get()] = make_pair(id->value.d, id->initVal);
+							}
+						}
+					}
+					SasModel &cm = *comp->topModels.front();
 					for (const shared_ptr<IdPearl> &id : cm.idTable) {
 						if ((id->idTy == ID_VAR || id->idTy == ID_IVAR) && id->str != NULL) {
 							map<string, double>::const_iterator it = state.find((const char *)id->str);
@@ -283,8 +322,18 @@ namespace che {
 							}
 						}
 					}
-					comp->preprocessModels();
-					comp->generateDAEs();
+					if (cacheHit) {
+						comp->processInitialValues(); // the rest of preprocessModels() and generateDAEs() were done
+					} else {
+						comp->preprocessModels();
+						comp->generateDAEs();
+						if (options.modeCache && modeCache.size() < maxCachedModes) {
+							ModeCacheEntry entry;
+							entry.comp = comp;
+							entry.pre = std::move(preValues);
+							modeCache[cacheKey] = std::move(entry);
+						}
+					}
 					// An override that turned out to be for a state in this mode is undone (continuity of the states).
 					for (const shared_ptr<IdPearl> &id : hintedIds) {
 						if (id->index >= 0 && id->index < comp->nX) {

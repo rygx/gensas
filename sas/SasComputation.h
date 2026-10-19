@@ -96,6 +96,11 @@ namespace che {
 			bool stableSeriesAdaptive = true;
 			// Shared by the steps of a run; a hybrid run passes one object for all its segments. Null: one per solve().
 			std::shared_ptr<StableSeriesAdvice> stableAdvice;
+			// Hybrid runs only: keep the flattened model of each mode (the values of the discrete variables and the truth
+			// of the dynamic guards) and reuse it when the mode comes back (a fault that is applied and cleared again, a
+			// limiter that hits and leaves), instead of copying, specialising and flattening the model for every segment.
+			// The results are the same; false builds every segment from scratch.
+			bool modeCache = true;
 			// Called with each solution segment right after it was computed. If it returns true, solve()
 			// stops after this segment (used to cut the simulation at a detected event).
 			std::function<bool(const std::shared_ptr<SasSolution> &)> onSolution;
@@ -198,6 +203,10 @@ namespace che {
 			// goes to *why.
 			bool validateDomain(const SasSolution &sol, std::string *why);
 
+			// Sets the start values of the variables (their values and the temporary variables flattening made) from the
+			// values the model has now. generateDAEs() calls it; a model that is reused for another segment calls it again.
+			void processInitialValues();
+
 			// Steps of the last solve() whose series was computed backwards for fast decaying variables.
 			int manifoldSeriesSteps() const {
 				return stableSeriesSteps;
@@ -222,8 +231,6 @@ namespace che {
 
 			void doReplacement(AstNode *p, bool waiveNext, int depth, std::shared_ptr<SasModel> &currentModel,
 							   std::vector<std::list<std::shared_ptr<IdReplaceTable>>> &repTable);
-
-			void processInitialValues();
 
 			vec getStartStateIVP();
 

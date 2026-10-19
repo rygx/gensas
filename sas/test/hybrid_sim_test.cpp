@@ -40,6 +40,7 @@ struct Run {
 };
 
 static bool g_stableAdaptive = true; // SasComputationOptions::stableSeriesAdaptive of the runs
+static bool g_modeCache = true;		 // SasComputationOptions::modeCache of the runs
 
 static bool simulate(Run &run, const string &src, double endTime, PiecewiseMode mode = PW_EVENTS, double eps = 1e-6) {
 	SasModelParser parser;
@@ -66,6 +67,7 @@ static bool simulate(Run &run, const string &src, double endTime, PiecewiseMode 
 	options.errorTol = 1e-6;
 	options.nLvl = 15;
 	options.stableSeriesAdaptive = g_stableAdaptive;
+	options.modeCache = g_modeCache;
 	run.sol = run.sim->run(options);
 	if (run.sol == NULL) {
 		std::cerr << "simulation failed: " << run.sim->error() << std::endl;
@@ -962,10 +964,86 @@ static void testStableSeriesAcrossEvents() {
 	CHECK_NEAR(y[0], y[1], 1e-4);
 }
 
+// Runs a model with and without the cache of the flattened model of each mode: the same segments, events and values to the
+// last bit. Returns the number of segments.
+static int compareModeCache(const string &src, double endTime) {
+	Run with, without;
+	g_modeCache = true;
+	const bool ok1 = simulate(with, src, endTime);
+	g_modeCache = false;
+	const bool ok2 = simulate(without, src, endTime);
+	g_modeCache = true;
+	CHECK(ok1 && ok2);
+	if (!ok1 || !ok2) {
+		return 0;
+	}
+	CHECK_EQ(with.sim->segmentCount(), without.sim->segmentCount());
+	CHECK_EQ(with.sol->solutionLink.size(), without.sol->solutionLink.size());
+	CHECK_EQ(with.sim->events().size(), without.sim->events().size());
+	if (with.sim->events().size() == without.sim->events().size()) {
+		for (size_t i = 0; i < with.sim->events().size(); i++) {
+			CHECK_NEAR(with.sim->events()[i].time, without.sim->events()[i].time, 0.0);
+		}
+	}
+	CHECK_EQ(with.sim->finalValues().size(), without.sim->finalValues().size());
+	for (const std::pair<const string, double> &kv : with.sim->finalValues()) {
+		const std::map<string, double>::const_iterator o = without.sim->finalValues().find(kv.first);
+		CHECK(o != without.sim->finalValues().end());
+		if (o != without.sim->finalValues().end()) {
+			CHECK_NEAR(kv.second, o->second, 0.0);
+		}
+	}
+	return with.sim->segmentCount();
+}
+
+// A thermostat with an algebraic variable switches between two modes many times: every return to a mode reuses its
+// flattened model, and the run is the same as without the cache.
+static void testModeCacheRecurringModes() {
+	const int segments = compareModeCache(
+		"model Thermostat\n"
+		"  Real T(start = 20);\n"
+		"  Real q;\n"
+		"  Boolean on(start = true);\n"
+		"equation\n"
+		"  q = if on then 6 - 0.1*T else 1 - 0.1*T;\n"
+		"  der(T) = q;\n"
+		"  when T < 18 then\n"
+		"    on = true;\n"
+		"  elsewhen T > 22 then\n"
+		"    on = false;\n"
+		"  end when;\n"
+		"end Thermostat;\n",
+		40.0);
+	CHECK(segments >= 8);
+}
+
+// Every segment is a new mode (a counter in the equation), also more of them than the cache holds: nothing is reused.
+static void testModeCacheDistinctModes() {
+	const string src =
+		"model M\n"
+		"  Integer n(start = 0);\n"
+		"  Real x(start = 1);\n"
+		"equation\n"
+		"  der(x) = -(1 + 0.01*n)*x;\n"
+		"  when sample(0.1, 0.1) then\n"
+		"    n = pre(n) + 1;\n"
+		"  end when;\n"
+		"end M;\n";
+	const int segments = compareModeCache(src, 7.05);
+	CHECK(segments >= 70);
+	Run run;
+	if (simulate(run, src, 7.05)) {
+		// the rate is 1 + 0.01 n during the n-th tenth: x(T) = exp(-(0.1 * 70 + 0.001 * (0 + 1 + ... + 69)) - 0.05 * 1.70)
+		CHECK_NEAR(finalValue(run, "x"), std::exp(-(7.0 + 0.001 * 2415.0 + 0.05 * 1.70)), 1e-4);
+	}
+}
+
 int main() {
 	testEventsCloserThanAlphaTol();
 	testModeMemory();
 	testStableSeriesAcrossEvents();
+	testModeCacheRecurringModes();
+	testModeCacheDistinctModes();
 	testSmoothAbsConverges();
 	testSmoothMinMaxSign();
 	testSmoothSlidingFriction();

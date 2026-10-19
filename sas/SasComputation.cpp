@@ -1641,7 +1641,11 @@ namespace che {
 			if (skipStable) {
 				stableSkip--;
 			}
-			if (options.stableSeries && !skipStable && nX > 0 && nX == nDE && nAE == nY && options.nLvl >= 10) {
+			// Returns 0 if no variable qualified, 1 if the manifold series was tried and dropped, 2 if it is used. With
+			// hForward > 0 only the variables that a forward step of that length may be limited by are tried. `units`
+			// counts the work done in orders of the series (a forward series is options.nLvl - 1 of them).
+			auto tryStable = [&](double hForward, double &units) -> int {
+				int attempt = 0;
 				mat &sol = sasSol->solution->solution;
 				const int N = options.nLvl - 1;
 				const double dMin = 2.0 * (N + 1);
@@ -1656,13 +1660,14 @@ namespace che {
 						continue;
 					}
 					const double r1 = (k1 + 1) * b1 / a1, r0 = (k0 + 1) * b0 / a0;
-					if (r1 < -dMin && r0 < 0.0) {
+					if (r1 < -dMin && r0 < 0.0 && (hForward <= 0.0 || -r1 * hForward > 15.0)) {
 						fast.push_back(i);
 					}
 				}
 				if (!fast.empty()) {
 					// The self-derivative of each candidate with the algebraic variables eliminated:
 					// d = df_i/dx_i - sum_j df_i/dy_j (LHSY^-1 LHSX)_{ji}.
+					units += 0.5 * static_cast<double>(fast.size()); // one solve of the algebraic system per candidate
 					const vec state0 = sol.col(0);
 					vector<int> keep;
 					vector<double> dEff;
@@ -1723,6 +1728,7 @@ namespace che {
 					int growing = 0;
 					bool farOffExit = false;
 					for (int sweep = 0; sweep < maxSweeps && !converged; sweep++) {
+						units += N; // a sweep goes through all the orders once
 						// Pass A, upward in the order: the slow variables and the algebraic variables as usual, the fast
 						// ones keep their current coefficients and only record the right-hand side.
 						for (int lvl = 1; lvl <= N; lvl++) {
@@ -1818,100 +1824,165 @@ namespace che {
 					}
 					if (onManifold) {
 						stableSeriesSteps++;
+						attempt = 2;
 					} else {
 						sol = forwardSeries;
+						attempt = 1;
 					}
 				}
-			}
-
-			resetPade();
-
-			// sasSol->solution->solution.print("sol");
-			// The series is final from here on: the derivative, and its Pade approximant, are built once
-			// and used by every trial of the step size search.
-			vec diff = calcDiff(sasSol->solution, 0.0);
-			double diffMax = maxAbsEntry(diff);
-			if (!std::isfinite(diffMax)) {
-				string why = describeDomainViolation(sasSol->solution, 0.0);
-				throw std::runtime_error("the equations cannot be evaluated at t = " + std::to_string(startAbsAlpha) + (why.empty() ? string("") : ": " + why));
-			}
-			if (diffMax > tol) {
-				if (solverWarnings.size() < MAX_SOLVER_WARNINGS) {
-					ostringstream os;
-					os << "at t = " << startAbsAlpha << " the residual at the start of a step (" << diffMax << ") exceeds the error tolerance (" << tol << "); the tolerance was relaxed for that step";
-					solverWarnings.push_back(os.str());
-				}
-				tol = diffMax;
-			}
-			double alphaLeft = 0.0;
-			double alphaRight = maxAlpha;
-			double alpha = alphaRight;
-			// The search resolution is alphaTol, but a short segment (the last one of a run, or one up to
-			// an event) is resolved finer so that a run can end exactly at the requested time.
-			const double resolution = std::min(options.alphaTol, maxAlpha / 64.0);
-			double rejectAlpha = -1.0; // the smallest step rejected because the residual is not finite
-			string rejectWhy;		   // the reason of the smallest step rejected because of a domain violation
-			double rejectWhyAlpha = -1.0;
-			// Whether the equations hold within the tolerance after a step of the given length.
-			auto acceptable = [&](double a) {
-				diff = calcDiff(sasSol->solution, a);
-				// diff.print("diff");
-				diffMax = maxAbsEntry(diff, options.tolerateNonFinite);
-				string why;
-				if (diffMax < tol && (options.tolerateNonFinite || domainOk(sasSol->solution, a, &why))) {
-					return true;
-				}
-				if (!why.empty()) {
-					if (rejectWhyAlpha < 0.0 || a < rejectWhyAlpha) {
-						rejectWhy = why;
-						rejectWhyAlpha = a;
-					}
-				} else if (!std::isfinite(diffMax) && (rejectAlpha < 0.0 || a < rejectAlpha)) {
-					rejectAlpha = a;
-				}
-				return false;
+				return attempt;
 			};
-			// Where to start the search: the length of the previous step. Consecutive steps are alike, so
-			// a probe at that length and a few geometric moves up or down bracket the answer in two or three
-			// trials instead of the thirteen of a bisection of the whole segment. Without a previous step
-			// (the first of a run) the search starts from the whole segment.
-			constexpr double kProbeFactor = 1.5;
-			if (lastStep > resolution && lastStep < maxAlpha) {
-				if (acceptable(lastStep)) {
-					alphaLeft = lastStep;
-					while (alphaLeft < maxAlpha) {
-						const double next = std::min(maxAlpha, alphaLeft * kProbeFactor);
-						if (acceptable(next)) {
-							alphaLeft = next;
-						} else {
+
+			const double tolStart = tol;
+			double alpha = 0.0;
+			double rejectAlpha = -1.0;
+			string rejectWhy;
+			double rejectWhyAlpha = -1.0;
+			auto findStep = [&]() {
+				resetPade();
+				tol = tolStart;
+
+				// sasSol->solution->solution.print("sol");
+				// The series is final from here on: the derivative, and its Pade approximant, are built once
+				// and used by every trial of the step size search.
+				vec diff = calcDiff(sasSol->solution, 0.0);
+				double diffMax = maxAbsEntry(diff);
+				if (!std::isfinite(diffMax)) {
+					string why = describeDomainViolation(sasSol->solution, 0.0);
+					throw std::runtime_error("the equations cannot be evaluated at t = " + std::to_string(startAbsAlpha) + (why.empty() ? string("") : ": " + why));
+				}
+				if (diffMax > tol) {
+					if (solverWarnings.size() < MAX_SOLVER_WARNINGS) {
+						ostringstream os;
+						os << "at t = " << startAbsAlpha << " the residual at the start of a step (" << diffMax << ") exceeds the error tolerance (" << tol << "); the tolerance was relaxed for that step";
+						solverWarnings.push_back(os.str());
+					}
+					tol = diffMax;
+				}
+				double alphaLeft = 0.0;
+				double alphaRight = maxAlpha;
+				alpha = alphaRight;
+				// The search resolution is alphaTol, but a short segment (the last one of a run, or one up to
+				// an event) is resolved finer so that a run can end exactly at the requested time.
+				const double resolution = std::min(options.alphaTol, maxAlpha / 64.0);
+				rejectAlpha = -1.0; // the smallest step rejected because the residual is not finite
+				rejectWhy.clear();	// the reason of the smallest step rejected because of a domain violation
+				rejectWhyAlpha = -1.0;
+				// Whether the equations hold within the tolerance after a step of the given length.
+				auto acceptable = [&](double a) {
+					diff = calcDiff(sasSol->solution, a);
+					// diff.print("diff");
+					diffMax = maxAbsEntry(diff, options.tolerateNonFinite);
+					string why;
+					if (diffMax < tol && (options.tolerateNonFinite || domainOk(sasSol->solution, a, &why))) {
+						return true;
+					}
+					if (!why.empty()) {
+						if (rejectWhyAlpha < 0.0 || a < rejectWhyAlpha) {
+							rejectWhy = why;
+							rejectWhyAlpha = a;
+						}
+					} else if (!std::isfinite(diffMax) && (rejectAlpha < 0.0 || a < rejectAlpha)) {
+						rejectAlpha = a;
+					}
+					return false;
+				};
+				// Where to start the search: the length of the previous step. Consecutive steps are alike, so
+				// a probe at that length and a few geometric moves up or down bracket the answer in two or three
+				// trials instead of the thirteen of a bisection of the whole segment. Without a previous step
+				// (the first of a run) the search starts from the whole segment.
+				constexpr double kProbeFactor = 1.5;
+				if (lastStep > resolution && lastStep < maxAlpha) {
+					if (acceptable(lastStep)) {
+						alphaLeft = lastStep;
+						while (alphaLeft < maxAlpha) {
+							const double next = std::min(maxAlpha, alphaLeft * kProbeFactor);
+							if (acceptable(next)) {
+								alphaLeft = next;
+							} else {
+								alphaRight = next;
+								break;
+							}
+						}
+					} else {
+						alphaRight = lastStep;
+						while (alphaRight > resolution) {
+							const double next = alphaRight / kProbeFactor;
+							if (acceptable(next)) {
+								alphaLeft = next;
+								break;
+							}
 							alphaRight = next;
-							break;
 						}
 					}
-				} else {
-					alphaRight = lastStep;
-					while (alphaRight > resolution) {
-						const double next = alphaRight / kProbeFactor;
-						if (acceptable(next)) {
-							alphaLeft = next;
-							break;
-						}
-						alphaRight = next;
+				} else if (acceptable(maxAlpha)) {
+					alphaLeft = maxAlpha;
+				}
+				while (alphaRight - alphaLeft > resolution) {
+					alpha = (alphaLeft + alphaRight) / 2;
+					if (acceptable(alpha)) {
+						alphaLeft = alpha;
+					} else {
+						alphaRight = alpha;
 					}
 				}
-			} else if (acceptable(maxAlpha)) {
-				alphaLeft = maxAlpha;
-			}
-			while (alphaRight - alphaLeft > resolution) {
-				alpha = (alphaLeft + alphaRight) / 2;
-				if (acceptable(alpha)) {
-					alphaLeft = alpha;
+				alpha = alphaLeft;
+				lastStep = alpha;
+			};
+			StableSeriesAdvice &advice = options.stableAdvice ? *options.stableAdvice : ownAdvice;
+			const bool stableApplies = options.stableSeries && !skipStable && nX > 0 && nX == nDE && nAE == nY && options.nLvl >= 10;
+			double unitsUnused = 0.0;
+			if (!stableApplies) {
+				findStep();
+			} else if (!options.stableSeriesAdaptive) {
+				tryStable(0.0, unitsUnused);
+				findStep();
+			} else if (advice.on) {
+				// the manifold series paid off before: use it first, drop it after three failures in a row
+				const int r = tryStable(0.0, unitsUnused);
+				findStep();
+				if (r == 1 && ++advice.fails >= 3) {
+					advice.on = false;
+					advice.fails = 0;
+				} else if (r == 2) {
+					advice.fails = 0;
+				}
+			} else {
+				// The forward series first. The manifold series costs several passes of the series (the sweeps, and a solve
+				// of the algebraic system per candidate), so it is tried only if a fast decaying variable could limit the
+				// forward step, and kept only if the step it gives is longer by more than the work it costs.
+				findStep();
+				if (advice.skip > 0) {
+					advice.skip--;
 				} else {
-					alphaRight = alpha;
+					const double forwardStep = alpha;
+					double units = 0.0;
+					const mat forwardSeries = sasSol->solution->solution;
+					const int r = tryStable(forwardStep, units);
+					if (r == 0) {
+						advice.offFails = 0;
+					} else {
+						resetPade();
+						findStep();
+						const double cost = 1.0 + units / std::max(1, options.nLvl - 1);
+						if (r == 2 && alpha > forwardStep * std::max(1.3, cost)) {
+							advice.on = true;
+							advice.fails = 0;
+							advice.offFails = 0;
+						} else {
+							sasSol->solution->solution = forwardSeries;
+							findStep();
+							if (r == 2) {
+								// it ran and did not pay off: wait longer each time (1, 3, 7, ... up to 63 steps)
+								advice.skip = (1 << std::min(++advice.fails, 6)) - 1;
+							} else {
+								// the start is off the manifold (a real transient): look again soon (up to 31 steps)
+								advice.skip = (1 << std::min(++advice.offFails, 5)) - 1;
+							}
+						}
+					}
 				}
 			}
-			alpha = alphaLeft;
-			lastStep = alpha;
 			if (alpha <= 0.0) {
 				// The step cannot advance because the equations are undefined right after this point.
 				if (!rejectWhy.empty()) {
@@ -1956,6 +2027,7 @@ namespace che {
 			stableSeriesSteps = 0;
 			stableFails = 0;
 			stableSkip = 0;
+			ownAdvice = StableSeriesAdvice();
 			domainChecks.clear();
 			for (const shared_ptr<AstTree> &t : eqnTable) {
 				collectDomainChecks(t->pHead, domainChecks);

@@ -39,6 +39,8 @@ struct Run {
 	}
 };
 
+static bool g_stableAdaptive = true; // SasComputationOptions::stableSeriesAdaptive of the runs
+
 static bool simulate(Run &run, const string &src, double endTime, PiecewiseMode mode = PW_EVENTS, double eps = 1e-6) {
 	SasModelParser parser;
 	parser.parseString(src.c_str());
@@ -63,6 +65,7 @@ static bool simulate(Run &run, const string &src, double endTime, PiecewiseMode 
 	options.alphaTol = 1e-4;
 	options.errorTol = 1e-6;
 	options.nLvl = 15;
+	options.stableSeriesAdaptive = g_stableAdaptive;
 	run.sol = run.sim->run(options);
 	if (run.sol == NULL) {
 		std::cerr << "simulation failed: " << run.sim->error() << std::endl;
@@ -923,9 +926,44 @@ static void testModeMemory() {
 	CHECK_NEAR(finalValue(run, "x"), 2.0 * std::asin(0.5) + 100.0, 1e-3);
 }
 
+// A fast decaying variable that follows a slowly varying one, across a time event: the adaptive use of the series of the
+// slow manifold (its state is kept over the segments of the run) gives the same result as the series at every step.
+static void testStableSeriesAcrossEvents() {
+	const string src =
+		"model FE\n"
+		"  discrete Real m(start = 1);\n"
+		"  Real y(start = 1);\n"
+		"  Real c(start = 1);\n"
+		"  Real s(start = 0);\n"
+		"equation\n"
+		"  der(c) = -m * s;\n"
+		"  der(s) = m * c;\n"
+		"  der(y) = -1000 * (y - c);\n"
+		"  when time >= 2 then\n"
+		"    m = 2;\n"
+		"  end when;\n"
+		"end FE;\n";
+	double y[2] = {0.0, 0.0};
+	for (int pass = 0; pass < 2; pass++) {
+		g_stableAdaptive = pass == 0;
+		Run run;
+		if (!simulate(run, src, 4.0)) {
+			g_stableAdaptive = true;
+			return;
+		}
+		// the angle is 2 at the event and then grows by 2 per unit of time: 6 at t = 4
+		CHECK_NEAR(finalValue(run, "c"), std::cos(6.0), 1e-4);
+		CHECK_NEAR(finalValue(run, "s"), std::sin(6.0), 1e-4);
+		y[pass] = finalValue(run, "y");
+	}
+	g_stableAdaptive = true;
+	CHECK_NEAR(y[0], y[1], 1e-4);
+}
+
 int main() {
 	testEventsCloserThanAlphaTol();
 	testModeMemory();
+	testStableSeriesAcrossEvents();
 	testSmoothAbsConverges();
 	testSmoothMinMaxSign();
 	testSmoothSlidingFriction();

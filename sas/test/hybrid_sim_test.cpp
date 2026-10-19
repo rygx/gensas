@@ -947,8 +947,10 @@ static void testStableSeriesAcrossEvents() {
 	for (int pass = 0; pass < 2; pass++) {
 		g_stableAdaptive = pass == 0;
 		Run run;
-		if (!simulate(run, src, 4.0)) {
-			g_stableAdaptive = true;
+		const bool ok = simulate(run, src, 4.0);
+		g_stableAdaptive = true;
+		CHECK(ok);
+		if (!ok) {
 			return;
 		}
 		// the angle is 2 at the event and then grows by 2 per unit of time: 6 at t = 4

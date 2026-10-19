@@ -1973,6 +1973,7 @@ namespace che {
 							sasSol->solution->solution = forwardSeries;
 							findStep();
 							if (r == 2) {
+								stableSeriesSteps--; // the step was taken with the forward series
 								// it ran and did not pay off: wait longer each time (1, 3, 7, ... up to 63 steps)
 								advice.skip = (1 << std::min(++advice.fails, 6)) - 1;
 							} else {
